@@ -1061,6 +1061,12 @@ function DienstplanUploadView({ records, users }) {
     if (!file) return;
     if (!apiKey) { setShowKeyInput(true); return; }
 
+    // HEIC/HEIF 체크
+    if (file.type === "image/heic" || file.type === "image/heif" || file.name.toLowerCase().endsWith(".heic")) {
+      setMsg({ type: "err", text: "❌ HEIC 형식은 지원되지 않아요. 사진 앱에서 JPEG로 변환 후 업로드해주세요." });
+      return;
+    }
+
     setAnalyzing(true);
     setMsg(null);
 
@@ -1085,7 +1091,7 @@ function DienstplanUploadView({ records, users }) {
           "anthropic-dangerous-direct-browser-access": "true",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-5",
           max_tokens: 2000,
           messages: [{
             role: "user",
@@ -1151,7 +1157,7 @@ function DienstplanUploadView({ records, users }) {
       <div style={{...S.card, marginBottom:12}}>
         <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>📋 Dienstplan hochladen</div>
         <div style={{fontSize:10,color:C.muted,marginBottom:12}}>Bild hochladen → KI analysiert automatisch die Schichten</div>
-        <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/>
+        <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleFile} style={{display:"none"}}/>
         <button onClick={()=>fileRef.current.click()} disabled={analyzing}
           style={{width:"100%",padding:"12px",borderRadius:11,border:`2px dashed ${C.mint}`,
             background:C.mintLight,color:C.mintDark,fontWeight:800,fontSize:13,cursor:"pointer",
