@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="theme-color" content="#2C2C2C"/>
+<title>teeamo Stempeluhr</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#FAF8F5;overscroll-behavior:none;}
+  #root{min-height:100vh;}
+  input,textarea,button,select{font-family:inherit;}
+  ::-webkit-scrollbar{display:none;}
+  textarea{resize:none;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+</style>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script type="module" id="firebase-init">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, onValue, set, push, remove, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAdFpLR51E3uV5i4CDB-By1iC0lr-7vfBA",
+    authDomain: "teeamo-app.firebaseapp.com",
+    databaseURL: "https://teeamo-app-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "teeamo-app",
+    storageBucket: "teeamo-app.firebasestorage.app",
+    messagingSenderId: "1042377090448",
+    appId: "1:1042377090448:web:dea5af3a6c56949b543f15"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // 전역으로 노출 (babel 스크립트에서 사용)
+  window._fbDb = db;
+  window._fbRef = ref;
+  window._fbOnValue = onValue;
+  window._fbSet = set;
+  window._fbPush = push;
+  window._fbRemove = remove;
+  window._fbUpdate = update;
+  window._fbReady = true;
+
+  window.dispatchEvent(new Event("firebase-ready"));
+</script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const C = {
+  navy:"#2C2C2C", navyLight:"#444444",
+  mint:"#7A9BAE", mintDark:"#5C7F94", mintLight:"#EAF1F5",
+  bg:"#FAF8F5", card:"#FFFFFF",
+  text:"#2C2C2C", muted:"#A09080", border:"#E8E2DA",
+  red:"#C4604A", redLight:"#FAF0EE",
+  yellow:"#C8A96A", yellowLight:"#FAF4E8",
+};
+
+const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","Teenjoy"];
+const MONTHS     = ["2026-06","2026-05","2026-04"];
+const MONTH_LABELS = {"2026-06":"Juni 2026","2026-05":"Mai 2026","2026-04":"April 2026"};
+const TAGE_DE    = ["So","Mo","Di","Mi","Do","Fr","Sa"];
+const MANAGERS   = ["tingting","teddy","yeaji"];
+const NACHTRAG_ROUTING = {
+  "TEEAMO Arkaden":"yeaji","TEEAMO Aegidiimarkt":"yeaji","Teenjoy":"teddy",
+};
+
+const INIT_USERS = [
+  {key:"anna",    vorname:"Anna",    nachname:"",kuerzel:"An",role:"Mitarbeiterin",pin:"1001"},
+  {key:"dayoung", vorname:"Dayoung", nachname:"",kuerzel:"Da",role:"Mitarbeiterin",pin:"1002"},
+  {key:"eunjin",  vorname:"Eunjin",  nachname:"",kuerzel:"Eu",role:"Mitarbeiterin",pin:"1003"},
+  {key:"gayeon",  vorname:"Gayeon",  nachname:"",kuerzel:"Ga",role:"Mitarbeiterin",pin:"1004"},
+  {key:"jiwoo",   vorname:"Jiwoo",   nachname:"",kuerzel:"Ji",role:"Mitarbeiterin",pin:"1005"},
+  {key:"jiye",    vorname:"Jiye",    nachname:"",kuerzel:"Ji",role:"Mitarbeiterin",pin:"1006"},
+  {key:"mengjun", vorname:"Mengjun", nachname:"",kuerzel:"Me",role:"Mitarbeiterin",pin:"1007"},
+  {key:"saemee",  vorname:"Saemee",  nachname:"",kuerzel:"Sa",role:"Mitarbeiterin",pin:"1008"},
+  {key:"sangeun", vorname:"Sangeun", nachname:"",kuerzel:"Sa",role:"Mitarbeiterin",pin:"1009"},
+  {key:"semi",    vorname:"Semi",    nachname:"",kuerzel:"Se",role:"Mitarbeiterin",pin:"1010"},
+  {key:"shakira", vorname:"Shakira", nachname:"",kuerzel:"Sh",role:"Mitarbeiterin",pin:"1011"},
+  {key:"siyi",    vorname:"Siyi",    nachname:"",kuerzel:"Si",role:"Mitarbeiterin",pin:"1012"},
+  {key:"uuree",   vorname:"Uuree",   nachname:"",kuerzel:"Uu",role:"Mitarbeiterin",pin:"1013"},
+  {key:"yaya",    vorname:"Yaya",    nachname:"",kuerzel:"Ya",role:"Mitarbeiterin",pin:"1014"},
+  {key:"yeonjoo", vorname:"Yeonjoo", nachname:"",kuerzel:"Ye",role:"Mitarbeiterin",pin:"1016"},
+  {key:"yewon",   vorname:"Yewon",   nachname:"",kuerzel:"Ye",role:"Mitarbeiterin",pin:"1017"},
+  {key:"yujin",   vorname:"Yujin",   nachname:"",kuerzel:"Yu",role:"Mitarbeiterin",pin:"1018"},
+  {key:"tingting",vorname:"Tingting",nachname:"",kuerzel:"Ti",role:"Chefin",       pin:"9001"},
+  {key:"teddy",   vorname:"Teddy",   nachname:"",kuerzel:"Te",role:"Manager",      pin:"9002"},
+  {key:"yeaji",   vorname:"Yeaji",   nachname:"",kuerzel:"Yj",role:"Managerin",    pin:"9003"},
+];
+const INIT_RECORDS = [
+  {id:1, user:"Anna",   date:"2026-06-02",filiale:"TEEAMO Arkaden",     ein:"09:02",aus:"18:10",note:"",typ:"normal"},
+  {id:2, user:"Dayoung",date:"2026-06-02",filiale:"TEEAMO Aegidiimarkt",ein:"10:00",aus:"18:00",note:"",typ:"normal"},
+  {id:3, user:"Eunjin", date:"2026-06-03",filiale:"Teenjoy",            ein:"09:05",aus:"17:55",note:"",typ:"normal"},
+  {id:4, user:"Gayeon", date:"2026-06-03",filiale:"TEEAMO Arkaden",     ein:"09:00",aus:"18:00",note:"",typ:"normal"},
+  {id:5, user:"Jiwoo",  date:"2026-06-04",filiale:"TEEAMO Aegidiimarkt",ein:"09:10",aus:"17:50",note:"Stau",typ:"normal"},
+  {id:6, user:"Jiye",   date:"2026-06-04",filiale:"Teenjoy",            ein:"10:00",aus:"18:00",note:"",typ:"normal"},
+  {id:7, user:"Anna",   date:"2026-06-05",filiale:"TEEAMO Arkaden",     ein:"09:02",aus:null,   note:"",typ:"normal"},
+  {id:8, user:"Semi",   date:"2026-06-05",filiale:"Teenjoy",            ein:"09:00",aus:"17:00",note:"",typ:"normal"},
+  {id:9, user:"Saemee", date:"2026-06-08",filiale:"TEEAMO Arkaden",     ein:"09:00",aus:"18:00",note:"",typ:"normal"},
+  {id:10,user:"Yujin",  date:"2026-06-09",filiale:"TEEAMO Aegidiimarkt",ein:"09:05",aus:null,   note:"",typ:"normal"},
+];
+const INIT_ANTRAEGE = [
+  {id:101,user:"Sangeun",date:"2026-06-01",filiale:"TEEAMO Arkaden",   ein:"10:00",aus:"18:00",grund:"Vergessen einzustempeln",status:"offen",zustaendig:"yeaji"},
+  {id:102,user:"Shakira",date:"2026-06-05",filiale:"Teenjoy",          ein:"09:30",aus:"17:30",grund:"Kein Internet im Laden", status:"offen",zustaendig:"teddy"},
+];
+
+// ── ✅ LocalStorage: 최초 1회만 INIT 사용, 이후 변경은 즉시 저장 ─────────────
+function lsGet(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    if (v !== null) return JSON.parse(v);
+    localStorage.setItem(key, JSON.stringify(fallback));
+    return fallback;
+  } catch { return fallback; }
+}
+function lsSet(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+}
+function usePersist(lsKey, init) {
+  const [state, setState] = useState(() => lsGet(lsKey, init));
+  const setAndSave = useCallback((updater) => {
+    setState(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      lsSet(lsKey, next);
+      return next;
+    });
+  }, [lsKey]);
+  return [state, setAndSave];
+}
+
+// ── Firebase 실시간 동기화 훅 ─────────────────────────────────────────────────
+function useFirebase(path, fallback) {
+  const [data, setData] = useState(fallback);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let unsubscribe = null;
+
+    function attach() {
+      const db = window._fbDb;
+      const fbRef = window._fbRef;
+      const fbOnValue = window._fbOnValue;
+      if (!db || !fbRef || !fbOnValue) return false;
+      const r = fbRef(db, path);
+      fbOnValue(r, snap => {
+        const val = snap.val();
+        if (val === null) {
+          setData(fallback);
+        } else if (Array.isArray(fallback)) {
+          setData(Object.values(val));
+        } else {
+          setData(val);
+        }
+        setReady(true);
+      });
+      return true;
+    }
+
+    // 이미 준비됐으면 바로 연결
+    if (attach()) return;
+
+    // 아직 안 됐으면 폴링으로 재시도 (최대 10초)
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      if (attach()) { clearInterval(iv); return; }
+      if (tries > 20) {
+        clearInterval(iv);
+        console.error("Firebase 연결 실패");
+        setReady(true); // 로딩 풀어주기
+      }
+    }, 500);
+
+    return () => clearInterval(iv);
+  }, [path]);
+
+  function setter(updater) {
+    setData(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (window._fbDb && window._fbRef && window._fbSet) {
+        const toSave = Array.isArray(next)
+          ? Object.fromEntries(next.map((v, i) => [v.id || i, v]))
+          : next;
+        window._fbSet(window._fbRef(window._fbDb, path), toSave)
+          .catch(e => console.error("FB write error:", e));
+      }
+      return next;
+    });
+  }
+
+  return [data, setter, ready];
+}
+
+// ── 유틸 ─────────────────────────────────────────────────────────────────────
+function pad(n) { return String(n).padStart(2, "0"); }
+function useNow() {
+  const [t, setT] = useState(new Date());
+  useEffect(() => { const i = setInterval(() => setT(new Date()), 1000); return () => clearInterval(i); }, []);
+  return t;
+}
+function stunden(ein, aus) {
+  if (!ein || !aus) return null;
+  const [eh, em] = ein.split(":").map(Number);
+  const [ah, am] = aus.split(":").map(Number);
+  return (ah * 60 + am - eh * 60 - em) / 60;
+}
+function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "–" : h.toFixed(1) + "h"; }
+function today() { return new Date().toISOString().slice(0, 10); }
+
+const S = {
+  card: { background: C.card, borderRadius: 14, padding: "13px 14px", boxShadow: "0 2px 10px rgba(44,44,44,.07)" },
+  hdr: { background: C.navy, padding: "env(safe-area-inset-top,44px) 20px 22px", paddingTop: "max(44px,env(safe-area-inset-top))", color: "#fff" },
+  nav: { position: "fixed", bottom: 0, left: 0, right: 0, background: C.card, borderTop: `1px solid ${C.border}`, display: "flex", padding: "9px 0 max(16px,env(safe-area-inset-bottom))", zIndex: 100 },
+  backBtn: { background: "rgba(255,255,255,.12)", border: "0.5px solid rgba(255,255,255,.2)", color: "rgba(255,255,255,.8)", borderRadius: 10, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", marginBottom: 14, display: "inline-block" },
+  input: { width: "100%", padding: "9px 11px", border: `1.5px solid ${C.border}`, borderRadius: 10, fontSize: 13, outline: "none", color: C.text, background: C.bg },
+  pill: (s) => ({ fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: 99, background: s==="offen"?C.yellowLight:s==="genehmigt"?C.mintLight:C.redLight, color: s==="offen"?C.yellow:s==="genehmigt"?C.mintDark:C.red }),
+};
+
+const FILIAL_NAMES = { A:"TEEAMO Arkaden", B:"TEEAMO Aegidiimarkt", C:"Teenjoy" };
+const FILIAL_COLOR = {
+  A:{ bg:"#EAF1F5", text:"#5C7F94", border:"#BDD3DF", dot:"#7A9BAE" },
+  B:{ bg:"#FAF0EE", text:"#C4604A", border:"#EBBFB4", dot:"#C4604A" },
+  C:{ bg:"#FAF4E8", text:"#B38B3A", border:"#E8D4A8", dot:"#C8A96A" },
+};
+
+// ── Dienstplan: CSV 연동 없이 plan.png 이미지 뷰어만 사용 ──────────────────
+function useDienstplanCSV() {
+  // CSV/구글 시트 연동 제거 – 빈 컨텍스트 반환 (다른 뷰에서 props로 받으므로 구조 유지)
+  return { plan: {}, sheetMonth: null, error: null, lastFetch: null, refresh: () => {} };
+}
+
+
+
+// ── KALENDER VIEW (plan.png 이미지 뷰어 + 내 일정) ──────────────────────────
+function KalenderView({ csvCtx, userName, records }) {
+  const [imgErr, setImgErr] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const containerRef = useRef(null);
+  const lastTouchRef = useRef(null);
+  const lastDistRef = useRef(null);
+  const lastScaleRef = useRef(1);
+  const lastOffsetRef = useRef({ x: 0, y: 0 });
+
+  const [schedule] = useFirebase("schedule", {});
+  const [planImg] = useFirebase("planImage", null);
+  const myShifts = (userName && schedule[userName]) ? schedule[userName] : [];
+
+  // viewport는 그대로 유지 (페이지 줌 비활성화 상태 유지)
+
+  function clampOffset(ox, oy, sc, el) {
+    if (!el) return { x: ox, y: oy };
+    const cw = el.clientWidth;
+    const ch = el.clientHeight;
+    const imgW = cw * sc;
+    const imgH = ch * sc; // height auto이므로 근사
+    const maxX = Math.max(0, (imgW - cw) / 2);
+    const maxY = Math.max(0, (imgH - ch) / 2);
+    return { x: Math.min(maxX, Math.max(-maxX, ox)), y: Math.min(maxY, Math.max(-maxY, oy)) };
+  }
+
+  function getDist(t1, t2) {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  function getMid(t1, t2) {
+    return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
+  }
+
+  function onTouchStart(e) {
+    e.stopPropagation();
+    if (e.touches.length === 2) {
+      lastDistRef.current = getDist(e.touches[0], e.touches[1]);
+      lastScaleRef.current = scale;
+      lastOffsetRef.current = offset;
+    } else if (e.touches.length === 1) {
+      lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      lastOffsetRef.current = offset;
+    }
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = containerRef.current;
+    if (e.touches.length === 2) {
+      const dist = getDist(e.touches[0], e.touches[1]);
+      const ratio = dist / lastDistRef.current;
+      const newScale = Math.min(5, Math.max(1, lastScaleRef.current * ratio));
+      setScale(newScale);
+      if (newScale === 1) setOffset({ x: 0, y: 0 });
+    } else if (e.touches.length === 1 && scale > 1) {
+      const dx = e.touches[0].clientX - lastTouchRef.current.x;
+      const dy = e.touches[0].clientY - lastTouchRef.current.y;
+      const raw = { x: lastOffsetRef.current.x + dx, y: lastOffsetRef.current.y + dy };
+      setOffset(clampOffset(raw.x, raw.y, scale, el));
+    }
+  }
+
+  function onTouchEnd(e) {
+    e.stopPropagation();
+    lastDistRef.current = null;
+    if (e.touches.length === 1) {
+      lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      lastOffsetRef.current = offset;
+    }
+  }
+
+  function onDoubleClick() {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  }
+
+  return (
+    <div style={{ width: "100%", background: C.card, borderRadius: 14, overflow: "hidden" }}>
+      {(imgErr && !planImg) ? (
+        <div style={{
+          display: "flex", flexDirection: "column", alignItems: "center",
+          justifyContent: "center", padding: "48px 24px", gap: 12, textAlign: "center",
+        }}>
+          <span style={{fontSize: 36}}>📋</span>
+          <div style={{fontSize: 13, fontWeight: 700, color: C.text}}>Kein Dienstplan vorhanden</div>
+          <div style={{fontSize: 11, color: C.muted, lineHeight: 1.5}}>
+            Der Manager hat noch keinen Dienstplan hochgeladen.
+          </div>
+        </div>
+      ) : (
+        <div>
+          <div
+            ref={containerRef}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onDoubleClick={onDoubleClick}
+            style={{ overflow: "hidden", touchAction: "none", cursor: scale > 1 ? "grab" : "default" }}
+          >
+            <img
+              src={planImg || "plan.png"}
+              alt="Dienstplan"
+              onError={() => setImgErr(true)}
+              style={{
+                display: "block", width: "100%", height: "auto",
+                transform: `scale(${scale}) translate(${offset.x / scale}px, ${offset.y / scale}px)`,
+                transformOrigin: "center center", transition: "none",
+                userSelect: "none", pointerEvents: "none",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 내 일정 */}
+      {userName && myShifts.length > 0 && (
+        <div style={{padding:"14px", borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>
+            Meine Schichten
+          </div>
+          {myShifts.map((s, i) => {
+            const actualRec = records?.find(r => r.user === userName && r.date === s.date);
+            const status = !actualRec ? "ausstehend" : !actualRec.aus ? "aktiv" : "erledigt";
+            return (
+              <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+                padding:"10px 12px",borderRadius:10,marginBottom:6,
+                background:status==="erledigt"?C.mintLight:status==="aktiv"?"#FFF9E6":C.bg,
+                border:`1px solid ${status==="erledigt"?C.mint:status==="aktiv"?C.yellow:C.border}`}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:C.text}}>
+                    {new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                  </div>
+                  <div style={{fontSize:10,color:C.muted,marginTop:1}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                </div>
+                <span style={{fontSize:9,fontWeight:700,padding:"4px 9px",borderRadius:99,
+                  color:status==="erledigt"?C.mintDark:status==="aktiv"?C.yellow:C.muted,
+                  background:status==="erledigt"?"#fff":status==="aktiv"?C.yellowLight:C.border}}>
+                  {status==="erledigt"?"✅ Gearbeitet":status==="aktiv"?"🟡 Im Dienst":"⏳ Ausstehend"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── LOGIN ─────────────────────────────────────────────────────────────────────
+function LoginView({onLogin,users,setUsers,csvCtx}){
+  const now=useNow();
+  const [page,setPage]=useState("list");
+  const [selUser,setSelUser]=useState(null);
+  const [pin,setPin]=useState("");
+  const [err,setErr]=useState("");
+  const [regV,setRegV]=useState("");
+  const [regN,setRegN]=useState("");
+  const [regP,setRegP]=useState("");
+  const [regP2,setRegP2]=useState("");
+  const [regErr,setRegErr]=useState("");
+  const [regRole,setRegRole]=useState("Staff");
+  const ADMIN_NAMES=["yeaji","tingting","teddy","huy"];
+  const isAdminName=regV.trim().toLowerCase()!==""&&ADMIN_NAMES.includes(regV.trim().toLowerCase());
+  const empList=[...users.filter(u=>!MANAGERS.includes(u.key))].sort((a,b)=>a.vorname.localeCompare(b.vorname));
+  const mgrList=[...users.filter(u=>MANAGERS.includes(u.key))].sort((a,b)=>a.vorname.localeCompare(b.vorname));
+
+  function selectUser(u){setSelUser(u);setPin("");setErr("");setPage("pin");}
+  function back(){setPage("list");setSelUser(null);setPin("");setErr("");}
+  function pinKey(k){
+    if(pin.length>=4)return;
+    const next=pin+k; setPin(next);
+    if(next.length===4){
+      if(next===selUser.pin) onLogin(selUser.key);
+      else{setErr("Falsche PIN. Erneut versuchen.");setTimeout(()=>{setPin("");setErr("");},1400);}
+    }
+  }
+  function doRegister(){
+    if(!regV.trim()){setRegErr("Vorname ist Pflichtfeld.");return;}
+    if(!/^\d{4}$/.test(regP)){setRegErr("PIN muss 4 Ziffern sein.");return;}
+    if(regP!==regP2){setRegErr("PINs stimmen nicht überein.");return;}
+    const vn=regV.trim(),nn=regN.trim(),key=vn.toLowerCase()+"_"+Date.now();
+    const isAdmin=isAdminName&&regRole==="Admin";
+    setUsers(prev=>[...prev,{key,vorname:vn,nachname:nn,kuerzel:vn.slice(0,2),role:isAdmin?"Admin":"Staff",pin:regP,isAdmin}]);
+    setRegV("");setRegN("");setRegP("");setRegP2("");setRegErr("");setRegRole("Staff");setPage("list");
+  }
+
+  if(page==="kalender")return(
+    <div style={{background:C.bg,minHeight:"100vh"}}>
+      <div style={S.hdr}>
+        <button onClick={()=>setPage("list")} style={S.backBtn}>← Zurück</button>
+        <div style={{fontSize:18,fontWeight:800}}>Dienstplan</div>
+        <div style={{fontSize:11,opacity:.45,marginTop:2}}>Leseansicht – ohne Anmeldung</div>
+      </div>
+      <div style={{padding:"14px"}}><KalenderView csvCtx={csvCtx} records={[]}/></div>
+    </div>
+  );
+
+  if(page==="pin"&&selUser){
+    const isMgr=MANAGERS.includes(selUser.key);
+    const dots=Array.from({length:4}).map((_,i)=>i<pin.length);
+    return(
+      <div style={{background:C.bg,minHeight:"100vh"}}>
+        <div style={S.hdr}>
+          <button onClick={back} style={S.backBtn}>← Zurück</button>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div style={{width:46,height:46,borderRadius:"50%",background:isMgr?C.yellow:C.mint,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:15,color:C.navy}}>{selUser.kuerzel}</div>
+            <div><div style={{fontSize:18,fontWeight:800}}>{selUser.vorname}{selUser.nachname?" "+selUser.nachname:""}</div><div style={{fontSize:11,opacity:.45}}>{selUser.role}</div></div>
+          </div>
+        </div>
+        <div style={{padding:"32px 24px",textAlign:"center"}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:28}}>PIN eingeben</div>
+          <div style={{display:"flex",justifyContent:"center",gap:18,marginBottom:8}}>
+            {dots.map((f,i)=><div key={i} style={{width:16,height:16,borderRadius:"50%",background:f?(err?C.red:C.navy):C.border,transition:"background .15s"}}/>)}
+          </div>
+          <div style={{minHeight:28,marginBottom:8,fontSize:12,color:C.red,fontWeight:600}}>{err}</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,maxWidth:260,margin:"0 auto"}}>
+            {["1","2","3","4","5","6","7","8","9","","0","⌫"].map((k,i)=>(
+              k===""?<div key={i}/>:
+              <button key={i} onClick={()=>k==="⌫"?setPin(p=>p.slice(0,-1)):pinKey(k)}
+                style={{height:56,borderRadius:14,border:`1px solid ${C.border}`,background:C.card,fontSize:k==="⌫"?20:22,fontWeight:600,color:C.text,cursor:"pointer"}}
+                onTouchStart={e=>e.currentTarget.style.background="#eee"} onTouchEnd={e=>e.currentTarget.style.background=C.card}>{k}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if(page==="register")return(
+    <div style={{background:C.bg,minHeight:"100vh"}}>
+      <div style={S.hdr}>
+        <button onClick={()=>setPage("list")} style={S.backBtn}>← Zurück</button>
+        <div style={{fontSize:18,fontWeight:800}}>Registrieren</div>
+        <div style={{fontSize:11,opacity:.45,marginTop:2}}>Neues Konto erstellen</div>
+      </div>
+      <div style={{padding:"16px 16px 40px"}}>
+        <div style={{...S.card,padding:"18px 16px"}}>
+          {[["Vorname *",regV,setRegV,"Anna"],["Nachname (optional)",regN,setRegN,"Kim"]].map(([lbl,val,set,ph])=>(
+            <div key={lbl} style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>{lbl}</div>
+              <input value={val} onChange={e=>set(e.target.value)} placeholder={ph} style={S.input}/>
+            </div>
+          ))}
+          {isAdminName&&(
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>Rolle</div>
+              <div style={{display:"flex",gap:9}}>
+                {["Staff","Admin"].map(r=>(
+                  <button key={r} onClick={()=>setRegRole(r)} style={{flex:1,padding:"10px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",border:`2px solid ${regRole===r?C.mint:C.border}`,background:regRole===r?C.mintLight:"#fff",color:regRole===r?C.mintDark:C.muted}}>
+                    {r==="Admin"?"👑 Admin":"👤 Staff"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+            {[["PIN (4 Ziffern) *",regP,setRegP],["PIN wiederholen *",regP2,setRegP2]].map(([lbl,val,set])=>(
+              <div key={lbl}>
+                <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>{lbl}</div>
+                <input type="password" inputMode="numeric" maxLength={4} value={val} onChange={e=>set(e.target.value.replace(/\D/g,""))} placeholder="••••" style={{...S.input,letterSpacing:"0.3em",fontSize:18}}/>
+              </div>
+            ))}
+          </div>
+          {regErr&&<div style={{fontSize:11,color:C.red,fontWeight:600,marginBottom:10}}>{regErr}</div>}
+          <button onClick={doRegister} style={{width:"100%",padding:"13px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer"}}>Konto erstellen</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const UserCard=({u})=>{
+    const isMgr=MANAGERS.includes(u.key);
+    return(
+      <button onClick={()=>selectUser(u)} style={{width:"100%",display:"flex",alignItems:"center",gap:13,padding:"12px 14px",borderRadius:14,border:`1px solid ${C.border}`,background:C.card,cursor:"pointer",boxShadow:"0 2px 8px rgba(44,44,44,.05)",textAlign:"left",marginBottom:7}}
+        onTouchStart={e=>e.currentTarget.style.background=C.mintLight} onTouchEnd={e=>e.currentTarget.style.background=C.card}>
+        <div style={{width:40,height:40,borderRadius:"50%",flexShrink:0,background:isMgr?C.yellow:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff"}}>{u.kuerzel}</div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.text}}>{u.vorname}{u.nachname?" "+u.nachname:""}</div>
+          <div style={{fontSize:10,color:C.muted,marginTop:1}}>{u.role}</div>
+        </div>
+        <span style={{fontSize:14,color:C.muted}}>🔒</span>
+      </button>
+    );
+  };
+
+  return(
+    <div style={{background:C.bg,minHeight:"100vh"}}>
+      <div style={S.hdr}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontSize:11,opacity:.4,marginBottom:3,letterSpacing:".08em",textTransform:"uppercase"}}>Willkommen</div>
+            <div style={{fontSize:28,fontWeight:800,lineHeight:1.1}}>teeamo</div>
+            <div style={{fontSize:11,opacity:.4,marginTop:3}}>Münster · Stempeluhr</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:24,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{pad(now.getHours())}:{pad(now.getMinutes())}</div>
+            <div style={{fontSize:10,opacity:.4,marginTop:2}}>{new Date().toLocaleDateString("de-DE")}</div>
+          </div>
+        </div>
+      </div>
+      <div style={{padding:"16px 16px 40px"}}>
+        <button onClick={()=>setPage("kalender")} style={{width:"100%",padding:"14px 16px",borderRadius:14,border:`1.5px solid ${C.mint}`,background:C.mintLight,color:C.mintDark,fontSize:14,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:6}}
+          onTouchStart={e=>{e.currentTarget.style.background=C.mint;e.currentTarget.style.color="#fff";}} onTouchEnd={e=>{e.currentTarget.style.background=C.mintLight;e.currentTarget.style.color=C.mintDark;}}>
+          📋 Dienstplan anzeigen
+        </button>
+        <div style={{textAlign:"center",fontSize:10,color:C.muted,marginBottom:18}}>Ohne Anmeldung – nur Leseansicht</div>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+          <div style={{flex:1,height:1,background:C.border}}/><span style={{fontSize:10,color:C.muted,fontWeight:600}}>ODER ANMELDEN</span><div style={{flex:1,height:1,background:C.border}}/>
+        </div>
+        {empList.map(u=><UserCard key={u.key} u={u}/>)}
+        <div style={{display:"flex",alignItems:"center",gap:10,margin:"14px 0"}}>
+          <div style={{flex:1,height:1,background:C.border}}/><span style={{fontSize:10,color:C.muted,fontWeight:600}}>MANAGEMENT</span><div style={{flex:1,height:1,background:C.border}}/>
+        </div>
+        {mgrList.map(u=><UserCard key={u.key} u={u}/>)}
+        <button onClick={()=>setPage("register")} style={{width:"100%",padding:"12px",borderRadius:14,border:`1px dashed ${C.border}`,background:"transparent",color:C.muted,fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginTop:8}}>
+          + Neues Konto erstellen
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── CLOCK MODAL ───────────────────────────────────────────────────────────────
+function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onClose,onEin,onAus}){
+  const isEin = modal==="ein";
+  const nowStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const [manualMode, setManualMode] = useState(false);
+  const [manualTime, setManualTime] = useState(nowStr);
+
+  const ausInvalid = !isEin && manualMode && clockInTime && (()=>{
+    const [ah,am] = manualTime.split(":").map(Number);
+    return (ah*60+am) - (clockInTime.getHours()*60+clockInTime.getMinutes()) <= 0;
+  })();
+
+  function doEin(){
+    const t = manualMode ? manualTime : nowStr;
+    const [h,m] = t.split(":").map(Number);
+    const d = new Date(); d.setHours(h,m,0,0);
+    onEin(d);
+  }
+  function doAus(){
+    if(ausInvalid) return;
+    const t = manualMode ? manualTime : nowStr;
+    const inStr = `${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`;
+    onAus(inStr, t);
+  }
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200}}>
+      <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))"}}>
+        <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 20px"}}/>
+        <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>
+          {isEin?"Einstempeln bestätigen":"Ausstempeln bestätigen"}
+        </div>
+        <div style={{fontSize:12,color:C.muted,marginBottom:14}}>
+          Filiale: <strong style={{color:C.text}}>{isEin?selFiliale:clockFiliale}</strong>
+        </div>
+
+        <div style={{marginBottom:16}}>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={()=>setManualMode(false)}
+              style={{flex:1,padding:"9px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",
+                border:`2px solid ${!manualMode?C.mint:C.border}`,
+                background:!manualMode?C.mintLight:"#fff",
+                color:!manualMode?C.mintDark:C.muted}}>
+              🕐 Jetzt ({nowStr})
+            </button>
+            <button onClick={()=>setManualMode(true)}
+              style={{flex:1,padding:"9px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",
+                border:`2px solid ${manualMode?C.yellow:C.border}`,
+                background:manualMode?C.yellowLight:"#fff",
+                color:manualMode?C.yellow:C.muted}}>
+              ✏️ Zeit eingeben
+            </button>
+          </div>
+          {manualMode&&(
+            <div style={{background:C.yellowLight,borderRadius:10,padding:"12px 14px",border:`1.5px solid ${ausInvalid?C.red:C.yellow}`}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:6}}>
+                {isEin?"Tatsächliche Einstempelzeit":"Tatsächliche Ausstempelzeit"}
+              </div>
+              <input type="time" value={manualTime} onChange={e=>setManualTime(e.target.value)}
+                style={{...S.input,width:"80%",display:"block",margin:"0 auto",fontSize:20,fontWeight:700,textAlign:"center",borderColor:ausInvalid?C.red:C.yellow}}/>
+              {!isEin&&clockInTime&&(()=>{
+                const [ah,am]=manualTime.split(":").map(Number);
+                const diff=(ah*60+am)-(clockInTime.getHours()*60+clockInTime.getMinutes());
+                if(diff<=0) return(
+                  <div style={{fontSize:11,color:C.red,fontWeight:700,marginTop:7,textAlign:"center"}}>
+                    ⚠ Die Zeit liegt vor der Einstempelzeit ({pad(clockInTime.getHours())}:{pad(clockInTime.getMinutes())} Uhr)
+                  </div>
+                );
+                return(
+                  <div style={{fontSize:11,color:"#3a7a55",fontWeight:700,marginTop:7,textAlign:"center"}}>
+                    ⏱ {Math.floor(diff/60)}h {diff%60}min Arbeitszeit
+                  </div>
+                );
+              })()}
+              {isEin&&(()=>{
+                const [ah,am]=manualTime.split(":").map(Number);
+                const diff=(now.getHours()*60+now.getMinutes())-(ah*60+am);
+                if(diff<=0) return null;
+                return(
+                  <div style={{fontSize:11,color:C.yellow,fontWeight:700,marginTop:7,textAlign:"center"}}>
+                    ⏱ {Math.floor(diff/60)}h {diff%60}min bereits vergangen
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+
+        <div style={{display:"flex",gap:9}}>
+          <button onClick={onClose} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
+          <button onClick={isEin?doEin:doAus} disabled={!!ausInvalid}
+            style={{flex:2,padding:"12px",borderRadius:11,border:"none",
+              background:ausInvalid?"#ccc":isEin?`linear-gradient(135deg,${C.mint},${C.mintDark})`:`linear-gradient(135deg,${C.red},#A8432E)`,
+              color:"#fff",fontWeight:800,fontSize:14,cursor:ausInvalid?"not-allowed":"pointer",opacity:ausInvalid?0.6:1}}>
+            {isEin?"Einstempeln":"Ausstempeln"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MITARBEITER ───────────────────────────────────────────────────────────────
+function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,onLogout,csvCtx}){
+  const user=users.find(u=>u.key===userKey);
+  const now=useNow();
+  const [tab,setTab]=useState("home");
+
+  // ── 근무 상태 localStorage 유지 ──────────────────────────────────────────────
+  const CLOCK_KEY = `teeamo_clock_${userKey}`;
+  const [clockedIn,setClockedIn]=useState(()=>{
+    try { const s=localStorage.getItem(CLOCK_KEY); return s?JSON.parse(s).clockedIn:false; } catch{return false;}
+  });
+  const [clockInTime,setClockInTime]=useState(()=>{
+    try { const s=localStorage.getItem(CLOCK_KEY); const v=s?JSON.parse(s).clockInTime:null; return v?new Date(v):null; } catch{return null;}
+  });
+  const [clockFiliale,setClockFiliale]=useState(()=>{
+    try { const s=localStorage.getItem(CLOCK_KEY); return s?JSON.parse(s).clockFiliale:""; } catch{return "";}
+  });
+
+  // 상태 바뀔 때마다 즉시 저장
+  useEffect(()=>{
+    try { localStorage.setItem(CLOCK_KEY, JSON.stringify({clockedIn, clockInTime:clockInTime?clockInTime.toISOString():null, clockFiliale})); } catch{}
+  },[clockedIn, clockInTime, clockFiliale]);
+
+  const [selFiliale,setSelFiliale]=useState(FILIALEN[0]);
+  const [grund,setGrund]=useState("");
+  const [elapsed,setElapsed]=useState(()=>{
+    // 앱 재시작 시 이미 근무 중이면 경과시간 복원
+    try {
+      const s=localStorage.getItem(CLOCK_KEY); const v=s?JSON.parse(s):null;
+      if(v&&v.clockedIn&&v.clockInTime) return Math.floor((Date.now()-new Date(v.clockInTime).getTime())/1000);
+    } catch{}
+    return 0;
+  });
+  const [modal,setModal]=useState(null);
+  const [nDatum,setNDatum]=useState(today());
+  const [nFiliale,setNFiliale]=useState(FILIALEN[0]);
+  const [nEin,setNEin]=useState("09:00");
+  const [nAus,setNAus]=useState("17:00");
+  const [nGrund,setNGrund]=useState("");
+  const [nMsg,setNMsg]=useState("");
+
+  useEffect(()=>{
+    if(!clockedIn){setElapsed(0);return;}
+    const t=setInterval(()=>setElapsed(e=>e+1),1000); return()=>clearInterval(t);
+  },[clockedIn]);
+
+  const displayName=user.vorname+(user.nachname?" "+user.nachname:"");
+  const myRecs=records.filter(r=>r.user===user.vorname);
+  const myAntraege=antraege.filter(a=>a.user===user.vorname);
+  const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
+
+  function handleEin(){setClockedIn(true);setClockInTime(new Date());setClockFiliale(selFiliale);setModal(null);}
+  function handleAus(){
+    const outStr=`${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    const inStr=`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`;
+    setRecords(prev=>[...prev,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ:"normal"}]);
+    setClockedIn(false);setClockInTime(null);setElapsed(0);setGrund("");setModal(null);
+    try{localStorage.removeItem(CLOCK_KEY);}catch{}
+  }
+  function submitNachtrag(){
+    if(!nGrund.trim()){setNMsg("Bitte einen Grund angeben.");return;}
+    const z=NACHTRAG_ROUTING[nFiliale]||"yeaji";
+    setAntraege(prev=>[...prev,{id:Date.now(),user:user.vorname,date:nDatum,filiale:nFiliale,ein:nEin,aus:nAus,grund:nGrund,status:"offen",zustaendig:z}]);
+    setNMsg(`Antrag eingereicht! Wird von ${z==="yeaji"?"Yeaji":"Teddy"} geprüft.`);setNGrund("");
+  }
+
+  const elStr=`${pad(Math.floor(elapsed/3600))}:${pad(Math.floor((elapsed%3600)/60))}:${pad(elapsed%60)}`;
+  const timeStr=`${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+  return(
+    <div style={{background:C.bg,minHeight:"100vh",paddingBottom:80}}>
+      <div style={S.hdr}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontSize:11,opacity:.45,marginBottom:3,letterSpacing:".06em",textTransform:"uppercase"}}>teeamo Münster</div>
+            <div style={{fontSize:20,fontWeight:800}}>{displayName}</div>
+            <div style={{fontSize:11,opacity:.5,marginTop:1}}>{user.role}</div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:7}}>
+            <div style={{width:38,height:38,borderRadius:"50%",background:C.mint,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:C.navy}}>{user.kuerzel}</div>
+            <button onClick={onLogout} style={{fontSize:10,background:"rgba(255,255,255,.1)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.6)",borderRadius:7,padding:"3px 8px",cursor:"pointer"}}>Abmelden</button>
+          </div>
+        </div>
+        <div style={{marginTop:14,background:"rgba(255,255,255,.07)",borderRadius:12,padding:"11px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:9,opacity:.4,marginBottom:2}}>Aktuelle Uhrzeit</div>
+            <div style={{fontSize:24,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{timeStr}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:9,opacity:.4,marginBottom:2}}>Heute</div>
+            <div style={{fontSize:12,fontWeight:600}}>{new Date().toLocaleDateString("de-DE")}</div>
+          </div>
+        </div>
+      </div>
+
+      {clockedIn&&(
+        <div style={{background:"#d4f0e0",borderBottom:`2px solid #a8dfc0`,padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:90}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:9,height:9,borderRadius:"50%",background:"#3a9e68",boxShadow:"0 0 0 3px rgba(58,158,104,.25)",animation:"pulse 1.4s infinite"}}/>
+            <div>
+              <div style={{fontSize:12,fontWeight:800,color:"#1a5c38"}}>Im Dienst · {clockFiliale}</div>
+              <div style={{fontSize:10,color:"#3a7a55"}}>
+                {clockInTime?`seit ${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())} Uhr`:""} · {elStr}
+              </div>
+            </div>
+          </div>
+          <button onClick={()=>{setModal("aus");setTab("home");}}
+            style={{fontSize:11,fontWeight:800,color:"#fff",background:"#3a9e68",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer"}}>
+            Ausstempeln
+          </button>
+        </div>
+      )}
+
+      {tab==="home"&&(
+        <div style={{padding:"18px 16px"}}>
+          <div style={{textAlign:"center",marginBottom:18}}>
+            <button onClick={()=>setModal(clockedIn?"aus":"ein")}
+              style={{width:144,height:144,borderRadius:"50%",border:"none",cursor:"pointer",
+                background:clockedIn?C.red:`linear-gradient(145deg,${C.mint},${C.mintDark})`,
+                color:"#fff",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+                gap:4,margin:"0 auto",boxShadow:clockedIn?`0 8px 28px rgba(196,96,74,.4)`:`0 8px 28px rgba(92,127,148,.4)`,transition:"all .2s"}}
+              onTouchStart={e=>e.currentTarget.style.transform="scale(.96)"} onTouchEnd={e=>e.currentTarget.style.transform="scale(1)"}>
+              <span style={{fontSize:15,fontWeight:800}}>{clockedIn?"Ausstempeln":"Einstempeln"}</span>
+              {clockedIn&&<span style={{fontSize:11,opacity:.85,fontVariantNumeric:"tabular-nums"}}>{elStr}</span>}
+            </button>
+            <div style={{marginTop:9,fontSize:12,color:C.muted}}>
+              {clockedIn?<span>Eingecheckt: <span style={{color:C.mintDark,fontWeight:700}}>{clockFiliale}</span></span>:"Filiale wählen & einstempeln"}
+            </div>
+          </div>
+          {!clockedIn&&(
+            <div style={{...S.card,marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:7}}>Filiale auswählen</div>
+              <div style={{display:"flex",gap:7}}>
+                {FILIALEN.map(f=>(
+                  <button key={f} onClick={()=>setSelFiliale(f)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${selFiliale===f?C.mint:C.border}`,background:selFiliale===f?C.mintLight:"#fff",color:selFiliale===f?C.mintDark:C.muted}}>{f}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{...S.card,marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:5}}>Grund <span style={{fontWeight:400,color:C.muted}}>(optional)</span></div>
+            <textarea value={grund} onChange={e=>setGrund(e.target.value)} placeholder="z. B. früher erschienen wegen Lieferung…" style={{width:"100%",height:58,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
+          </div>
+          <div style={S.card}>
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,letterSpacing:".05em",textTransform:"uppercase"}}>Monatsübersicht</div>
+            {monthSummary.length===0?<div style={{fontSize:12,color:C.muted}}>Noch keine Einträge.</div>:monthSummary.map(({f,h})=>(
+              <div key={f} style={{display:"flex",justifyContent:"space-between",paddingBottom:7,marginBottom:7,borderBottom:`1px solid ${C.border}`}}>
+                <span style={{fontSize:12,color:C.text}}>{f}</span>
+                <span style={{fontSize:12,fontWeight:700,color:C.mintDark}}>{h.toFixed(1)} Std.</span>
+              </div>
+            ))}
+            {monthSummary.length>0&&<div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,fontWeight:700,color:C.text}}>Gesamt</span><span style={{fontSize:12,fontWeight:800,color:C.navy}}>{monthSummary.reduce((a,x)=>a+x.h,0).toFixed(1)} Std.</span></div>}
+          </div>
+        </div>
+      )}
+
+      {tab==="dienstplan"&&(
+        <div style={{padding:"14px"}}>
+          <div style={{marginBottom:12}}><KalenderView csvCtx={csvCtx} userName={user.vorname} records={records}/></div>
+          <div style={S.card}>
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Meine Einträge</div>
+            {myRecs.length===0?<div style={{fontSize:12,color:C.muted}}>Keine Einträge.</div>:myRecs.map((r,i)=>(
+              <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:i<myRecs.length-1?9:0,marginBottom:i<myRecs.length-1?9:0,borderBottom:i<myRecs.length-1?`1px solid ${C.border}`:"none"}}>
+                <div style={{display:"flex",gap:9,alignItems:"center"}}>
+                  <div style={{width:32,height:32,borderRadius:8,background:r.aus?C.mintLight:C.yellowLight,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                    <span style={{fontSize:7,color:C.muted}}>{r.date.slice(5)}</span>
+                    <span style={{fontSize:10,fontWeight:700,color:r.aus?C.mintDark:C.yellow}}>{r.filiale.slice(-1)}</span>
+                  </div>
+                  <div>
+                    <div style={{fontSize:11,color:C.muted}}>{r.ein} → {r.aus||"läuft"}</div>
+                    <div style={{fontSize:9,color:C.muted}}>{r.filiale}</div>
+                  </div>
+                </div>
+                <span style={{fontSize:12,fontWeight:700,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab==="nachtrag"&&(
+        <div style={{padding:"14px"}}>
+          <div style={{...S.card,padding:"16px",marginBottom:12}}>
+            <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:12}}>Nachträgliche Zeiterfassung</div>
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Datum</div>
+              <div style={{display:"flex"}}>
+                <input type="date" value={nDatum} onChange={e=>setNDatum(e.target.value)} style={{...S.input, flex:1}}/>
+              </div>
+            </div>
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Filiale</div>
+              <div style={{display:"flex",gap:7}}>
+                {FILIALEN.map(f=>(
+                  <button key={f} onClick={()=>setNFiliale(f)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${nFiliale===f?C.mint:C.border}`,background:nFiliale===f?C.mintLight:"#fff",color:nFiliale===f?C.mintDark:C.muted}}>{f}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
+              {[["Einstempeln",nEin,setNEin],["Ausstempeln",nAus,setNAus]].map(([lbl,val,set])=>(
+                <div key={lbl} style={{display:"flex",flexDirection:"column"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>{lbl}</div>
+                  <input type="time" value={val} onChange={e=>set(e.target.value)} style={{...S.input, width:"50%", display:"block", margin:"0 auto", minWidth:0, boxSizing:"border-box"}}/>
+                </div>
+              ))}
+            </div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Grund <span style={{color:C.red}}>*</span></div>
+              <textarea value={nGrund} onChange={e=>{setNGrund(e.target.value);setNMsg("");}} placeholder="z. B. Vergessen einzustempeln…" style={{width:"100%",height:66,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
+            </div>
+            {nMsg&&<div style={{fontSize:11,color:nMsg.startsWith("Bitte")?C.red:C.mintDark,marginBottom:9,fontWeight:600}}>{nMsg}</div>}
+            <button onClick={submitNachtrag} style={{width:"100%",padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer"}}>Antrag einreichen</button>
+          </div>
+          {myAntraege.length>0&&(
+            <div style={S.card}>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Meine Anträge</div>
+              {myAntraege.map((a,i)=>(
+                <div key={a.id} style={{paddingBottom:i<myAntraege.length-1?9:0,marginBottom:i<myAntraege.length-1?9:0,borderBottom:i<myAntraege.length-1?`1px solid ${C.border}`:"none"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{a.date} · {a.filiale}</div>
+                      <div style={{fontSize:10,color:C.muted}}>{a.ein} – {a.aus}</div>
+                      {a.grund&&<div style={{fontSize:9,color:C.muted,marginTop:2}}>📌 {a.grund}</div>}
+                    </div>
+                    <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"Genehmigt":"Abgelehnt"}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={S.nav}>
+        {[{id:"home",icon:"🏠",lbl:"Startseite"},{id:"dienstplan",icon:"📋",lbl:"Dienstplan"},{id:"nachtrag",icon:"🕐",lbl:"Nachtrag"}].map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0"}}>
+            <span style={{fontSize:19}}>{t.icon}</span>
+            <span style={{fontSize:9,fontWeight:600,color:tab===t.id?C.mintDark:C.muted}}>{t.lbl}</span>
+            {tab===t.id&&<div style={{width:16,height:2,background:C.mint,borderRadius:99}}/>}
+          </button>
+        ))}
+      </div>
+
+      {modal&&(
+        <ClockModal
+          modal={modal}
+          now={now}
+          selFiliale={selFiliale}
+          clockFiliale={clockFiliale}
+          clockInTime={clockInTime}
+          grund={grund}
+          CLOCK_KEY={CLOCK_KEY}
+          onClose={()=>setModal(null)}
+          onEin={(d)=>{setClockedIn(true);setClockInTime(d);setClockFiliale(selFiliale);setModal(null);}}
+          onAus={(inStr,outStr)=>{
+            setRecords(prev=>[...prev,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ:"normal"}]);
+            setClockedIn(false);setClockInTime(null);setElapsed(0);setGrund("");setModal(null);
+            try{localStorage.removeItem(CLOCK_KEY);}catch{}
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── STATISTIK ─────────────────────────────────────────────────────────────────
+function StatistikTab({records,users}){
+  const [selMonth,setSelMonth]=useState("2026-06");
+  const [exported,setExported]=useState(null);
+  const empList=users.filter(u=>!MANAGERS.includes(u.key)).sort((a,b)=>a.vorname.localeCompare(b.vorname));
+  const monthRecs=records.filter(r=>r.date.startsWith(selMonth)&&r.aus);
+
+  function downloadCSV(rows,filename){
+    const bom="\uFEFF";
+    const csv=bom+rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(";")).join("\r\n");
+    const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");a.href=url;a.download=filename;a.click();
+    URL.revokeObjectURL(url);
+    setExported(filename);setTimeout(()=>setExported(null),3000);
+  }
+  function exportDetail(){
+    const hdr=["Name","Datum","Wochentag","Filiale","Einstempeln","Ausstempeln","Arbeitsstunden","Typ","Anmerkung"];
+    const rows=[hdr,...[...monthRecs].sort((a,b)=>a.date.localeCompare(b.date)).map(r=>{
+      const h=stunden(r.ein,r.aus);
+      return[r.user,r.date,TAGE_DE[new Date(r.date).getDay()],r.filiale,r.ein,r.aus,h!=null?h.toFixed(2):"",r.typ==="nachtrag"?"Nachtrag":"Normal",r.note||""];
+    })];
+    downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
+  }
+  function exportSummary(){
+    const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","Teenjoy (Std)","Ø Std/Tag"];
+    const rows=[hdr,...empList.map(emp=>{
+      const er=monthRecs.filter(r=>r.user===emp.vorname);
+      const total=er.reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+      const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
+      return[emp.vorname,emp.role,er.length,total.toFixed(2),byFil["TEEAMO Arkaden"].toFixed(2),byFil["TEEAMO Aegidiimarkt"].toFixed(2),byFil["Teenjoy"].toFixed(2),er.length?(total/er.length).toFixed(2):"0.00"];
+    })];
+    downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
+  }
+
+  return(
+    <div style={{padding:"14px"}}>
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:7,letterSpacing:".06em",textTransform:"uppercase"}}>Monat auswählen</div>
+        <div style={{display:"flex",gap:7}}>
+          {MONTHS.map(m=>(
+            <button key={m} onClick={()=>setSelMonth(m)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${selMonth===m?C.mint:C.border}`,background:selMonth===m?C.mintLight:"#fff",color:selMonth===m?C.mintDark:C.muted}}>
+              {MONTH_LABELS[m]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,letterSpacing:".06em",textTransform:"uppercase"}}>Übersicht – {MONTH_LABELS[selMonth]}</div>
+      <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:14}}>
+        {empList.map(emp=>{
+          const er=monthRecs.filter(r=>r.user===emp.vorname);
+          const total=er.reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+          const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
+          const fColors=[C.mintLight,C.yellowLight,C.redLight];
+          const fTColors=[C.mintDark,"#b37400",C.red];
+          return(
+            <div key={emp.key} style={S.card}>
+              <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:9}}>
+                <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:12,color:"#fff",flexShrink:0}}>{emp.kuerzel}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:800,color:C.text}}>{emp.vorname}</div>
+                  <div style={{fontSize:9,color:C.muted}}>{emp.role}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:18,fontWeight:800,color:C.mintDark}}>{total.toFixed(1)}<span style={{fontSize:10,color:C.muted}}> Std</span></div>
+                  <div style={{fontSize:9,color:C.muted}}>{er.length} Tage</div>
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+                {FILIALEN.map((f,fi)=>(
+                  <div key={f} style={{background:fColors[fi],borderRadius:7,padding:"6px 7px"}}>
+                    <div style={{fontSize:8,fontWeight:700,color:fTColors[fi],marginBottom:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{f}</div>
+                    <div style={{fontSize:12,fontWeight:800,color:fTColors[fi]}}>{byFil[f].toFixed(1)}h</div>
+                    <div style={{fontSize:8,color:fTColors[fi],opacity:.7}}>{er.filter(r=>r.filiale===f).length}d</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{background:C.navy,borderRadius:14,padding:"16px",marginBottom:12}}>
+        <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>📥 Daten exportieren</div>
+        <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>Als CSV – öffnet direkt in Excel</div>
+        {[
+          {title:"Stundennachweis (Details)",sub:"Jeder Tag · Name · Datum · Filiale · Ein/Aus · Std",fn:exportDetail,file:`Detail_${selMonth}.csv`},
+          {title:"Monatsübersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin · Gesamtstunden · je Filiale",fn:exportSummary,file:`Übersicht_${selMonth}.csv`},
+        ].map(({title,sub,fn,file})=>(
+          <div key={file} style={{background:"rgba(255,255,255,.07)",borderRadius:10,padding:"12px",marginBottom:8}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{title}</div>
+            <div style={{fontSize:9,color:"rgba(255,255,255,.4)",marginBottom:10}}>{sub}</div>
+            <button onClick={fn} style={{width:"100%",padding:"10px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>⬇ {file}</button>
+          </div>
+        ))}
+      </div>
+      {exported&&(
+        <div style={{...S.card,display:"flex",alignItems:"center",gap:9,border:`1.5px solid ${C.mint}`,background:C.mintLight}}>
+          <span style={{fontSize:18}}>✅</span>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:C.mintDark}}>Datei gespeichert!</div>
+            <div style={{fontSize:10,color:C.mintDark,opacity:.8}}>{exported}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DIENSTPLAN UPLOAD + AI ANALYSE ───────────────────────────────────────────
+function DienstplanUploadView({ records, users }) {
+  const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
+  const [schedule, setSchedule, scheduleReady] = useFirebase("schedule", {});
+  const [imgSrc, setImgSrc] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const fileRef = useRef(null);
+
+  // plan.png도 Firebase Storage 대신 base64로 Firebase에 저장
+  const [planImg, setPlanImg, planReady] = useFirebase("planImage", null);
+
+  // 이미지 선택 → 분석
+  async function handleFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!apiKey) { setShowKeyInput(true); return; }
+
+    setAnalyzing(true);
+    setMsg(null);
+
+    // base64 변환
+    const b64 = await new Promise(res => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(",")[1]);
+      r.readAsDataURL(file);
+    });
+    const dataUrl = `data:${file.type};base64,${b64}`;
+    setImgSrc(dataUrl);
+
+    const empNames = users.filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: file.type, data: b64 } },
+              { type: "text", text: `이 근무표 이미지에서 다음 직원들의 근무 일정을 추출해줘: ${empNames}
+
+각 직원별로 근무하는 날짜, 지점(${FILIALEN.join(", ")} 중 하나), 근무 시간(있으면)을 찾아줘.
+
+반드시 아래 JSON 형식으로만 응답해. 다른 텍스트 없이 JSON만:
+{
+  "직원이름": [
+    { "date": "YYYY-MM-DD", "filiale": "지점명", "time": "HH:MM-HH:MM 또는 null" }
+  ]
+}
+
+날짜가 월/일로만 표시되면 올해(${new Date().getFullYear()}) 기준으로 YYYY-MM-DD 형식으로 변환해줘.
+지점명은 정확히 "${FILIALEN.join('", "')}" 중 하나로 써줘.` }
+            ]
+          }]
+        })
+      });
+
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const data = await res.json();
+      const text = data.content.map(c => c.text || "").join("");
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+
+      // Firebase에 저장 (schedule + planImage)
+      setSchedule(parsed);
+      // 이미지 base64를 Firebase에 저장 (5MB 이하면 OK)
+      if (b64.length < 4000000) {
+        setPlanImg(dataUrl);
+      }
+      setMsg({ type: "ok", text: `✅ 분석 완료! ${Object.keys(parsed).length}명의 일정을 추출했어요.` });
+    } catch (err) {
+      setMsg({ type: "err", text: `❌ 오류: ${err.message}` });
+    }
+    setAnalyzing(false);
+  }
+
+  const displayImg = imgSrc || planImg;
+
+  return (
+    <div style={{padding:"14px"}}>
+
+      {/* API 키 입력 */}
+      {showKeyInput && (
+        <div style={{...S.card, marginBottom:12, border:`1.5px solid ${C.yellow}`}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>🔑 Anthropic API-Schlüssel</div>
+          <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
+            placeholder="sk-ant-..."
+            style={{...S.input, width:"100%", fontSize:11, marginBottom:8}}/>
+          <button onClick={()=>setShowKeyInput(false)}
+            style={{width:"100%",padding:"9px",borderRadius:9,border:"none",background:C.mint,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+            Speichern
+          </button>
+        </div>
+      )}
+
+      {/* 업로드 버튼 */}
+      <div style={{...S.card, marginBottom:12}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>📋 Dienstplan hochladen</div>
+        <div style={{fontSize:10,color:C.muted,marginBottom:12}}>Bild hochladen → KI analysiert automatisch die Schichten</div>
+        <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/>
+        <button onClick={()=>fileRef.current.click()} disabled={analyzing}
+          style={{width:"100%",padding:"12px",borderRadius:11,border:`2px dashed ${C.mint}`,
+            background:C.mintLight,color:C.mintDark,fontWeight:800,fontSize:13,cursor:"pointer",
+            opacity:analyzing?0.6:1}}>
+          {analyzing ? "⏳ KI analysiert…" : "📷 Bild auswählen & analysieren"}
+        </button>
+        {!apiKey&&(
+          <button onClick={()=>setShowKeyInput(true)}
+            style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
+            🔑 API-Schlüssel eingeben
+          </button>
+        )}
+        {msg&&(
+          <div style={{marginTop:10,padding:"9px 12px",borderRadius:9,
+            background:msg.type==="ok"?C.mintLight:C.redLight,
+            color:msg.type==="ok"?C.mintDark:C.red,fontSize:11,fontWeight:600}}>
+            {msg.text}
+          </div>
+        )}
+      </div>
+
+      {/* 근무표 이미지 */}
+      {displayImg && (
+        <div style={{marginBottom:12}}>
+          <img src={displayImg} alt="Dienstplan"
+            style={{width:"100%",height:"auto",borderRadius:14,display:"block"}}/>
+        </div>
+      )}
+
+      {/* 추출된 일정 */}
+      {schedule && Object.keys(schedule).length > 0 && (
+        <div>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>
+            Extrahierte Schichten
+          </div>
+          {Object.entries(schedule).map(([name, shifts]) => {
+            if (!Array.isArray(shifts) || shifts.length === 0) return null;
+            return (
+              <div key={name} style={{...S.card, marginBottom:10}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:8}}>{name}</div>
+                {shifts.map((s, i) => {
+                  const actualRec = records.find(r => r.user === name && r.date === s.date);
+                  const status = !actualRec ? "ausstehend" : !actualRec.aus ? "aktiv" : "erledigt";
+                  return (
+                    <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+                      padding:"8px 10px",borderRadius:9,marginBottom:5,
+                      background:status==="erledigt"?C.mintLight:status==="aktiv"?"#FFF9E6":C.bg}}>
+                      <div>
+                        <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                          {new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                        </div>
+                        <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                      </div>
+                      <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
+                        color:status==="erledigt"?C.mintDark:status==="aktiv"?C.yellow:C.muted,
+                        background:status==="erledigt"?C.mintLight:status==="aktiv"?C.yellowLight:C.border}}>
+                        {status==="erledigt"?"✅ Gearbeitet":status==="aktiv"?"🟡 Aktiv":"⏳ Ausstehend"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx}){
+  const [tab,setTab]=useState("uebersicht");
+  const [detailKey,setDetailKey]=useState(null);
+  const [deleteConfirm,setDeleteConfirm]=useState(null);
+  const manager=users.find(u=>u.key===userKey);
+  const offene=antraege.filter(a=>a.status==="offen"&&a.zustaendig===userKey);
+  const empList=users.filter(u=>!MANAGERS.includes(u.key)).sort((a,b)=>a.vorname.localeCompare(b.vorname));
+  const todayRecs=records.filter(r=>r.date===today());
+  const approve=(id,ok)=>setAntraege(prev=>prev.map(a=>a.id===id?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
+  const getStatus=name=>{const r=todayRecs.find(x=>x.user===name);if(!r)return"Nicht erschienen";if(!r.aus)return"Aktiv";return"Feierabend";};
+  const getBranch=name=>{const r=todayRecs.find(x=>x.user===name);return r?.filiale||null;};
+  const sColor=s=>s==="Aktiv"?C.mintDark:s==="Feierabend"?C.muted:C.red;
+  const sBg=s=>s==="Aktiv"?C.mintLight:s==="Feierabend"?"#F0F0F0":C.redLight;
+
+  return(
+    <div style={{background:C.bg,minHeight:"100vh",paddingBottom:80}}>
+      <div style={S.hdr}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <div style={{fontSize:11,opacity:.45,marginBottom:3,letterSpacing:".06em",textTransform:"uppercase"}}>teeamo · Manager</div>
+            <div style={{fontSize:20,fontWeight:800}}>{manager?.vorname||"Manager"}</div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:7}}>
+            <div style={{width:38,height:38,borderRadius:"50%",background:C.yellow,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:C.navy}}>{manager?.kuerzel||"M"}</div>
+            <button onClick={onLogout} style={{fontSize:10,background:"rgba(255,255,255,.1)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.6)",borderRadius:7,padding:"3px 8px",cursor:"pointer"}}>Abmelden</button>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginTop:14}}>
+          {[{l:"Aktiv",n:empList.filter(u=>getStatus(u.vorname)==="Aktiv").length,c:C.mint},
+            {l:"Feierabend",n:empList.filter(u=>getStatus(u.vorname)==="Feierabend").length,c:"rgba(255,255,255,.4)"},
+            {l:"Nicht da",n:empList.filter(u=>getStatus(u.vorname)==="Nicht erschienen").length,c:C.red}].map(({l,n,c})=>(
+            <div key={l} style={{background:"rgba(255,255,255,.07)",borderRadius:11,padding:"9px 10px",textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:800,color:c}}>{n}</div>
+              <div style={{fontSize:9,opacity:.45,marginTop:1}}>{l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {tab==="uebersicht"&&!detailKey&&(
+        <div style={{padding:"14px"}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Heutige Mitarbeiterinnen</div>
+          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            {empList.map(emp=>{
+              const st=getStatus(emp.vorname),br=getBranch(emp.vorname);
+              return(
+                <div key={emp.key} style={{...S.card,display:"flex",alignItems:"center",gap:11,padding:"12px 14px"}}>
+                  <button onClick={()=>setDetailKey(emp.key)} style={{flex:1,border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
+                    <div style={{width:40,height:40,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff",flexShrink:0}}>{emp.kuerzel}</div>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",alignItems:"center",gap:7}}>
+                        <span style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}</span>
+                        <span style={{fontSize:9,color:C.muted,background:C.border,padding:"2px 6px",borderRadius:99}}>{emp.role}</span>
+                      </div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>{br?br+" · ":""}Heute</div>
+                    </div>
+                    <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:99,color:sColor(st),background:sBg(st)}}>{st}</span>
+                  </button>
+                  <button onClick={()=>setDeleteConfirm(emp.key)} style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
+                    <span style={{fontSize:13,color:C.red}}>🗑</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab==="uebersicht"&&detailKey&&(()=>{
+        const emp=users.find(u=>u.key===detailKey);
+        const empRecs=records.filter(r=>r.user===emp.vorname);
+        const total=empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+        return(
+          <div style={{padding:"14px"}}>
+            <button onClick={()=>setDetailKey(null)} style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:12,fontWeight:700,marginBottom:12}}>← Zurück</button>
+            <div style={{...S.card,display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+              <div style={{width:48,height:48,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:16,color:"#fff"}}>{emp.kuerzel}</div>
+              <div>
+                <div style={{fontSize:16,fontWeight:800,color:C.text}}>{emp.vorname}</div>
+                <div style={{fontSize:11,color:C.muted}}>{emp.role}</div>
+                <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:5,display:"inline-block",color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>{getStatus(emp.vorname)}</span>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+              {[{l:"Std. gesamt",v:total.toFixed(1)+"h"},{l:"Arbeitstage",v:empRecs.length+"d"}].map(({l,v})=>(
+                <div key={l} style={S.card}>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{l}</div>
+                  <div style={{fontSize:20,fontWeight:800,color:C.mintDark}}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{...S.card,padding:0,overflow:"hidden"}}>
+              <div style={{padding:"11px 13px",borderBottom:`1px solid ${C.border}`,fontSize:11,fontWeight:700,color:C.text}}>Arbeitsnachweise</div>
+              {empRecs.length===0?<div style={{padding:"12px",fontSize:11,color:C.muted}}>Keine Einträge.</div>:empRecs.map((r,i)=>(
+                <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",borderBottom:i<empRecs.length-1?`1px solid ${C.border}`:"none"}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <div style={{width:30,height:30,borderRadius:7,background:r.aus?C.mintLight:C.yellowLight,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                      <span style={{fontSize:7,color:C.muted}}>{r.date.slice(5)}</span>
+                      <span style={{fontSize:9,fontWeight:700,color:r.aus?C.mintDark:C.yellow}}>{r.filiale.slice(-1)}</span>
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,color:C.muted}}>{r.ein} → {r.aus||"läuft"}</div>
+                      <div style={{fontSize:9,color:C.muted}}>{r.filiale}</div>
+                    </div>
+                  </div>
+                  <span style={{fontSize:11,fontWeight:700,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {tab==="dienstplan"&&(
+        <DienstplanUploadView records={records} users={users}/>
+      )}
+
+      {tab==="antraege"&&(
+        <div style={{padding:"14px"}}>
+          {offene.length>0&&(
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Offene Anträge ({offene.length})</div>
+              {offene.map(a=>(
+                <div key={a.id} style={{...S.card,marginBottom:9}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:C.text}}>{a.user}</div>
+                      <div style={{fontSize:10,color:C.muted}}>{a.date} · {a.filiale} · {a.ein}–{a.aus}</div>
+                    </div>
+                    <span style={{fontSize:9,fontWeight:700,color:C.yellow,background:C.yellowLight,padding:"3px 7px",borderRadius:99}}>Offen</span>
+                  </div>
+                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:7,padding:"6px 9px",marginBottom:9}}>📌 „{a.grund}"</div>
+                  <div style={{display:"flex",gap:7}}>
+                    <button onClick={()=>approve(a.id,false)} style={{flex:1,padding:"9px",borderRadius:9,border:`1.5px solid ${C.red}`,background:C.redLight,color:C.red,fontWeight:700,fontSize:12,cursor:"pointer"}}>✕ Ablehnen</button>
+                    <button onClick={()=>approve(a.id,true)} style={{flex:1,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>✓ Genehmigen</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={S.card}>
+            <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Alle Anträge</div>
+            {antraege.length===0?<div style={{fontSize:11,color:C.muted}}>Keine Anträge.</div>:antraege.map((a,i)=>(
+              <div key={a.id} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",paddingBottom:i<antraege.length-1?9:0,marginBottom:i<antraege.length-1?9:0,borderBottom:i<antraege.length-1?`1px solid ${C.border}`:"none"}}>
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text}}>{a.user} · {a.date}</div>
+                  <div style={{fontSize:10,color:C.muted}}>{a.filiale} · {a.ein}–{a.aus}</div>
+                </div>
+                <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"Genehmigt":"Abgelehnt"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab==="statistik"&&<StatistikTab records={records} users={users}/>}
+
+      <div style={S.nav}>
+        {[{id:"uebersicht",icon:"👥",lbl:"Übersicht"},
+          {id:"dienstplan",icon:"📋",lbl:"Dienstplan"},
+          {id:"antraege",icon:"📥",lbl:`Anträge${offene.length>0?" ("+offene.length+")":""}`},
+          {id:"statistik",icon:"📊",lbl:"Statistik"}].map(t=>(
+          <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0"}}>
+            <span style={{fontSize:19}}>{t.icon}</span>
+            <span style={{fontSize:9,fontWeight:600,color:tab===t.id?C.mintDark:C.muted}}>{t.lbl}</span>
+            {tab===t.id&&<div style={{width:16,height:2,background:C.mint,borderRadius:99}}/>}
+          </button>
+        ))}
+      </div>
+
+      {deleteConfirm&&(()=>{
+        const empToDel=users.find(u=>u.key===deleteConfirm);
+        return(
+          <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:"24px"}}>
+            <div style={{background:C.card,borderRadius:18,padding:"24px 22px",width:"100%",maxWidth:340,boxShadow:"0 8px 32px rgba(0,0,0,.18)"}}>
+              <div style={{width:48,height:48,borderRadius:"50%",background:C.redLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 14px"}}>🗑</div>
+              <div style={{fontSize:16,fontWeight:800,color:C.text,textAlign:"center",marginBottom:6}}>Konto löschen?</div>
+              <div style={{fontSize:12,color:C.muted,textAlign:"center",marginBottom:20}}>
+                Das Konto von <strong style={{color:C.text}}>{empToDel?.vorname}</strong> wird dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.
+              </div>
+              <div style={{display:"flex",gap:9}}>
+                <button onClick={()=>setDeleteConfirm(null)} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
+                <button onClick={()=>{setUsers(prev=>prev.filter(u=>u.key!==deleteConfirm));setDeleteConfirm(null);setDetailKey(null);}}
+                  style={{flex:1,padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>Löschen</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ── APP ROOT ──────────────────────────────────────────────────────────────────
+function App(){
+  const [screen,setScreen]=useState("login");
+  const [userKey,setUserKey]=useState(null);
+  // users/PIN은 로컬 유지 (보안)
+  const [users, setUsers] = usePersist("teeamo_users", INIT_USERS);
+  // records/antraege는 Firebase 실시간 동기화
+  const [records,  setRecords,  recordsReady]  = useFirebase("records",  INIT_RECORDS);
+  const [antraege, setAntraege, antraegeReady] = useFirebase("antraege", INIT_ANTRAEGE);
+  // ✅ CSV: 앱 최상단 1회 fetch, 모든 화면에 공유
+  const csvCtx = useDienstplanCSV();
+
+  function handleLogin(key){
+    const u=users.find(x=>x.key===key);
+    const isAdmin=MANAGERS.includes(key)||(u&&u.isAdmin);
+    setUserKey(key);setScreen(isAdmin?"manager":"mitarbeiter");
+  }
+  function handleLogout(){setUserKey(null);setScreen("login");}
+
+  return(
+    <div style={{maxWidth:500,margin:"0 auto",minHeight:"100vh",background:C.bg}}>
+      {!recordsReady&&(
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",gap:14}}>
+          <div style={{width:36,height:36,border:`3px solid ${C.mint}`,borderTop:"3px solid transparent",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
+          <div style={{fontSize:13,color:C.muted,fontWeight:600}}>Verbindung zu Firebase…</div>
+        </div>
+      )}
+      {recordsReady&&screen==="login"&&<LoginView onLogin={handleLogin} users={users} setUsers={setUsers} csvCtx={csvCtx}/>}
+      {recordsReady&&screen==="mitarbeiter"&&<MitarbeiterView userKey={userKey} users={users} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx}/>}
+      {recordsReady&&screen==="manager"&&<ManagerView records={records} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsers} csvCtx={csvCtx}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
