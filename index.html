@@ -1130,7 +1130,7 @@ JSON만 응답. 다른 텍스트 없이:
         }
       } catch(pe) {
         console.error("Raw response:", text);
-        throw new Error(`JSON-Fehler: Bitte erneut versuchen.`);
+        throw new Error(`Raw: ${text.slice(0, 200)}`);
       }
 
       // Firebase에 저장 (schedule + planImage)
