@@ -1063,23 +1063,43 @@ function DienstplanUploadView({ records, users }) {
 
     // HEIC/HEIF 체크
     if (file.type === "image/heic" || file.type === "image/heif" || file.name.toLowerCase().endsWith(".heic")) {
-      setMsg({ type: "err", text: "❌ HEIC 형식은 지원되지 않아요. 사진 앱에서 JPEG로 변환 후 업로드해주세요." });
+      setMsg({ type: "err", text: "❌ HEIC 형식은 지원되지 않아요. JPEG로 변환 후 업로드해주세요." });
       return;
     }
+
+    const isPdf = file.type === "application/pdf";
 
     setAnalyzing(true);
     setMsg(null);
 
-    // base64 변환
     const b64 = await new Promise(res => {
       const r = new FileReader();
       r.onload = () => res(r.result.split(",")[1]);
       r.readAsDataURL(file);
     });
-    const dataUrl = `data:${file.type};base64,${b64}`;
-    setImgSrc(dataUrl);
+    const dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
+    if (!isPdf) setImgSrc(dataUrl);
 
     const empNames = users.filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
+    const promptText = `이 근무표를 매우 주의깊게 읽어줘.
+
+추출할 직원 목록: ${empNames}
+
+각 날짜 칸에서 직원 이름 뒤에 오는 시간(예: Anna: 15:00-20:00)을 정확히 읽어줘.
+- Arkaden = TEEAMO Arkaden 섹션
+- Aegdiimarkt 또는 Aegdimarkt = TEEAMO Aegidiimarkt 섹션  
+- TEEnJOY 또는 Teenjoy = Teenjoy 섹션
+- 각 섹션 안에 있는 직원 이름과 시간을 정확히 매칭해줘
+- 날짜는 ${new Date().getFullYear()}년 기준 YYYY-MM-DD 형식
+
+JSON만 응답 (다른 텍스트 없이):
+{"이름":[{"d":"YYYY-MM-DD","f":"지점명","t":"HH:MM-HH:MM"}]}
+
+지점명은 정확히 "TEEAMO Arkaden", "TEEAMO Aegidiimarkt", "Teenjoy" 중 하나만 사용.`;
+
+    const contentBlock = isPdf
+      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+      : { type: "image", source: { type: "base64", media_type: file.type, data: b64 } };
 
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -1095,19 +1115,7 @@ function DienstplanUploadView({ records, users }) {
           max_tokens: 8000,
           messages: [{
             role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: file.type, data: b64 } },
-              { type: "text", text: `이 근무표에서 다음 직원들의 근무 일정을 추출해줘: ${empNames}
-
-JSON만 응답. 다른 텍스트 없이:
-{"이름":[{"d":"YYYY-MM-DD","f":"지점명","t":"시작-끝"}]}
-
-규칙:
-- 날짜는 ${new Date().getFullYear()}년 기준 YYYY-MM-DD
-- 지점명: "Arkaden"=TEEAMO Arkaden, "Aegidiimarkt"=TEEAMO Aegidiimarkt, "TEEnJOY"=Teenjoy
-- 시간없으면 t는 null
-- 근무없는 직원은 빈배열[]` }
-            ]
+            content: [ contentBlock, { type: "text", text: promptText } ]
           }]
         })
       });
@@ -1135,8 +1143,8 @@ JSON만 응답. 다른 텍스트 없이:
 
       // Firebase에 저장 (schedule + planImage)
       setSchedule(parsed);
-      // 이미지 base64를 Firebase에 저장 (5MB 이하면 OK)
-      if (b64.length < 4000000) {
+      // 이미지만 Firebase에 저장 (PDF는 저장 안 함)
+      if (!isPdf && b64.length < 4000000) {
         setPlanImg(dataUrl);
       }
       setMsg({ type: "ok", text: `✅ 분석 완료! ${Object.keys(parsed).length}명의 일정을 추출했어요.` });
@@ -1169,12 +1177,12 @@ JSON만 응답. 다른 텍스트 없이:
       <div style={{...S.card, marginBottom:12}}>
         <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>📋 Dienstplan hochladen</div>
         <div style={{fontSize:10,color:C.muted,marginBottom:12}}>Bild hochladen → KI analysiert automatisch die Schichten</div>
-        <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleFile} style={{display:"none"}}/>
+        <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" onChange={handleFile} style={{display:"none"}}/>
         <button onClick={()=>fileRef.current.click()} disabled={analyzing}
           style={{width:"100%",padding:"12px",borderRadius:11,border:`2px dashed ${C.mint}`,
             background:C.mintLight,color:C.mintDark,fontWeight:800,fontSize:13,cursor:"pointer",
             opacity:analyzing?0.6:1}}>
-          {analyzing ? "⏳ KI analysiert…" : "📷 Bild auswählen & analysieren"}
+          {analyzing ? "⏳ KI analysiert…" : "📷 Bild oder PDF auswählen & analysieren"}
         </button>
         {!apiKey&&(
           <button onClick={()=>setShowKeyInput(true)}
