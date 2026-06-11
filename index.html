@@ -1182,6 +1182,12 @@ JSON만 응답. 다른 텍스트 없이:
             🔑 API-Schlüssel eingeben
           </button>
         )}
+        {apiKey&&(
+          <button onClick={()=>setShowKeyInput(v=>!v)}
+            style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
+            🔑 API-Schlüssel ändern
+          </button>
+        )}
         {msg&&(
           <div style={{marginTop:10,padding:"9px 12px",borderRadius:9,
             background:msg.type==="ok"?C.mintLight:C.redLight,
