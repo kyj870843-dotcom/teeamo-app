@@ -1097,19 +1097,16 @@ function DienstplanUploadView({ records, users }) {
             role: "user",
             content: [
               { type: "image", source: { type: "base64", media_type: file.type, data: b64 } },
-              { type: "text", text: `이 근무표 이미지에서 다음 직원들의 근무 일정을 추출해줘: ${empNames}
+              { type: "text", text: `이 근무표에서 다음 직원들의 근무 일정을 추출해줘: ${empNames}
 
-각 직원별로 근무하는 날짜, 지점(${FILIALEN.join(", ")} 중 하나), 근무 시간(있으면)을 찾아줘.
+JSON만 응답. 다른 텍스트 없이:
+{"이름":[{"d":"YYYY-MM-DD","f":"지점명","t":"시작-끝"}]}
 
-반드시 아래 JSON 형식으로만 응답해. 다른 텍스트 없이 JSON만:
-{
-  "직원이름": [
-    { "date": "YYYY-MM-DD", "filiale": "지점명", "time": "HH:MM-HH:MM 또는 null" }
-  ]
-}
-
-날짜가 월/일로만 표시되면 올해(${new Date().getFullYear()}) 기준으로 YYYY-MM-DD 형식으로 변환해줘.
-지점명은 정확히 "${FILIALEN.join('", "')}" 중 하나로 써줘.` }
+규칙:
+- 날짜는 ${new Date().getFullYear()}년 기준 YYYY-MM-DD
+- 지점명: "Arkaden"=TEEAMO Arkaden, "Aegidiimarkt"=TEEAMO Aegidiimarkt, "TEEnJOY"=Teenjoy
+- 시간없으면 t는 null
+- 근무없는 직원은 빈배열[]` }
             ]
           }]
         })
@@ -1121,10 +1118,19 @@ function DienstplanUploadView({ records, users }) {
       const clean = text.replace(/```json|```/g, "").trim();
       let parsed;
       try {
-        parsed = JSON.parse(clean);
+        const raw = JSON.parse(clean);
+        // 짧은 키(d/f/t) → 긴 키(date/filiale/time) 변환
+        parsed = {};
+        for (const [name, shifts] of Object.entries(raw)) {
+          parsed[name] = (shifts || []).map(s => ({
+            date: s.date || s.d,
+            filiale: s.filiale || s.f,
+            time: s.time || s.t || null,
+          }));
+        }
       } catch(pe) {
         console.error("Raw response:", text);
-        throw new Error(`JSON-Fehler: Antwort zu lang oder ungültig. Bitte erneut versuchen.`);
+        throw new Error(`JSON-Fehler: Bitte erneut versuchen.`);
       }
 
       // Firebase에 저장 (schedule + planImage)
