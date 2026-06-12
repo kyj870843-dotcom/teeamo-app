@@ -361,39 +361,216 @@ function KalenderView({ csvCtx, userName, records }) {
 
       {/* 내 일정 */}
       {userName && myShifts.length > 0 && (
-        <div style={{padding:"14px", borderTop:`1px solid ${C.border}`}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>
-            Meine Schichten
-          </div>
-          {myShifts.map((s, i) => {
-            const actualRec = records?.find(r => r.user === userName && r.date === s.date);
-            const status = !actualRec ? "ausstehend" : !actualRec.aus ? "aktiv" : "erledigt";
-            return (
-              <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",
-                padding:"10px 12px",borderRadius:10,marginBottom:6,
-                background:status==="erledigt"?C.mintLight:status==="aktiv"?"#FFF9E6":C.bg,
-                border:`1px solid ${status==="erledigt"?C.mint:status==="aktiv"?C.yellow:C.border}`}}>
-                <div>
-                  <div style={{fontSize:12,fontWeight:700,color:C.text}}>
-                    {new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
-                  </div>
-                  <div style={{fontSize:10,color:C.muted,marginTop:1}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
-                </div>
-                <span style={{fontSize:9,fontWeight:700,padding:"4px 9px",borderRadius:99,
-                  color:status==="erledigt"?C.mintDark:status==="aktiv"?C.yellow:C.muted,
-                  background:status==="erledigt"?"#fff":status==="aktiv"?C.yellowLight:C.border}}>
-                  {status==="erledigt"?"✅ Gearbeitet":status==="aktiv"?"🟡 Im Dienst":"⏳ Ausstehend"}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+        <MeineSchichtenSection userName={userName} myShifts={myShifts} records={records}/>
       )}
     </div>
   );
 }
 
-// ── LOGIN ─────────────────────────────────────────────────────────────────────
+// ── 근무 시간 비교 헬퍼 ───────────────────────────────────────────────────────
+function parseMinutes(timeStr) {
+  if (!timeStr) return null;
+  const [h, m] = timeStr.split(":").map(Number);
+  return h * 60 + m;
+}
+function calcShiftMinutes(timeRange) {
+  if (!timeRange) return null;
+  const [start, end] = timeRange.split("-");
+  const s = parseMinutes(start), e = parseMinutes(end);
+  if (s == null || e == null) return null;
+  return e > s ? e - s : null;
+}
+function getShiftStatus(shift, actualRec) {
+  if (!actualRec) return "ausstehend";
+  if (!actualRec.aus) return "aktiv";
+  const planned = calcShiftMinutes(shift.time || shift.t);
+  const actual = calcShiftMinutes(`${actualRec.ein}-${actualRec.aus}`);
+  if (planned == null || actual == null) return "gearbeitet";
+  return actual >= planned ? "gearbeitet" : "prüfen";
+}
+
+// ── SCHICHTTAUSCH MODAL ────────────────────────────────────────────────────────
+function SchichttauschModal({ userName, myShifts, onClose, onSubmit }) {
+  const [selShift, setSelShift] = useState(null);
+  const [newDate, setNewDate] = useState(today());
+  const [newTime, setNewTime] = useState("");
+  const [newFiliale, setNewFiliale] = useState(FILIALEN[0]);
+  const [grund, setGrund] = useState("");
+  const [err, setErr] = useState("");
+
+  function doSubmit() {
+    if (!selShift) { setErr("Bitte eine Schicht auswählen."); return; }
+    if (!grund.trim()) { setErr("Bitte einen Grund angeben."); return; }
+    onSubmit({ userName, origDate: selShift.d || selShift.date, origFiliale: selShift.f || selShift.filiale, origTime: selShift.t || selShift.time, newDate, newTime, newFiliale, grund, status: "offen", id: Date.now() });
+    onClose();
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
+      <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))",maxHeight:"85vh",overflowY:"auto"}}>
+        <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 20px"}}/>
+        <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>Schichttausch beantragen</div>
+        <div style={{fontSize:11,color:C.muted,marginBottom:16}}>Wähle die Schicht aus, die du tauschen möchtest.</div>
+
+        {/* 원래 날짜 선택 */}
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Ursprüngliche Schicht</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {myShifts.map((s,i) => {
+              const d = s.d || s.date;
+              const f = s.f || s.filiale;
+              const t = s.t || s.time;
+              const isSel = selShift === s;
+              return (
+                <button key={i} onClick={()=>setSelShift(s)}
+                  style={{padding:"10px 12px",borderRadius:10,textAlign:"left",cursor:"pointer",
+                    border:`2px solid ${isSel?C.mint:C.border}`,
+                    background:isSel?C.mintLight:"#fff"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:isSel?C.mintDark:C.text}}>
+                    {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                  </div>
+                  <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 변경할 날짜/시간 */}
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Gewünschter neuer Termin</div>
+          <div style={{display:"flex",gap:8,marginBottom:8}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Datum</div>
+              <input type="date" value={newDate} onChange={e=>setNewDate(e.target.value)} style={{...S.input,width:"100%"}}/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Uhrzeit (optional)</div>
+              <input type="time" value={newTime} onChange={e=>setNewTime(e.target.value)} style={{...S.input,width:"100%"}}/>
+            </div>
+          </div>
+          <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Filiale</div>
+          <div style={{display:"flex",gap:6}}>
+            {FILIALEN.map(f=>(
+              <button key={f} onClick={()=>setNewFiliale(f)}
+                style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",
+                  border:`2px solid ${newFiliale===f?C.mint:C.border}`,
+                  background:newFiliale===f?C.mintLight:"#fff",
+                  color:newFiliale===f?C.mintDark:C.muted}}>{f.replace("TEEAMO ","")}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* 사유 */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund</div>
+          <textarea value={grund} onChange={e=>setGrund(e.target.value)} placeholder="Grund für den Tausch..."
+            style={{...S.input,width:"100%",minHeight:70,resize:"none",fontFamily:"inherit"}}/>
+        </div>
+
+        {err&&<div style={{fontSize:11,color:C.red,marginBottom:10,fontWeight:600}}>⚠ {err}</div>}
+
+        <div style={{display:"flex",gap:9}}>
+          <button onClick={onClose} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
+          <button onClick={doSubmit} style={{flex:2,padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>Antrag stellen</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// ── MEINE SCHICHTEN SECTION ───────────────────────────────────────────────────
+function MeineSchichtenSection({ userName, myShifts, records }) {
+  const [showTausch, setShowTausch] = useState(false);
+  const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
+  const [, setNotifications] = useFirebase("notifications", {});
+
+  function handleTauschSubmit(antrag) {
+    setTauschAntraege(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
+    const zustaendig = antrag.origFiliale === "Teenjoy" ? "teddy" : "yeaji";
+    setNotifications(prev => ({
+      ...(prev||{}),
+      [`tausch_${antrag.id}`]: {
+        type: "schichttausch", user: userName,
+        origDate: antrag.origDate, origFiliale: antrag.origFiliale,
+        newDate: antrag.newDate, newFiliale: antrag.newFiliale,
+        grund: antrag.grund, zustaendig, gelesen: false, ts: Date.now()
+      }
+    }));
+  }
+
+  return (
+    <div style={{padding:"14px", borderTop:`1px solid ${C.border}`}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:9}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".05em"}}>
+          Meine Schichten
+        </div>
+        <button onClick={()=>setShowTausch(true)}
+          style={{fontSize:10,fontWeight:700,padding:"5px 10px",borderRadius:8,
+            border:`1.5px solid ${C.mint}`,background:C.mintLight,color:C.mintDark,cursor:"pointer"}}>
+          🔄 Schichttausch
+        </button>
+      </div>
+      {myShifts.map((s, i) => (
+        <ShiftRow key={i} s={s} userName={userName} records={records} setNotifications={setNotifications}/>
+      ))}
+      {showTausch && (
+        <SchichttauschModal userName={userName} myShifts={myShifts}
+          onClose={()=>setShowTausch(false)} onSubmit={handleTauschSubmit}/>
+      )}
+    </div>
+  );
+}
+
+function ShiftRow({ s, userName, records, setNotifications }) {
+  const d = s.d || s.date;
+  const f = s.f || s.filiale;
+  const t = s.t || s.time;
+  const actualRec = records?.find(r => r.user === userName && r.date === d);
+  const status = getShiftStatus({ time: t }, actualRec);
+
+  useEffect(() => {
+    if (status === "prüfen" && actualRec) {
+      const zustaendig = f === "Teenjoy" ? "teddy" : "yeaji";
+      const notifKey = `prüfen_${userName}_${d}`;
+      setNotifications(prev => {
+        if (prev && prev[notifKey]) return prev;
+        return { ...(prev||{}), [notifKey]: {
+          type: "prüfen", user: userName, date: d, filiale: f,
+          plannedTime: t, actualEin: actualRec.ein, actualAus: actualRec.aus,
+          zustaendig, gelesen: false, ts: Date.now()
+        }};
+      });
+    }
+  }, [status]);
+
+  const sc = {
+    gearbeitet: { bg: C.mintLight,  border: C.mint,   color: C.mintDark, label: "✅ Gearbeitet" },
+    prüfen:     { bg: C.yellowLight, border: C.yellow, color: C.yellow,   label: "⚠️ Prüfen"    },
+    aktiv:      { bg: "#FFF9E6",     border: C.yellow, color: C.yellow,   label: "🟡 Im Dienst" },
+    ausstehend: { bg: C.bg,          border: C.border, color: C.muted,    label: "⏳ Ausstehend"},
+  }[status] || { bg: C.bg, border: C.border, color: C.muted, label: "⏳ Ausstehend" };
+
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+      padding:"10px 12px",borderRadius:10,marginBottom:6,
+      background:sc.bg, border:`1px solid ${sc.border}`}}>
+      <div>
+        <div style={{fontSize:12,fontWeight:700,color:C.text}}>
+          {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+        </div>
+        <div style={{fontSize:10,color:C.muted,marginTop:1}}>{f}{t?` · ${t}`:""}</div>
+        {status==="prüfen"&&actualRec&&(
+          <div style={{fontSize:9,color:C.yellow,marginTop:2}}>Geplant: {t} · Gearbeitet: {actualRec.ein}–{actualRec.aus}</div>
+        )}
+      </div>
+      <span style={{fontSize:9,fontWeight:700,padding:"4px 9px",borderRadius:99,
+        color:sc.color, background:"#fff", border:`1px solid ${sc.border}`}}>
+        {sc.label}
+      </span>
+    </div>
+  );
+}
+
 function LoginView({onLogin,users,setUsers,csvCtx}){
   const now=useNow();
   const [page,setPage]=useState("list");
@@ -1265,6 +1442,27 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   const getStatus=name=>{const r=todayRecs.find(x=>x.user===name);if(!r)return"Nicht erschienen";if(!r.aus)return"Aktiv";return"Feierabend";};
   const getBranch=name=>{const r=todayRecs.find(x=>x.user===name);return r?.filiale||null;};
   const sColor=s=>s==="Aktiv"?C.mintDark:s==="Feierabend"?C.muted:C.red;
+
+  // 알림 & Schichttausch
+  const [notifications, setNotifications] = useFirebase("notifications", {});
+  const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
+
+  const myNotifs = Object.entries(notifications||{})
+    .filter(([,n]) => n.zustaendig === userKey && !n.gelesen)
+    .sort((a,b) => b[1].ts - a[1].ts);
+  const myTausch = (Array.isArray(tauschAntraege)?tauschAntraege:[])
+    .filter(t => {
+      const zustaendig = t.origFiliale === "Teenjoy" ? "teddy" : "yeaji";
+      return zustaendig === userKey;
+    });
+  const unreadCount = myNotifs.length + myTausch.filter(t=>t.status==="offen").length;
+
+  function markRead(key) {
+    setNotifications(prev => ({ ...(prev||{}), [key]: { ...(prev[key]||{}), gelesen: true } }));
+  }
+  function approveTausch(id, ok) {
+    setTauschAntraege(prev => (Array.isArray(prev)?prev:[]).map(t => t.id===id ? {...t, status: ok?"genehmigt":"abgelehnt"} : t));
+  }
   const sBg=s=>s==="Aktiv"?C.mintLight:s==="Feierabend"?"#F0F0F0":C.redLight;
 
   return(
@@ -1410,10 +1608,58 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
 
       {tab==="statistik"&&<StatistikTab records={records} users={users}/>}
 
+      {tab==="benachrichtigungen"&&(
+        <div style={{padding:"14px"}}>
+          {/* prüfen 알림 */}
+          {myNotifs.length > 0 && (
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>⚠️ Prüfen erforderlich</div>
+              {myNotifs.map(([key, n]) => (
+                <div key={key} style={{...S.card,marginBottom:8,border:`1.5px solid ${C.yellow}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:800,color:C.text}}>{n.user} · {new Date(n.date||n.ts).toLocaleDateString("de-DE")}</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>{n.filiale}</div>
+                      {n.type==="prüfen"&&<div style={{fontSize:10,color:C.yellow,marginTop:3}}>Geplant: {n.plannedTime} · Gearbeitet: {n.actualEin}–{n.actualAus}</div>}
+                      {n.type==="schichttausch"&&<div style={{fontSize:10,color:C.yellow,marginTop:3}}>Tausch: {n.origDate} → {n.newDate}</div>}
+                    </div>
+                    <button onClick={()=>markRead(key)} style={{fontSize:9,padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,cursor:"pointer"}}>Gelesen</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Schichttausch 신청 */}
+          <div>
+            <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🔄 Schichttausch-Anträge</div>
+            {myTausch.length===0
+              ? <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12}}>Keine Anträge.</div>
+              : myTausch.map(t=>(
+                <div key={t.id} style={{...S.card,marginBottom:8,border:`1.5px solid ${t.status==="offen"?C.mint:t.status==="genehmigt"?C.mintDark:C.red}`}}>
+                  <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{t.userName}</div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:2}}>von: {t.origDate} · {t.origFiliale}</div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:2}}>nach: {t.newDate} · {t.newFiliale}{t.newTime?` · ${t.newTime}`:""}</div>
+                  <div style={{fontSize:10,color:C.text,marginBottom:8}}>"{t.grund}"</div>
+                  {t.status==="offen"
+                    ? <div style={{display:"flex",gap:8}}>
+                        <button onClick={()=>approveTausch(t.id,false)} style={{flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.red}`,background:C.redLight,color:C.red,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
+                        <button onClick={()=>approveTausch(t.id,true)} style={{flex:1,padding:"8px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}}>Genehmigen</button>
+                      </div>
+                    : <span style={{...S.pill(t.status)}}>{t.status==="genehmigt"?"✅ Genehmigt":"❌ Abgelehnt"}</span>
+                  }
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      )}
+
       <div style={S.nav}>
         {[{id:"uebersicht",icon:"👥",lbl:"Übersicht"},
           {id:"dienstplan",icon:"📋",lbl:"Dienstplan"},
-          {id:"antraege",icon:"📥",lbl:`Anträge${offene.length>0?" ("+offene.length+")":""}`},
+          {id:"antraege",icon:"📥",lbl:`Anträge${offene.length>0?" ("+offene.length+")":""}` },
+          {id:"benachrichtigungen",icon:"🔔",lbl:`Alarm${unreadCount>0?" ("+unreadCount+")":""}` },
           {id:"statistik",icon:"📊",lbl:"Statistik"}].map(t=>(
           <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0"}}>
             <span style={{fontSize:19}}>{t.icon}</span>
