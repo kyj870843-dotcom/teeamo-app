@@ -397,12 +397,230 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
   const [targetShift, setTargetShift] = useState(null);
   const [grund, setGrund] = useState("");
   const [err, setErr] = useState("");
-  const [sheetHeight, setSheetHeight] = useState(52); // vh
+  const [sheetHeight, setSheetHeight] = useState(60);
   const dragStartY = useRef(null);
   const dragStartH = useRef(null);
   const [schedule] = useFirebase("schedule", {});
   const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
   const [, setNotifications] = useFirebase("notifications", {});
+
+  // 배경 스크롤 잠금
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.width = "100%";
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.width = "";
+    };
+  }, []);
+
+  const empList = (users||[]).filter(u => !MANAGERS.includes(u.key) && u.vorname !== userName);
+  const targetShifts = targetUser ? (schedule[targetUser.vorname] || []) : [];
+
+  function onDragStart(e) {
+    e.stopPropagation();
+    dragStartY.current = e.touches ? e.touches[0].clientY : e.clientY;
+    dragStartH.current = sheetHeight;
+  }
+  function onDragMove(e) {
+    e.stopPropagation();
+    if (dragStartY.current == null) return;
+    const y = e.touches ? e.touches[0].clientY : e.clientY;
+    const dy = dragStartY.current - y;
+    const newH = Math.min(92, Math.max(25, dragStartH.current + (dy / window.innerHeight * 100)));
+    setSheetHeight(newH);
+  }
+  function onDragEnd(e) {
+    e.stopPropagation();
+    if (sheetHeight < 30) onClose();
+    dragStartY.current = null;
+  }
+
+  function doSubmit() {
+    if (!grund.trim()) { setErr("Bitte einen Grund angeben."); return; }
+    const id = Date.now();
+    const antrag = {
+      id, status: "ausstehend_bestaetigung",
+      initiator: userName,
+      initiatorDate: myShift.d||myShift.date,
+      initiatorFiliale: myShift.f||myShift.filiale,
+      initiatorTime: myShift.t||myShift.time,
+      partner: targetUser.vorname,
+      partnerDate: targetShift.d||targetShift.date,
+      partnerFiliale: targetShift.f||targetShift.filiale,
+      partnerTime: targetShift.t||targetShift.time,
+      grund, partnerBestaetigt: false, ts: Date.now(),
+    };
+    setTauschAntraege(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
+    const zustaendig = antrag.initiatorFiliale === "Teenjoy" ? "teddy" : "yeaji";
+    // setNotifications는 setTauschAntraege와 분리해서 직접 호출
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      const notifKey = `tausch_anfrage_${id}`;
+      const notifData = {
+        type: "tausch_anfrage", targetUser: targetUser.vorname,
+        initiator: userName, antragId: id,
+        myDate: antrag.partnerDate, myFiliale: antrag.partnerFiliale, myTime: antrag.partnerTime,
+        theirDate: antrag.initiatorDate, theirFiliale: antrag.initiatorFiliale,
+        zustaendig, gelesen: false, ts: Date.now()
+      };
+      window._fbSet(window._fbRef(window._fbDb, `notifications/${notifKey}`), notifData)
+        .catch(e => console.error("notif write error:", e));
+    }
+    onClose();
+  }
+
+  const steps = ["Meine Schicht","Partner","Partner-Schicht","Senden"];
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:300}}
+      onTouchMove={e=>e.stopPropagation()}>
+      <div style={{position:"absolute",inset:0,background:"rgba(20,20,20,.4)"}}
+        onClick={onClose}/>
+      <div style={{
+        position:"absolute", bottom:0, left:0, right:0,
+        height:`${sheetHeight}vh`,
+        background:C.card,
+        borderRadius:"22px 22px 0 0",
+        display:"flex", flexDirection:"column",
+        boxShadow:"0 -4px 24px rgba(0,0,0,.15)",
+      }}>
+        {/* 드래그 핸들 */}
+        <div
+          onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}
+          style={{padding:"14px 22px 8px",cursor:"ns-resize",flexShrink:0,touchAction:"none"}}>
+          <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto"}}/>
+        </div>
+
+        {/* 헤더 */}
+        <div style={{padding:"0 22px 10px",flexShrink:0}}>
+          <div style={{display:"flex",gap:4,marginBottom:10}}>
+            {steps.map((s,i)=>(
+              <div key={i} style={{flex:1,height:3,borderRadius:99,
+                background:i+1<=step?C.mint:C.border,transition:"background .2s"}}/>
+            ))}
+          </div>
+          <div style={{fontSize:14,fontWeight:800,color:C.text}}>🔄 Schichttausch</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:2}}>
+            {step===1&&"Welche Schicht möchtest du tauschen?"}
+            {step===2&&"Mit wem möchtest du tauschen?"}
+            {step===3&&`Welche Schicht von ${targetUser?.vorname}?`}
+            {step===4&&"Zusammenfassung & Grund"}
+          </div>
+        </div>
+
+        {/* 스크롤 콘텐츠 */}
+        <div style={{flex:1,overflowY:"auto",padding:"0 22px",WebkitOverflowScrolling:"touch"}}>
+          {step===1&&myShifts.map((s,i)=>{
+            const d=s.d||s.date; const f=s.f||s.filiale; const t=s.t||s.time;
+            return(
+              <button key={i} onClick={()=>setMyShift(s)}
+                style={{width:"100%",padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
+                  marginBottom:6,display:"block",
+                  border:`2px solid ${myShift===s?C.mint:C.border}`,
+                  background:myShift===s?C.mintLight:"#fff"}}>
+                <div style={{fontSize:12,fontWeight:700,color:myShift===s?C.mintDark:C.text}}>
+                  {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                </div>
+                <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+              </button>
+            );
+          })}
+
+          {step===2&&empList.map(u=>(
+            <button key={u.key} onClick={()=>setTargetUser(u)}
+              style={{width:"100%",padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
+                marginBottom:6,display:"flex",alignItems:"center",gap:10,
+                border:`2px solid ${targetUser?.key===u.key?C.mint:C.border}`,
+                background:targetUser?.key===u.key?C.mintLight:"#fff"}}>
+              <div style={{width:32,height:32,borderRadius:"50%",background:C.navy,flexShrink:0,
+                display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,color:"#fff"}}>
+                {u.kuerzel}
+              </div>
+              <span style={{fontSize:13,fontWeight:700,color:targetUser?.key===u.key?C.mintDark:C.text}}>{u.vorname}</span>
+            </button>
+          ))}
+
+          {step===3&&(targetShifts.length===0
+            ? <div style={{textAlign:"center",color:C.muted,padding:"20px",fontSize:12}}>
+                {targetUser?.vorname} hat keine geplanten Schichten.
+              </div>
+            : targetShifts.map((s,i)=>{
+                const d=s.d||s.date; const f=s.f||s.filiale; const t=s.t||s.time;
+                return(
+                  <button key={i} onClick={()=>setTargetShift(s)}
+                    style={{width:"100%",padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
+                      marginBottom:6,display:"block",
+                      border:`2px solid ${targetShift===s?C.mint:C.border}`,
+                      background:targetShift===s?C.mintLight:"#fff"}}>
+                    <div style={{fontSize:12,fontWeight:700,color:targetShift===s?C.mintDark:C.text}}>
+                      {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                    </div>
+                    <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                  </button>
+                );
+              })
+          )}
+
+          {step===4&&(
+            <div>
+              <div style={{...S.card,background:C.mintLight,border:`1px solid ${C.mint}`,marginBottom:12}}>
+                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>TAUSCH ÜBERSICHT</div>
+                <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
+                  <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:9,color:C.muted}}>{userName} gibt ab:</div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                      {new Date(myShift?.d||myShift?.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                    </div>
+                    <div style={{fontSize:10,color:C.muted}}>{(myShift?.f||myShift?.filiale)?.replace("TEEAMO ","")}</div>
+                  </div>
+                  <div style={{fontSize:18}}>⇄</div>
+                  <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:9,color:C.muted}}>{targetUser?.vorname} gibt ab:</div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                      {new Date(targetShift?.d||targetShift?.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                    </div>
+                    <div style={{fontSize:10,color:C.muted}}>{(targetShift?.f||targetShift?.filiale)?.replace("TEEAMO ","")}</div>
+                  </div>
+                </div>
+                <div style={{fontSize:10,color:C.mintDark,textAlign:"center"}}>
+                  ⏳ {targetUser?.vorname} muss zuerst bestätigen.
+                </div>
+              </div>
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund</div>
+                <textarea value={grund} onChange={e=>{setGrund(e.target.value);setErr("");}}
+                  placeholder="Grund für den Tausch..."
+                  style={{...S.input,width:"100%",minHeight:70,resize:"none",fontFamily:"inherit"}}/>
+              </div>
+              {err&&<div style={{fontSize:11,color:C.red,marginBottom:8,fontWeight:600}}>⚠ {err}</div>}
+            </div>
+          )}
+        </div>
+
+        {/* 하단 버튼 */}
+        <div style={{padding:"12px 22px",paddingBottom:"max(16px,env(safe-area-inset-bottom))",
+          borderTop:`1px solid ${C.border}`,flexShrink:0,display:"flex",gap:9}}>
+          <button onClick={()=>step===1?onClose():setStep(s=>s-1)}
+            style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,
+              background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
+            {step===1?"✕":"← Zurück"}
+          </button>
+          <button
+            disabled={!!(step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift)}
+            onClick={()=>step<4?setStep(s=>s+1):doSubmit()}
+            style={{flex:2,padding:"12px",borderRadius:11,border:"none",
+              background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
+              color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",
+              opacity:(step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift)?0.4:1}}>
+            {step<4?"Weiter →":"Anfrage senden"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
   const empList = (users||[]).filter(u => !MANAGERS.includes(u.key) && u.vorname !== userName);
   const targetShifts = targetUser ? (schedule[targetUser.vorname] || []) : [];
@@ -621,23 +839,36 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
     .filter(([,n]) => n.type==="tausch_anfrage" && n.targetUser===userName && !n.gelesen);
 
   function bestaetigenTausch(notifKey, antragId, ok) {
-    // 알림 읽음 처리
-    setNotifications(prev => ({...(prev||{}), [notifKey]: {...(prev[notifKey]||{}), gelesen: true}}));
+    // 알림 읽음 처리 (직접 Firebase 쓰기)
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      window._fbSet(
+        window._fbRef(window._fbDb, `notifications/${notifKey}/gelesen`), true
+      ).catch(e => console.error(e));
+    }
 
-    setTauschAntraege(prev => {
-      const list = Array.isArray(prev)?prev:[];
-      if (!ok) {
-        // 거절 → 상태 업데이트
-        return list.map(a => a.id===antragId ? {...a, status:"abgelehnt_partner"} : a);
-      }
-      // 수락 → 둘 다 동의 완료, 관리자에게 전달
-      const antrag = list.find(a => a.id===antragId);
-      if (!antrag) return list;
+    const list = Array.isArray(tauschAntraege) ? tauschAntraege : [];
+    const antrag = list.find(a => a.id === antragId);
+    if (!antrag) return;
+
+    if (!ok) {
+      setTauschAntraege(prev => (Array.isArray(prev)?prev:[]).map(a =>
+        a.id===antragId ? {...a, status:"abgelehnt_partner"} : a
+      ));
+      return;
+    }
+
+    // 수락 → 상태 업데이트
+    setTauschAntraege(prev => (Array.isArray(prev)?prev:[]).map(a =>
+      a.id===antragId ? {...a, status:"ausstehend_manager", partnerBestaetigt:true} : a
+    ));
+
+    // 관리자 알림 직접 쓰기
+    if (window._fbDb && window._fbRef && window._fbSet) {
       const zustaendig = antrag.initiatorFiliale==="Teenjoy"?"teddy":"yeaji";
-      // 관리자 알림
-      setNotifications(prev2 => ({
-        ...(prev2||{}),
-        [`tausch_manager_${antragId}`]: {
+      const managerNotifKey = `tausch_manager_${antragId}`;
+      window._fbSet(
+        window._fbRef(window._fbDb, `notifications/${managerNotifKey}`),
+        {
           type: "tausch_manager",
           initiator: antrag.initiator,
           partner: antrag.partner,
@@ -645,9 +876,8 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
           partnerDate: antrag.partnerDate, partnerFiliale: antrag.partnerFiliale,
           antragId, zustaendig, gelesen: false, ts: Date.now()
         }
-      }));
-      return list.map(a => a.id===antragId ? {...a, status:"ausstehend_manager", partnerBestaetigt:true} : a);
-    });
+      ).catch(e => console.error("manager notif error:", e));
+    }
   }
 
   // 모든 항목(schichten + anträge)을 날짜 기준으로 묶기
@@ -808,6 +1038,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const status = getShiftStatus({ time: t }, actualRec);
   const [showAbsagen, setShowAbsagen] = useState(false);
   const [absagenList, setAbsagenList] = useFirebase("absagen", []);
+  const [tauschAntraege] = useFirebase("schichttausch", []);
   const [, setNotif] = useFirebase("notifications", {});
 
   useEffect(() => {
@@ -827,6 +1058,16 @@ function ShiftRow({ s, userName, records, setNotifications }) {
 
   const alreadyAbgesagt = (Array.isArray(absagenList)?absagenList:[])
     .find(a => a.userName === userName && a.date === d);
+
+  // Tausch 신청 상태 확인
+  const myTausch = (Array.isArray(tauschAntraege)?tauschAntraege:[])
+    .find(t => t.initiator === userName && t.initiatorDate === d);
+  const tauschLabel = myTausch ? ({
+    ausstehend_bestaetigung: `🔄 Tausch-Anfrage an ${myTausch.partner} · Warte auf Bestätigung`,
+    ausstehend_manager:      `🔄 Tausch wartet auf Manager-Genehmigung`,
+    abgelehnt_partner:       `❌ Tausch von ${myTausch.partner} abgelehnt`,
+    genehmigt:               `✅ Tausch genehmigt`,
+  }[myTausch.status] || null) : null;
 
   function handleAbsagen(antrag) {
     setAbsagenList(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
@@ -862,6 +1103,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
           <div style={{fontSize:12,fontWeight:600,color:alreadyAbgesagt?C.red:C.text}}>
             {f}{t ? ` · ${t}` : ""}
             {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>🚫 Absage {alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
+          {tauschLabel && <div style={{fontSize:9,color:C.mintDark,marginTop:3,fontWeight:600}}>{tauschLabel}</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             {status==="ausstehend"&&!alreadyAbgesagt&&(
