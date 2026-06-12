@@ -288,22 +288,30 @@ function KalenderView({ csvCtx, userName, records, users }) {
   const [schedule] = useFirebase("schedule", {});
   const [planImg] = useFirebase("planImage", null);
 
+  // Firebase에서 온 schedule 값을 배열로 정규화
+  function normalizeShifts(val) {
+    if (!val) return [];
+    if (Array.isArray(val)) return val;
+    // Firebase가 {0:{...}, 1:{...}} 형태로 저장한 경우
+    return Object.values(val);
+  }
+
   // schedule 키 매칭: 여러 방식으로 시도
   const myShifts = React.useMemo(() => {
     if (!userName || !schedule) return [];
     const keys = Object.keys(schedule);
     // 1. 완전 일치
-    if (schedule[userName]) return schedule[userName];
+    if (schedule[userName]) return normalizeShifts(schedule[userName]);
     // 2. 대소문자 무시
     const lower = userName.toLowerCase();
     const k2 = keys.find(k => k.toLowerCase() === lower);
-    if (k2) return schedule[k2];
-    // 3. 이름이 "Yeaji Kwon"처럼 공백 포함이면 첫 번째 단어(firstName)로 시도
+    if (k2) return normalizeShifts(schedule[k2]);
+    // 3. 공백 포함 이름이면 첫 단어(firstName)로 시도
     const firstName = userName.split(" ")[0];
     if (firstName !== userName) {
-      if (schedule[firstName]) return schedule[firstName];
+      if (schedule[firstName]) return normalizeShifts(schedule[firstName]);
       const k3 = keys.find(k => k.toLowerCase() === firstName.toLowerCase());
-      if (k3) return schedule[k3];
+      if (k3) return normalizeShifts(schedule[k3]);
     }
     return [];
   }, [schedule, userName]);
@@ -1862,8 +1870,15 @@ function DienstplanUploadView({ records, users }) {
 
     const isPdf = file.type === "application/pdf";
 
+    // 파일 크기 체크 (PDF 20MB, 이미지 5MB)
+    const maxSize = isPdf ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setMsg({ type: "err", text: `❌ Datei zu groß (${(file.size/1024/1024).toFixed(1)}MB). Max: ${isPdf?"20MB":"5MB"}` });
+      return;
+    }
+
     setAnalyzing(true);
-    setMsg(null);
+    setMsg({ type: "info", text: "⏳ Analysiere… (kann 20–40 Sek. dauern)" });
 
     const b64 = await new Promise(res => {
       const r = new FileReader();
@@ -1896,25 +1911,34 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       : { type: "image", source: { type: "base64", media_type: file.type, data: b64 } };
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5",
-          max_tokens: 8000,
-          messages: [{
-            role: "user",
-            content: [ contentBlock, { type: "text", text: promptText } ]
-          }]
-        })
-      });
+      let res;
+      try {
+        res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "anthropic-dangerous-direct-browser-access": "true",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-6",
+            max_tokens: 8000,
+            messages: [{
+              role: "user",
+              content: [ contentBlock, { type: "text", text: promptText } ]
+            }]
+          })
+        });
+      } catch(fetchErr) {
+        throw new Error(`Netzwerkfehler: ${fetchErr.message}. Bitte API-Schlüssel prüfen und erneut versuchen.`);
+      }
 
-      if (!res.ok) throw new Error(`API ${res.status}`);
+      if (!res.ok) {
+        let errBody = "";
+        try { const j = await res.json(); errBody = j.error?.message || JSON.stringify(j); } catch{}
+        throw new Error(`API ${res.status}: ${errBody}`);
+      }
       const data = await res.json();
       const text = data.content.map(c => c.text || "").join("");
       const clean = text.replace(/```json|```/g, "").trim();
@@ -1935,7 +1959,16 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         throw new Error(`Raw: ${text.slice(0, 200)}`);
       }
 
-      // Firebase에 저장 (schedule + planImage)
+      // Firebase에 저장: 배열값을 인덱스 객체로 변환 (Firebase 배열 호환)
+      const parsedForFb = {};
+      for (const [name, shifts] of Object.entries(parsed)) {
+        parsedForFb[name] = Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]));
+      }
+      if (window._fbDb && window._fbRef && window._fbSet) {
+        window._fbSet(window._fbRef(window._fbDb, "schedule"), parsedForFb)
+          .then(()=>console.log("✅ schedule saved:", Object.keys(parsedForFb)))
+          .catch(e=>console.error("schedule save error:", e));
+      }
       setSchedule(parsed);
       // 이미지만 Firebase에 저장 (PDF는 저장 안 함)
       if (!isPdf && b64.length < 4000000) {
@@ -2120,7 +2153,11 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       // schedule swap
       if (window._fbDb && window._fbRef && window._fbSet && window._fbOnValue) {
         window._fbOnValue(window._fbRef(window._fbDb, "schedule"), snap => {
-          const sched = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
+          const raw = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
+          // Firebase 배열 → 실제 배열 정규화
+          const norm = (v) => !v ? [] : Array.isArray(v) ? v : Object.values(v);
+          const sched = {};
+          for (const [k,v] of Object.entries(raw)) sched[k] = norm(v);
           sched[antrag.initiator] = (sched[antrag.initiator]||[])
             .filter(s => (s.d||s.date) !== antrag.initiatorDate);
           sched[antrag.initiator] = [...(sched[antrag.initiator]||[]),
