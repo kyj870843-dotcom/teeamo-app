@@ -3894,7 +3894,12 @@ function App(){
     }
   }, [usersReady]);
 
-  const allReady = usersReady && recordsReady;
+  const [splashDone, setSplashDone] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSplashDone(true), 2000);
+    return () => clearTimeout(t);
+  }, []);
+  const allReady = usersReady && recordsReady && splashDone;
 
   function handleLogin(key){
     const u=(Array.isArray(users)?users:[]).find(x=>x.key===key);
