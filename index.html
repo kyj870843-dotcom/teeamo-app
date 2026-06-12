@@ -2372,24 +2372,22 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
 
 // ── ADMIN ANTRÄGE VIEW ────────────────────────────────────────────────────────
 // ── ANTRÄGE CARD (최상위 컴포넌트) ─────────────────────────────────────────
-function NachtragCard({ a, onToggle, isOpen, onDecide, onReopen }) {
-  const sc = a.status==="genehmigt" ? C.mintDark : a.status==="abgelehnt" ? C.red : C.yellow;
-  const sb = a.status==="genehmigt" ? C.mintLight : a.status==="abgelehnt" ? C.redLight : C.yellowLight;
-  const sl = a.status==="genehmigt" ? "Genehmigt" : a.status==="abgelehnt" ? "Abgelehnt" : "Offen";
-  const borderCol = a.status==="offen" ? C.yellow : a.status==="genehmigt" ? C.mint : C.border;
+function NachtragCard({ a, isOpen, onToggle, onDecide, onReopen }) {
+  var sc = a.status==="genehmigt" ? C.mintDark : a.status==="abgelehnt" ? C.red : C.yellow;
+  var sb = a.status==="genehmigt" ? C.mintLight : a.status==="abgelehnt" ? C.redLight : C.yellowLight;
+  var sl = a.status==="genehmigt" ? "Genehmigt" : a.status==="abgelehnt" ? "Abgelehnt" : "Offen";
+  var bc = a.status==="offen" ? C.yellow : a.status==="genehmigt" ? C.mint : C.border;
+  var dateStr = a.date ? new Date(a.date).toLocaleDateString("de-DE",{day:"numeric",month:"long"}) : "";
+  var filStr = a.filiale ? " - " + a.filiale : "";
+  var dateFull = a.date ? new Date(a.date).toLocaleDateString("de-DE") : "-";
   return (
-    <div style={{...S.card, marginBottom:8, padding:0, overflow:"hidden", border:"1.5px solid "+borderCol}}>
+    <div style={{...S.card, marginBottom:8, padding:0, overflow:"hidden", border:"1.5px solid "+bc}}>
       <button onClick={onToggle}
         style={{width:"100%", padding:"12px 14px", background:"none", border:"none", cursor:"pointer",
           display:"flex", justifyContent:"space-between", alignItems:"center"}}>
         <div style={{textAlign:"left"}}>
-          <div style={{fontSize:13, fontWeight:700, color:C.text}}>
-            {"Nachtrag – " + a.user}
-          </div>
-          <div style={{fontSize:11, color:C.muted}}>
-            {a.date ? new Date(a.date).toLocaleDateString("de-DE",{day:"numeric",month:"long"}) : ""}
-            {a.filiale ? " · " + a.filiale : ""}
-          </div>
+          <div style={{fontSize:13, fontWeight:700, color:C.text}}>{"Nachtrag - " + a.user}</div>
+          <div style={{fontSize:11, color:C.muted}}>{dateStr + filStr}</div>
         </div>
         <div style={{display:"flex", alignItems:"center", gap:8}}>
           <span style={{fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:99, color:sc, background:sb}}>{sl}</span>
@@ -2401,28 +2399,24 @@ function NachtragCard({ a, onToggle, isOpen, onDecide, onReopen }) {
           <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10}}>
             <div>
               <div style={{fontSize:9, color:C.muted}}>Datum</div>
-              <div style={{fontSize:13, fontWeight:700, color:C.text}}>
-                {a.date ? new Date(a.date).toLocaleDateString("de-DE") : "—"}
-              </div>
+              <div style={{fontSize:13, fontWeight:700, color:C.text}}>{dateFull}</div>
             </div>
             <div>
               <div style={{fontSize:9, color:C.muted}}>Filiale</div>
-              <div style={{fontSize:13, fontWeight:700, color:C.text}}>{a.filiale || "—"}</div>
+              <div style={{fontSize:13, fontWeight:700, color:C.text}}>{a.filiale || "-"}</div>
             </div>
             <div>
               <div style={{fontSize:9, color:C.muted}}>Einstempeln</div>
-              <div style={{fontSize:13, fontWeight:700, color:C.text}}>{a.ein || "—"}</div>
+              <div style={{fontSize:13, fontWeight:700, color:C.text}}>{a.ein || "-"}</div>
             </div>
             <div>
               <div style={{fontSize:9, color:C.muted}}>Ausstempeln</div>
-              <div style={{fontSize:13, fontWeight:700, color:C.text}}>{a.aus || "—"}</div>
+              <div style={{fontSize:13, fontWeight:700, color:C.text}}>{a.aus || "-"}</div>
             </div>
           </div>
           {a.grund && (
             <div style={{fontSize:11, color:C.text, background:C.bg, borderRadius:8,
-              padding:"8px 10px", marginBottom:10}}>
-              {a.grund}
-            </div>
+              padding:"8px 10px", marginBottom:10}}>{a.grund}</div>
           )}
           {a.status === "offen" ? (
             <div style={{display:"flex", gap:8}}>
@@ -2443,7 +2437,7 @@ function NachtragCard({ a, onToggle, isOpen, onDecide, onReopen }) {
               style={{width:"100%", padding:"8px", borderRadius:9,
                 border:"1px solid "+C.yellow, background:C.yellowLight,
                 color:"#b37400", fontWeight:700, fontSize:11, cursor:"pointer"}}>
-              Entscheidung ändern
+              Entscheidung andern
             </button>
           )}
         </div>
@@ -2454,36 +2448,42 @@ function NachtragCard({ a, onToggle, isOpen, onDecide, onReopen }) {
 
 function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard, setRecords, records }) {
   const [openId, setOpenId] = useState(null);
-
-  const offene = (Array.isArray(antraege) ? antraege : []).filter(a => a.status === "offen");
-  const done   = (Array.isArray(antraege) ? antraege : []).filter(a => a.status !== "offen");
-
-  const byDate = {};
-  done.forEach(a => {
-    const d = a.date || "";
+  var list = Array.isArray(antraege) ? antraege : [];
+  var offene = list.filter(a => a.status === "offen");
+  var done = list.filter(a => a.status !== "offen");
+  var byDate = {};
+  done.forEach(function(a) {
+    var d = a.date || "";
     if (!byDate[d]) byDate[d] = [];
     byDate[d].push(a);
   });
-  const dateKeys = Object.keys(byDate).sort((a,b) => b.localeCompare(a));
+  var dateKeys = Object.keys(byDate).sort(function(a,b){ return b.localeCompare(a); });
 
   function reopen(id) {
-    setAntraege(prev => (Array.isArray(prev)?prev:[]).map(a => a.id===id ? {...a, status:"offen"} : a));
+    setAntraege(function(prev) {
+      return (Array.isArray(prev)?prev:[]).map(function(a){ return a.id===id ? {...a,status:"offen"} : a; });
+    });
   }
-
   function decide(a, ok) {
-    setAntraege(prev => (Array.isArray(prev)?prev:[]).map(x => x.id===a.id ? {...x, status:ok?"genehmigt":"abgelehnt"} : x));
+    setAntraege(function(prev) {
+      return (Array.isArray(prev)?prev:[]).map(function(x){ return x.id===a.id ? {...x,status:ok?"genehmigt":"abgelehnt"} : x; });
+    });
     if (ok) {
-      const exists = records.find(r => r.user===a.user && r.date===a.date && r.typ==="nachtrag");
+      var exists = records.find(function(r){ return r.user===a.user && r.date===a.date && r.typ==="nachtrag"; });
       if (!exists) {
-        setRecords(prev => [...(Array.isArray(prev)?prev:[]), {
-          id:Date.now(), user:a.user, date:a.date, filiale:a.filiale,
-          ein:a.ein, aus:a.aus, note:a.grund||"Nachtrag genehmigt", typ:"nachtrag"
-        }]);
+        setRecords(function(prev) {
+          return [...(Array.isArray(prev)?prev:[]), {
+            id:Date.now(), user:a.user, date:a.date, filiale:a.filiale,
+            ein:a.ein, aus:a.aus, note:a.grund||"Nachtrag genehmigt", typ:"nachtrag"
+          }];
+        });
       }
     } else {
-      setRecords(prev => (Array.isArray(prev)?prev:[]).filter(
-        r => !(r.user===a.user && r.date===a.date && r.typ==="nachtrag")
-      ));
+      setRecords(function(prev) {
+        return (Array.isArray(prev)?prev:[]).filter(function(r){
+          return !(r.user===a.user && r.date===a.date && r.typ==="nachtrag");
+        });
+      });
     }
   }
 
@@ -2491,73 +2491,69 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
     <div style={{padding:"14px"}}>
       <div style={{fontSize:10, fontWeight:700, color:C.red, marginBottom:8,
         textTransform:"uppercase", letterSpacing:".05em"}}>
-        {"Offene Anträge (" + offene.length + ")"}
+        {"Offene Antrage (" + offene.length + ")"}
       </div>
-
       {offene.length === 0 ? (
         <div style={{...S.card, textAlign:"center", color:C.muted, fontSize:12, padding:"18px", marginBottom:14}}>
-          Keine offenen Anträge
+          Keine offenen Antrage
         </div>
-      ) : offene.map(a => (
-        <NachtragCard
-          key={a.id}
-          a={a}
-          isOpen={openId === a.id}
-          onToggle={() => setOpenId(openId===a.id ? null : a.id)}
-          onDecide={(ok) => decide(a, ok)}
-          onReopen={() => reopen(a.id)}
-        />
-      ))}
-
+      ) : offene.map(function(a) {
+        return (
+          <NachtragCard key={a.id} a={a}
+            isOpen={openId===a.id}
+            onToggle={function(){ setOpenId(openId===a.id ? null : a.id); }}
+            onDecide={function(ok){ decide(a,ok); }}
+            onReopen={function(){ reopen(a.id); }}
+          />
+        );
+      })}
       {done.length > 0 && (
         <div style={{marginTop:16}}>
           <div style={{fontSize:10, fontWeight:700, color:C.muted, marginBottom:8,
             textTransform:"uppercase", letterSpacing:".05em"}}>
-            Bearbeitete Anträge
+            Bearbeitete Antrage
           </div>
-          {done.filter(a=>a.status==="abgelehnt").length > 0 && (
+          {done.filter(function(a){return a.status==="abgelehnt";}).length > 0 && (
             <div style={{...S.card, marginBottom:10, display:"flex", gap:20, padding:"10px 14px"}}>
               <div style={{textAlign:"center"}}>
                 <div style={{fontSize:18, fontWeight:800, color:C.red}}>
-                  {done.filter(a=>a.status==="abgelehnt").length}
+                  {done.filter(function(a){return a.status==="abgelehnt";}).length}
                 </div>
                 <div style={{fontSize:9, color:C.muted}}>Abgelehnt</div>
               </div>
               <div style={{textAlign:"center"}}>
                 <div style={{fontSize:18, fontWeight:800, color:C.mintDark}}>
-                  {done.filter(a=>a.status==="genehmigt").length}
+                  {done.filter(function(a){return a.status==="genehmigt";}).length}
                 </div>
                 <div style={{fontSize:9, color:C.muted}}>Genehmigt</div>
               </div>
             </div>
           )}
-          {dateKeys.map(d => (
-            <div key={d} style={{marginBottom:4}}>
-              <div style={{fontSize:10, color:C.muted, fontWeight:600, marginBottom:4, marginTop:8}}>
-                {d ? new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"long",year:"numeric"}) : "—"}
+          {dateKeys.map(function(d) {
+            var label = d ? new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"long",year:"numeric"}) : "-";
+            return (
+              <div key={d} style={{marginBottom:4}}>
+                <div style={{fontSize:10, color:C.muted, fontWeight:600, marginBottom:4, marginTop:8}}>{label}</div>
+                {byDate[d].map(function(a) {
+                  return (
+                    <NachtragCard key={a.id} a={a}
+                      isOpen={openId===a.id}
+                      onToggle={function(){ setOpenId(openId===a.id ? null : a.id); }}
+                      onDecide={function(ok){ decide(a,ok); }}
+                      onReopen={function(){ reopen(a.id); }}
+                    />
+                  );
+                })}
               </div>
-              {byDate[d].map(a => (
-                <NachtragCard
-                  key={a.id}
-                  a={a}
-                  isOpen={openId === a.id}
-                  onToggle={() => setOpenId(openId===a.id ? null : a.id)}
-                  onDecide={(ok) => decide(a, ok)}
-                  onReopen={() => reopen(a.id)}
-                />
-              ))}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
-
       {myArchiv && myArchiv.length > 0 && (
         <div style={{marginTop:16}}>
           <div style={{fontSize:10, fontWeight:700, color:C.muted, marginBottom:8,
-            textTransform:"uppercase", letterSpacing:".05em"}}>
-            Archiv
-          </div>
-          {myArchiv.map(([key,a]) => renderErledigtCard(key, a))}
+            textTransform:"uppercase", letterSpacing:".05em"}}>Archiv</div>
+          {myArchiv.map(function(entry) { return renderErledigtCard(entry[0], entry[1]); })}
         </div>
       )}
     </div>
