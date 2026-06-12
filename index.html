@@ -2372,7 +2372,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
 
 // ── ADMIN ANTRÄGE VIEW ────────────────────────────────────────────────────────
 function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard, setRecords, records }) {
-  const [openId, setOpenId] = useState(null);
+  const [openId, setOpenId] = React.useState(null);
 
   const offene = (Array.isArray(antraege)?antraege:[]).filter(a=>a.status==="offen");
   const done   = (Array.isArray(antraege)?antraege:[]).filter(a=>a.status!=="offen");
@@ -2384,9 +2384,9 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
   function reopen(id) {
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(a=>a.id===id?{...a,status:"offen"}:a));
   }
+
   function decide(a, ok) {
-    const newStatus = ok?"genehmigt":"abgelehnt";
-    setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:newStatus}:x));
+    setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:ok?"genehmigt":"abgelehnt"}:x));
     if (ok) {
       const exists = records.find(r=>r.user===a.user&&r.date===a.date&&r.typ==="nachtrag");
       if (!exists) {
@@ -2402,22 +2402,21 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
     }
   }
 
-  // NachtragCard를 인라인 렌더 함수로 (컴포넌트 아님)
-  function renderCard(a) {
+  function CardItem({a}) {
     const isOpen = openId===a.id;
     const sc = a.status==="genehmigt"?C.mintDark:a.status==="abgelehnt"?C.red:C.yellow;
     const sb = a.status==="genehmigt"?C.mintLight:a.status==="abgelehnt"?C.redLight:C.yellowLight;
-    const sl = a.status==="genehmigt"?"✅ Genehmigt":a.status==="abgelehnt"?"❌ Abgelehnt":"⏳ Offen";
+    const sl = a.status==="genehmigt"?"Genehmigt":a.status==="abgelehnt"?"Abgelehnt":"Offen";
     const border = a.status==="offen"?C.yellow:a.status==="genehmigt"?C.mint:C.border;
     return (
-      <div key={a.id} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden",border:`1.5px solid ${border}`}}>
+      <div style={{...S.card,marginBottom:8,padding:0,overflow:"hidden",border:"1.5px solid "+border}}>
         <button onClick={()=>setOpenId(isOpen?null:a.id)}
           style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
             display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{textAlign:"left"}}>
-            <div style={{fontSize:13,fontWeight:700,color:C.text}}>🕐 {a.user}</div>
+            <div style={{fontSize:13,fontWeight:700,color:C.text}}>{"Nachtrag - "+a.user}</div>
             <div style={{fontSize:11,color:C.muted}}>
-              {a.date?new Date(a.date).toLocaleDateString("de-DE",{day:"numeric",month:"long"}):""} · {a.filiale}
+              {a.date?new Date(a.date).toLocaleDateString("de-DE",{day:"numeric",month:"long"}):""}{a.filiale?" - "+a.filiale:""}
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -2426,38 +2425,45 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
           </div>
         </button>
         {isOpen&&(
-          <div style={{borderTop:`1px solid ${C.border}`,padding:"12px 14px"}}>
+          <div style={{borderTop:"1px solid "+C.border,padding:"12px 14px"}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-              {[["Datum",a.date?new Date(a.date).toLocaleDateString("de-DE"):"—"],
-                ["Filiale",a.filiale||"—"],
-                ["Ein",a.ein||"—"],["Aus",a.aus||"—"]].map(([l,v])=>(
-                <div key={l}>
-                  <div style={{fontSize:9,color:C.muted}}>{l}</div>
-                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{v}</div>
-                </div>
-              ))}
+              <div>
+                <div style={{fontSize:9,color:C.muted}}>Datum</div>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.date?new Date(a.date).toLocaleDateString("de-DE"):"—"}</div>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:C.muted}}>Filiale</div>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.filiale||"—"}</div>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:C.muted}}>Einstempeln</div>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.ein||"—"}</div>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:C.muted}}>Ausstempeln</div>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.aus||"—"}</div>
+              </div>
             </div>
             {a.grund&&(
               <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>
-                📌 "{a.grund}"
+                {a.grund}
               </div>
             )}
-            {a.status==="offen"&&(
+            {a.status==="offen"?(
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>decide(a,false)}
-                  style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                  style={{flex:1,padding:"9px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
                   Ablehnen
                 </button>
                 <button onClick={()=>decide(a,true)}
-                  style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
-                  ✅ Genehmigen
+                  style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
+                  Genehmigen
                 </button>
               </div>
-            )}
-            {a.status!=="offen"&&(
+            ):(
               <button onClick={()=>reopen(a.id)}
-                style={{width:"100%",padding:"8px",borderRadius:9,border:`1px solid ${C.yellow}`,background:C.yellowLight,color:"#b37400",fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                🔄 Entscheidung ändern
+                style={{width:"100%",padding:"8px",borderRadius:9,border:"1px solid "+C.yellow,background:C.yellowLight,color:"#b37400",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                Entscheidung andern
               </button>
             )}
           </div>
@@ -2469,18 +2475,18 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
   return (
     <div style={{padding:"14px"}}>
       <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
-        ⏳ Offene Anträge ({offene.length})
+        {"Offene Antraege ("+offene.length+")"}
       </div>
       {offene.length===0?(
         <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"18px",marginBottom:14}}>
-          Keine offenen Anträge ✅
+          Keine offenen Antraege
         </div>
-      ):offene.map(a=>renderCard(a))}
+      ):offene.map(a=><CardItem key={a.id} a={a}/>)}
 
       {done.length>0&&(
         <div style={{marginTop:16}}>
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
-            📂 Bearbeitete Anträge
+            Bearbeitete Antraege
           </div>
           {done.filter(a=>a.status==="abgelehnt").length>0&&(
             <div style={{...S.card,marginBottom:10,display:"flex",gap:20,padding:"10px 14px"}}>
@@ -2497,9 +2503,9 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
           {dateKeys.map(d=>(
             <div key={d} style={{marginBottom:4}}>
               <div style={{fontSize:10,color:C.muted,fontWeight:600,marginBottom:4,marginTop:8}}>
-                📅 {d?new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"long",year:"numeric"}):"—"}
+                {d?new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"long",year:"numeric"}):"—"}
               </div>
-              {byDate[d].map(a=>renderCard(a))}
+              {byDate[d].map(a=><CardItem key={a.id} a={a}/>)}
             </div>
           ))}
         </div>
@@ -2507,7 +2513,9 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
 
       {myArchiv&&myArchiv.length>0&&(
         <div style={{marginTop:16}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🗂 Archiv</div>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
+            Archiv
+          </div>
           {myArchiv.map(([key,a])=>renderErledigtCard(key,a))}
         </div>
       )}
@@ -3535,7 +3543,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       <div style={S.nav}>
         {[{id:"uebersicht",icon:"👥",lbl:"Übersicht"},
           {id:"dienstplan",icon:"📋",lbl:"Dienstplan"},
-          {id:"antraege",icon:"📂",lbl:"Vorgänge"},
+          {id:"antraege",icon:"📂",lbl:"Anträge"},
           {id:"benachrichtigungen",icon:"🔔",lbl:`Alarm${alarmCount>0?" ("+alarmCount+")":""}` },
           {id:"statistik",icon:"📊",lbl:"Statistik"}].map(t=>(
           <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
