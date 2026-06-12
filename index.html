@@ -1223,7 +1223,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
               style={{...S.input,fontSize:15}}/>
             {regV&&(
               <div style={{marginTop:6,padding:"8px 11px",borderRadius:9,background:C.mintLight,border:`1px solid ${C.mint}`,fontSize:12,color:C.mintDark,fontWeight:700}}>
-                Vorschau: Hallo, {regV} 님!
+                Vorschau: Hallo, {regV}!
               </div>
             )}
           </div>
@@ -1510,7 +1510,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           <input value={vorname} onChange={e=>setVorname(e.target.value)}
             placeholder="Vorname (mit Emoji)"
             style={{...S.input,fontSize:15,marginBottom:10}}/>
-          {vorname&&<div style={{fontSize:11,color:C.mintDark,marginBottom:10}}>Vorschau: Hallo, {vorname} 님!</div>}
+          {vorname&&<div style={{fontSize:11,color:C.mintDark,marginBottom:10}}>Vorschau: Hallo, {vorname}!</div>}
           <div style={{fontSize:9,color:C.muted,marginBottom:10}}>
             ℹ️ Der Name kann jederzeit hier geändert werden.
           </div>
@@ -1609,11 +1609,16 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         </div>
 
         {/* 로그아웃 */}
-        <button onClick={onLogout}
-          style={{width:"100%",padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,
-            background:"#fff",color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer",marginBottom:30}}>
-          Abmelden
-        </button>
+        <div style={{marginBottom:30}}>
+          <button onClick={onLogout}
+            style={{width:"100%",padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,
+              background:"#fff",color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer",marginBottom:6}}>
+            Abmelden
+          </button>
+          <div style={{fontSize:9,color:C.muted,textAlign:"center",lineHeight:1.5}}>
+            ℹ️ Aktive Schichten bleiben bis zum Ausstempeln gespeichert.
+          </div>
+        </div>
 
       </div>
     </div>
@@ -1724,7 +1729,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
             <div style={{fontSize:11,opacity:.45,marginBottom:3,letterSpacing:".06em",textTransform:"uppercase"}}>teeamo Münster</div>
-            <div style={{fontSize:20,fontWeight:800}}>Hallo, {displayName} 님!</div>
+            <div style={{fontSize:20,fontWeight:800}}>Hallo, {displayName}!</div>
             <div style={{fontSize:11,opacity:.5,marginTop:1}}>{user.role}</div>
             {!user.infektionsschutz&&(
               <div style={{fontSize:10,color:"#ffb347",fontWeight:700,marginTop:4}}>
@@ -2642,11 +2647,22 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
 
   return(
     <div style={{background:C.bg,minHeight:"100vh",paddingBottom:80}}>
+      {showMgrSettings&&(
+        <SettingsView
+          user={manager}
+          users={users}
+          setUsers={setUsers}
+          userKey={userKey}
+          onLogout={onLogout}
+          onClose={()=>setShowMgrSettings(false)}
+          isAdmin={true}
+        />
+      )}
       <div style={S.hdr}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
             <div style={{fontSize:11,opacity:.45,marginBottom:3,letterSpacing:".06em",textTransform:"uppercase"}}>teeamo · Admin</div>
-            <div style={{fontSize:20,fontWeight:800}}>Hallo, {manager?.vorname||"Manager"} 님!</div>
+            <div style={{fontSize:20,fontWeight:800}}>Hallo, {manager?.vorname||"Manager"}!</div>
             <div style={{fontSize:11,opacity:.5,marginTop:1}}>Admin</div>
           </div>
           <button onClick={()=>setShowMgrSettings(true)}
