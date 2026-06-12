@@ -544,34 +544,24 @@ function MeineSchichtenSection({ userName, myShifts, records }) {
         const antr = myAntraege.filter(a => a.date === d);
         const status = shift ? getShiftStatus({ time: shift.t||shift.time }, rec) : null;
 
-        const sc = status ? ({
-          gearbeitet: { bg: C.mintLight,   border: C.mint,   color: C.mintDark, label: "✅ Gearbeitet" },
-          prüfen:     { bg: C.yellowLight,  border: C.yellow, color: C.yellow,   label: "⚠️ Prüfen"    },
-          aktiv:      { bg: "#FFF9E6",      border: C.yellow, color: C.yellow,   label: "🟡 Im Dienst" },
-          ausstehend: { bg: C.bg,           border: C.border, color: C.muted,    label: "⏳ Ausstehend"},
-        }[status] || { bg: C.bg, border: C.border, color: C.muted, label: "⏳ Ausstehend" }) : null;
-
         return (
-          <div key={d} style={{marginBottom:10}}>
+          <div key={d} style={{marginBottom:14}}>
             {/* 날짜 헤더 */}
-            <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:5}}>
-              {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"numeric"})}
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:6}}>
+              {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"2-digit"})}
             </div>
 
             {/* 근무 카드 */}
-            {shift && sc && (
+            {shift && (
               <ShiftRow s={shift} userName={userName} records={records} setNotifications={setNotifications}/>
             )}
 
-            {/* 실제 기록 (shift 없이 출근한 경우) */}
+            {/* shift 없이 출근한 경우 */}
             {!shift && rec && (
               <div style={{padding:"9px 12px",borderRadius:10,marginBottom:5,
                 background:C.mintLight,border:`1px solid ${C.mint}`,
                 display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:11,fontWeight:700,color:C.text}}>{rec.filiale}</div>
-                  <div style={{fontSize:10,color:C.muted}}>{rec.ein} → {rec.aus||"läuft"}</div>
-                </div>
+                <div style={{fontSize:11,fontWeight:600,color:C.text}}>{rec.filiale} · {rec.ein} – {rec.aus||"läuft"}</div>
                 <span style={{fontSize:11,fontWeight:700,color:C.mintDark}}>{stdLabel(rec.ein,rec.aus)}</span>
               </div>
             )}
@@ -653,7 +643,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const d = s.d || s.date;
   const f = s.f || s.filiale;
   const t = s.t || s.time;
-  const actualRec = records?.find(r => r.user === userName && r.date === d);
+  const actualRec = (Array.isArray(records)?records:[]).find(r => r.user === userName && r.date === d);
   const status = getShiftStatus({ time: t }, actualRec);
   const [showAbsagen, setShowAbsagen] = useState(false);
   const [absagenList, setAbsagenList] = useFirebase("absagen", []);
@@ -674,7 +664,6 @@ function ShiftRow({ s, userName, records, setNotifications }) {
     }
   }, [status]);
 
-  // 이미 absagen 신청했는지 확인
   const alreadyAbgesagt = (Array.isArray(absagenList)?absagenList:[])
     .find(a => a.userName === userName && a.date === d);
 
@@ -690,45 +679,58 @@ function ShiftRow({ s, userName, records, setNotifications }) {
     }));
   }
 
-  const sc = {
-    gearbeitet: { bg: C.mintLight,  border: C.mint,   color: C.mintDark, label: "✅ Gearbeitet" },
-    prüfen:     { bg: C.yellowLight, border: C.yellow, color: C.yellow,   label: "⚠️ Prüfen"    },
-    aktiv:      { bg: "#FFF9E6",     border: C.yellow, color: C.yellow,   label: "🟡 Im Dienst" },
-    ausstehend: { bg: C.bg,          border: C.border, color: C.muted,    label: "⏳ Ausstehend"},
-  }[status] || { bg: C.bg, border: C.border, color: C.muted, label: "⏳ Ausstehend" };
+  // 상태별 배지 색상
+  const badge = {
+    gearbeitet: { color: C.mintDark, bg: C.mintLight, label: "Gearbeitet" },
+    prüfen:     { color: C.yellow,   bg: C.yellowLight,label: "Prüfen"    },
+    aktiv:      { color: C.yellow,   bg: "#FFF9E6",    label: "Im Dienst" },
+    ausstehend: { color: C.muted,    bg: C.bg,         label: "Ausstehend"},
+  }[alreadyAbgesagt ? "ausstehend" : status] || { color: C.muted, bg: C.bg, label: "Ausstehend" };
 
   return (
     <>
-      <div onClick={()=>{ if(status==="ausstehend"&&!alreadyAbgesagt) setShowAbsagen(true); }}
-        style={{display:"flex",alignItems:"center",justifyContent:"space-between",
-          padding:"10px 12px",borderRadius:10,marginBottom:6,
-          background:alreadyAbgesagt?C.redLight:sc.bg,
-          border:`1px solid ${alreadyAbgesagt?C.red:sc.border}`,
-          cursor:status==="ausstehend"&&!alreadyAbgesagt?"pointer":"default"}}>
-        <div>
-          <div style={{fontSize:12,fontWeight:700,color:C.text}}>
-            {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+      <div style={{borderRadius:10,overflow:"hidden",marginBottom:6,
+        border:`1px solid ${alreadyAbgesagt?C.red:status==="aktiv"||status==="gearbeitet"?C.mint:C.border}`}}>
+
+        {/* 계획된 근무 행 */}
+        <div onClick={()=>{ if(status==="ausstehend"&&!alreadyAbgesagt) setShowAbsagen(true); }}
+          style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+            padding:"10px 12px",
+            background:alreadyAbgesagt?C.redLight:C.card,
+            cursor:status==="ausstehend"&&!alreadyAbgesagt?"pointer":"default"}}>
+          <div style={{fontSize:12,fontWeight:600,color:alreadyAbgesagt?C.red:C.text}}>
+            {f}{t ? ` · ${t}` : ""}
+            {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>🚫 Absage {alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
           </div>
-          <div style={{fontSize:10,color:C.muted,marginTop:1}}>{f}{t?` · ${t}`:""}</div>
-          {status==="prüfen"&&actualRec&&(
-            <div style={{fontSize:9,color:C.yellow,marginTop:2}}>Geplant: {t} · Gearbeitet: {actualRec.ein}–{actualRec.aus}</div>
-          )}
-          {alreadyAbgesagt&&(
-            <div style={{fontSize:9,color:C.red,marginTop:2,fontWeight:600}}>🚫 Absage beantragt · {alreadyAbgesagt.status==="offen"?"Ausstehend":alreadyAbgesagt.status==="genehmigt"?"Genehmigt":"Abgelehnt"}</div>
-          )}
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            {status==="ausstehend"&&!alreadyAbgesagt&&(
+              <span style={{fontSize:8,color:C.muted}}>tippen</span>
+            )}
+            <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
+              color:alreadyAbgesagt?C.red:badge.color,
+              background:alreadyAbgesagt?"#fff":badge.bg,
+              border:`1px solid ${alreadyAbgesagt?C.red:badge.color}`}}>
+              {alreadyAbgesagt?"🚫 Abgesagt":badge.label}
+            </span>
+          </div>
         </div>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
-          <span style={{fontSize:9,fontWeight:700,padding:"4px 9px",borderRadius:99,
-            color:alreadyAbgesagt?C.red:sc.color,
-            background:"#fff",
-            border:`1px solid ${alreadyAbgesagt?C.red:sc.border}`}}>
-            {alreadyAbgesagt?"🚫 Abgesagt":sc.label}
-          </span>
-          {status==="ausstehend"&&!alreadyAbgesagt&&(
-            <span style={{fontSize:8,color:C.muted}}>Tippen zum Absagen</span>
-          )}
-        </div>
+
+        {/* 실제 기록 행 (출근했을 때만) */}
+        {actualRec && (
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+            padding:"8px 12px",
+            background:status==="gearbeitet"?C.mintLight:status==="prüfen"?C.yellowLight:"#FFF9E6",
+            borderTop:`1px dashed ${status==="gearbeitet"?C.mint:C.yellow}`}}>
+            <div style={{fontSize:11,color:status==="gearbeitet"?C.mintDark:C.yellow,fontWeight:600}}>
+              {f} · {actualRec.ein}–{actualRec.aus||"läuft"}
+            </div>
+            <span style={{fontSize:11,fontWeight:700,color:status==="gearbeitet"?C.mintDark:C.yellow}}>
+              {actualRec.aus ? stdLabel(actualRec.ein, actualRec.aus) : "🟡"}
+            </span>
+          </div>
+        )}
       </div>
+
       {showAbsagen&&(
         <AbsagenModal shift={s} userName={userName}
           onClose={()=>setShowAbsagen(false)} onSubmit={handleAbsagen}/>
