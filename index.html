@@ -391,18 +391,37 @@ function getShiftStatus(shift, actualRec) {
 
 // ── SCHICHTTAUSCH MODAL ────────────────────────────────────────────────────────
 function SchichttauschModal({ userName, myShifts, users, onClose }) {
-  const [step, setStep] = useState(1); // 1:내 근무 선택, 2:상대방 선택, 3:상대 근무 선택, 4:사유
+  const [step, setStep] = useState(1);
   const [myShift, setMyShift] = useState(null);
   const [targetUser, setTargetUser] = useState(null);
   const [targetShift, setTargetShift] = useState(null);
   const [grund, setGrund] = useState("");
   const [err, setErr] = useState("");
+  const [sheetHeight, setSheetHeight] = useState(52); // vh
+  const dragStartY = useRef(null);
+  const dragStartH = useRef(null);
   const [schedule] = useFirebase("schedule", {});
   const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
   const [, setNotifications] = useFirebase("notifications", {});
 
   const empList = (users||[]).filter(u => !MANAGERS.includes(u.key) && u.vorname !== userName);
   const targetShifts = targetUser ? (schedule[targetUser.vorname] || []) : [];
+
+  function onDragStart(e) {
+    dragStartY.current = e.touches ? e.touches[0].clientY : e.clientY;
+    dragStartH.current = sheetHeight;
+  }
+  function onDragMove(e) {
+    if (dragStartY.current == null) return;
+    const y = e.touches ? e.touches[0].clientY : e.clientY;
+    const dy = dragStartY.current - y;
+    const newH = Math.min(92, Math.max(30, dragStartH.current + (dy / window.innerHeight * 100)));
+    setSheetHeight(newH);
+  }
+  function onDragEnd() {
+    if (sheetHeight < 35) onClose();
+    dragStartY.current = null;
+  }
 
   function doSubmit() {
     if (!grund.trim()) { setErr("Bitte einen Grund angeben."); return; }
@@ -417,13 +436,9 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
       partnerDate: targetShift.d||targetShift.date,
       partnerFiliale: targetShift.f||targetShift.filiale,
       partnerTime: targetShift.t||targetShift.time,
-      grund,
-      partnerBestaetigt: false,
-      ts: Date.now(),
+      grund, partnerBestaetigt: false, ts: Date.now(),
     };
     setTauschAntraege(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
-
-    // 상대방에게 수락 요청 알림
     const zustaendig = antrag.initiatorFiliale === "Teenjoy" ? "teddy" : "yeaji";
     setNotifications(prev => ({
       ...(prev||{}),
@@ -441,139 +456,151 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
   const steps = ["Meine Schicht","Partner","Partner-Schicht","Senden"];
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
-      <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))",maxHeight:"90vh",overflowY:"auto"}}>
-        <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 16px"}}/>
+    <div style={{position:"fixed",inset:0,zIndex:300}}
+      onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
+      {/* 반투명 배경 */}
+      <div style={{position:"absolute",inset:0,background:"rgba(20,20,20,.4)"}}/>
 
-        {/* 스텝 인디케이터 */}
-        <div style={{display:"flex",gap:4,marginBottom:16}}>
-          {steps.map((s,i)=>(
-            <div key={i} style={{flex:1,height:3,borderRadius:99,
-              background:i+1<=step?C.mint:C.border,transition:"background .2s"}}/>
-          ))}
+      {/* 바텀시트 */}
+      <div style={{
+        position:"absolute", bottom:0, left:0, right:0,
+        height:`${sheetHeight}vh`,
+        background:C.card,
+        borderRadius:"22px 22px 0 0",
+        display:"flex", flexDirection:"column",
+        boxShadow:"0 -4px 24px rgba(0,0,0,.15)",
+        transition:dragStartY.current?"none":"height .2s",
+      }}>
+        {/* 드래그 핸들 */}
+        <div
+          onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}
+          onMouseDown={onDragStart} onMouseMove={onDragMove} onMouseUp={onDragEnd}
+          style={{padding:"14px 22px 8px",cursor:"ns-resize",flexShrink:0}}>
+          <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto"}}/>
         </div>
 
-        <div style={{fontSize:15,fontWeight:800,color:C.text,marginBottom:4}}>🔄 Schichttausch</div>
-        <div style={{fontSize:11,color:C.muted,marginBottom:14}}>
-          {step===1&&"Welche deiner Schichten möchtest du tauschen?"}
-          {step===2&&"Mit wem möchtest du tauschen?"}
-          {step===3&&`Welche Schicht von ${targetUser?.vorname} möchtest du übernehmen?`}
-          {step===4&&"Zusammenfassung & Grund"}
-        </div>
-
-        {/* Step 1: 내 근무 선택 */}
-        {step===1&&(
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {myShifts.map((s,i)=>{
-              const d=s.d||s.date; const f=s.f||s.filiale; const t=s.t||s.time;
-              const isSel=myShift===s;
-              return(
-                <button key={i} onClick={()=>setMyShift(s)}
-                  style={{padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
-                    border:`2px solid ${isSel?C.mint:C.border}`,background:isSel?C.mintLight:"#fff"}}>
-                  <div style={{fontSize:12,fontWeight:700,color:isSel?C.mintDark:C.text}}>
-                    {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
-                  </div>
-                  <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Step 2: 상대방 선택 */}
-        {step===2&&(
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {empList.map(u=>(
-              <button key={u.key} onClick={()=>setTargetUser(u)}
-                style={{padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
-                  display:"flex",alignItems:"center",gap:10,
-                  border:`2px solid ${targetUser?.key===u.key?C.mint:C.border}`,
-                  background:targetUser?.key===u.key?C.mintLight:"#fff"}}>
-                <div style={{width:32,height:32,borderRadius:"50%",background:C.navy,
-                  display:"flex",alignItems:"center",justifyContent:"center",
-                  fontWeight:800,fontSize:11,color:"#fff",flexShrink:0}}>{u.kuerzel}</div>
-                <span style={{fontSize:13,fontWeight:700,color:targetUser?.key===u.key?C.mintDark:C.text}}>{u.vorname}</span>
-              </button>
+        {/* 헤더 */}
+        <div style={{padding:"0 22px 10px",flexShrink:0}}>
+          <div style={{display:"flex",gap:4,marginBottom:10}}>
+            {steps.map((s,i)=>(
+              <div key={i} style={{flex:1,height:3,borderRadius:99,
+                background:i+1<=step?C.mint:C.border,transition:"background .2s"}}/>
             ))}
           </div>
-        )}
-
-        {/* Step 3: 상대 근무 선택 */}
-        {step===3&&(
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {targetShifts.length===0
-              ? <div style={{textAlign:"center",color:C.muted,padding:"20px",fontSize:12}}>
-                  {targetUser?.vorname} hat keine geplanten Schichten.
-                </div>
-              : targetShifts.map((s,i)=>{
-                  const d=s.d||s.date; const f=s.f||s.filiale; const t=s.t||s.time;
-                  const isSel=targetShift===s;
-                  return(
-                    <button key={i} onClick={()=>setTargetShift(s)}
-                      style={{padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
-                        border:`2px solid ${isSel?C.mint:C.border}`,background:isSel?C.mintLight:"#fff"}}>
-                      <div style={{fontSize:12,fontWeight:700,color:isSel?C.mintDark:C.text}}>
-                        {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
-                      </div>
-                      <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
-                    </button>
-                  );
-                })
-            }
+          <div style={{fontSize:14,fontWeight:800,color:C.text}}>🔄 Schichttausch</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:2}}>
+            {step===1&&"Welche Schicht möchtest du tauschen?"}
+            {step===2&&"Mit wem möchtest du tauschen?"}
+            {step===3&&`Welche Schicht von ${targetUser?.vorname}?`}
+            {step===4&&"Zusammenfassung & Grund"}
           </div>
-        )}
+        </div>
 
-        {/* Step 4: 요약 + 사유 */}
-        {step===4&&(
-          <div>
-            <div style={{...S.card,background:C.mintLight,border:`1px solid ${C.mint}`,marginBottom:12}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>TAUSCH ÜBERSICHT</div>
-              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
-                <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
-                  <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{userName} gibt ab:</div>
-                  <div style={{fontSize:11,fontWeight:700,color:C.text}}>
-                    {new Date(myShift?.d||myShift?.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
-                  </div>
-                  <div style={{fontSize:10,color:C.muted}}>{myShift?.f||myShift?.filiale}</div>
+        {/* 스크롤 콘텐츠 */}
+        <div style={{flex:1,overflowY:"auto",padding:"0 22px",WebkitOverflowScrolling:"touch"}}>
+
+          {step===1&&myShifts.map((s,i)=>{
+            const d=s.d||s.date; const f=s.f||s.filiale; const t=s.t||s.time;
+            return(
+              <button key={i} onClick={()=>setMyShift(s)}
+                style={{width:"100%",padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
+                  marginBottom:6, display:"block",
+                  border:`2px solid ${myShift===s?C.mint:C.border}`,
+                  background:myShift===s?C.mintLight:"#fff"}}>
+                <div style={{fontSize:12,fontWeight:700,color:myShift===s?C.mintDark:C.text}}>
+                  {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                 </div>
-                <div style={{fontSize:18}}>⇄</div>
-                <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
-                  <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{targetUser?.vorname} gibt ab:</div>
-                  <div style={{fontSize:11,fontWeight:700,color:C.text}}>
-                    {new Date(targetShift?.d||targetShift?.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+              </button>
+            );
+          })}
+
+          {step===2&&empList.map(u=>(
+            <button key={u.key} onClick={()=>setTargetUser(u)}
+              style={{width:"100%",padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
+                marginBottom:6, display:"flex", alignItems:"center", gap:10,
+                border:`2px solid ${targetUser?.key===u.key?C.mint:C.border}`,
+                background:targetUser?.key===u.key?C.mintLight:"#fff"}}>
+              <div style={{width:32,height:32,borderRadius:"50%",background:C.navy,flexShrink:0,
+                display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,color:"#fff"}}>
+                {u.kuerzel}
+              </div>
+              <span style={{fontSize:13,fontWeight:700,color:targetUser?.key===u.key?C.mintDark:C.text}}>{u.vorname}</span>
+            </button>
+          ))}
+
+          {step===3&&(targetShifts.length===0
+            ? <div style={{textAlign:"center",color:C.muted,padding:"20px",fontSize:12}}>
+                {targetUser?.vorname} hat keine geplanten Schichten.
+              </div>
+            : targetShifts.map((s,i)=>{
+                const d=s.d||s.date; const f=s.f||s.filiale; const t=s.t||s.time;
+                return(
+                  <button key={i} onClick={()=>setTargetShift(s)}
+                    style={{width:"100%",padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
+                      marginBottom:6, display:"block",
+                      border:`2px solid ${targetShift===s?C.mint:C.border}`,
+                      background:targetShift===s?C.mintLight:"#fff"}}>
+                    <div style={{fontSize:12,fontWeight:700,color:targetShift===s?C.mintDark:C.text}}>
+                      {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                    </div>
+                    <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                  </button>
+                );
+              })
+          )}
+
+          {step===4&&(
+            <div>
+              <div style={{...S.card,background:C.mintLight,border:`1px solid ${C.mint}`,marginBottom:12}}>
+                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>TAUSCH ÜBERSICHT</div>
+                <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
+                  <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:9,color:C.muted}}>{userName} gibt ab:</div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                      {new Date(myShift?.d||myShift?.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                    </div>
+                    <div style={{fontSize:10,color:C.muted}}>{(myShift?.f||myShift?.filiale)?.replace("TEEAMO ","")}</div>
                   </div>
-                  <div style={{fontSize:10,color:C.muted}}>{targetShift?.f||targetShift?.filiale}</div>
+                  <div style={{fontSize:18}}>⇄</div>
+                  <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:9,color:C.muted}}>{targetUser?.vorname} gibt ab:</div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                      {new Date(targetShift?.d||targetShift?.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                    </div>
+                    <div style={{fontSize:10,color:C.muted}}>{(targetShift?.f||targetShift?.filiale)?.replace("TEEAMO ","")}</div>
+                  </div>
+                </div>
+                <div style={{fontSize:10,color:C.mintDark,textAlign:"center"}}>
+                  ⏳ {targetUser?.vorname} muss zuerst bestätigen.
                 </div>
               </div>
-              <div style={{fontSize:10,color:C.mintDark,textAlign:"center"}}>
-                ⏳ {targetUser?.vorname} muss zuerst bestätigen, dann geht es zum Manager.
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund</div>
+                <textarea value={grund} onChange={e=>{setGrund(e.target.value);setErr("");}}
+                  placeholder="Grund für den Tausch..."
+                  style={{...S.input,width:"100%",minHeight:70,resize:"none",fontFamily:"inherit"}}/>
               </div>
+              {err&&<div style={{fontSize:11,color:C.red,marginBottom:8,fontWeight:600}}>⚠ {err}</div>}
             </div>
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund</div>
-              <textarea value={grund} onChange={e=>{setGrund(e.target.value);setErr("");}}
-                placeholder="Grund für den Tausch..."
-                style={{...S.input,width:"100%",minHeight:70,resize:"none",fontFamily:"inherit"}}/>
-            </div>
-            {err&&<div style={{fontSize:11,color:C.red,marginBottom:8,fontWeight:600}}>⚠ {err}</div>}
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* 버튼 */}
-        <div style={{display:"flex",gap:9,marginTop:16}}>
+        {/* 하단 버튼 */}
+        <div style={{padding:"12px 22px",paddingBottom:"max(16px,env(safe-area-inset-bottom))",
+          borderTop:`1px solid ${C.border}`,flexShrink:0,display:"flex",gap:9}}>
           <button onClick={()=>step===1?onClose():setStep(s=>s-1)}
             style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,
               background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
-            {step===1?"Abbrechen":"Zurück"}
+            {step===1?"✕":"← Zurück"}
           </button>
           <button
-            disabled={step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift}
+            disabled={!!(step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift)}
             onClick={()=>step<4?setStep(s=>s+1):doSubmit()}
             style={{flex:2,padding:"12px",borderRadius:11,border:"none",
               background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
               color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",
-              opacity:(step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift)?.4:1}}>
+              opacity:(step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift)?0.4:1}}>
             {step<4?"Weiter →":"Anfrage senden"}
           </button>
         </div>
