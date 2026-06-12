@@ -287,7 +287,26 @@ function KalenderView({ csvCtx, userName, records, users }) {
 
   const [schedule] = useFirebase("schedule", {});
   const [planImg] = useFirebase("planImage", null);
-  const myShifts = (userName && schedule[userName]) ? schedule[userName] : [];
+
+  // schedule 키 매칭: 여러 방식으로 시도
+  const myShifts = React.useMemo(() => {
+    if (!userName || !schedule) return [];
+    const keys = Object.keys(schedule);
+    // 1. 완전 일치
+    if (schedule[userName]) return schedule[userName];
+    // 2. 대소문자 무시
+    const lower = userName.toLowerCase();
+    const k2 = keys.find(k => k.toLowerCase() === lower);
+    if (k2) return schedule[k2];
+    // 3. 이름이 "Yeaji Kwon"처럼 공백 포함이면 첫 번째 단어(firstName)로 시도
+    const firstName = userName.split(" ")[0];
+    if (firstName !== userName) {
+      if (schedule[firstName]) return schedule[firstName];
+      const k3 = keys.find(k => k.toLowerCase() === firstName.toLowerCase());
+      if (k3) return schedule[k3];
+    }
+    return [];
+  }, [schedule, userName]);
 
   // viewport는 그대로 유지 (페이지 줌 비활성화 상태 유지)
 
@@ -396,6 +415,14 @@ function KalenderView({ csvCtx, userName, records, users }) {
       {/* 내 일정 */}
       {userName && myShifts.length > 0 && (
         <MeineSchichtenSection userName={userName} myShifts={myShifts} records={records} users={users}/>
+      )}
+      {userName && myShifts.length === 0 && (
+        <div style={{padding:"14px",textAlign:"center"}}>
+          <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>
+            📋 Für <strong>{userName}</strong> sind noch keine Schichten im Dienstplan eingetragen.
+            <div style={{fontSize:9,marginTop:4,opacity:.6}}>Der Manager muss den Plan hochladen und analysieren.</div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -2025,8 +2052,10 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   const [detailKey,setDetailKey]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
   const [erledigtExpanded,setErledigtExpanded]=useState({});
-  const safeUsers=Array.isArray(users)?users:[];
-  const manager=safeUsers.find(u=>u.key===userKey);
+  const safeUsers=Array.isArray(users)&&users.length>0?users:INIT_USERS;
+  // userKey로 찾되, 없으면 key prefix로 fallback (동적 생성 계정)
+  const manager=safeUsers.find(u=>u.key===userKey)
+    || {key:userKey, vorname:userKey?.split("_")[0]||"Manager", emoji:"", kuerzel:"M", role:"Manager"};
   const empList=safeUsers.filter(u=>!MANAGERS.includes(u.key)).sort((a,b)=>a.vorname.localeCompare(b.vorname));
   const todayRecs=records.filter(r=>r.date===today());
   const getStatus=name=>{const r=todayRecs.find(x=>x.user===name);if(!r)return"Nicht erschienen";if(!r.aus)return"Aktiv";return"Feierabend";};
@@ -2489,9 +2518,16 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       {tab==="dienstplan"&&(
         <div>
           {/* Admin Staff 계정: 본인 일정도 함께 표시 */}
-          {!MANAGERS.includes(userKey)&&(
+          {/* Admin Staff 계정(MANAGERS 배열 밖)은 본인 일정도 표시 */}
+          {!MANAGERS.includes(userKey)&&manager?.vorname&&(
             <div style={{padding:"14px 14px 0"}}>
-              <KalenderView csvCtx={csvCtx} userName={manager?.vorname} records={records} users={users}/>
+              <KalenderView csvCtx={csvCtx} userName={manager.vorname} records={records} users={users}/>
+            </div>
+          )}
+          {/* manager.vorname이 아직 없으면(로딩 중) 임시 표시 */}
+          {!MANAGERS.includes(userKey)&&!manager?.vorname&&(
+            <div style={{padding:"14px",textAlign:"center",color:C.muted,fontSize:12}}>
+              Lade Benutzerdaten…
             </div>
           )}
           <DienstplanUploadView records={records} users={users}/>
