@@ -20,6 +20,35 @@
 </style>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script type="module" id="firebase-init">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, onValue, set, push, remove, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAdFpLR51E3uV5i4CDB-By1iC0lr-7vfBA",
+    authDomain: "teeamo-app.firebaseapp.com",
+    databaseURL: "https://teeamo-app-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "teeamo-app",
+    storageBucket: "teeamo-app.firebasestorage.app",
+    messagingSenderId: "1042377090448",
+    appId: "1:1042377090448:web:dea5af3a6c56949b543f15"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // 전역으로 노출 (babel 스크립트에서 사용)
+  window._fbDb = db;
+  window._fbRef = ref;
+  window._fbOnValue = onValue;
+  window._fbSet = set;
+  window._fbPush = push;
+  window._fbRemove = remove;
+  window._fbUpdate = update;
+  window._fbReady = true;
+
+  window.dispatchEvent(new Event("firebase-ready"));
+</script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
@@ -44,10 +73,6 @@ const MANAGERS   = ["tingting","teddy","yeaji"];
 const NACHTRAG_ROUTING = {
   "TEEAMO Arkaden":"yeaji","TEEAMO Aegidiimarkt":"yeaji","Teenjoy":"teddy",
 };
-
-// ✅ allorigins 프록시로 CORS 우회
-const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRNBipQq3oKoeRik5kal87Y24k4zsjVtDPH9KopiVOjcsgd83plhQmIjxeZfT8oH3QnFrInj93xnwuj/pub?gid=535418020&single=true&output=csv";
-const PROXY_URL = "https://api.allorigins.win/raw?url=";
 
 const INIT_USERS = [
   {key:"anna",    vorname:"Anna",    nachname:"",kuerzel:"An",role:"Mitarbeiterin",pin:"1001"},
@@ -112,6 +137,69 @@ function usePersist(lsKey, init) {
   return [state, setAndSave];
 }
 
+// ── Firebase 실시간 동기화 훅 ─────────────────────────────────────────────────
+function useFirebase(path, fallback) {
+  const [data, setData] = useState(fallback);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let unsubscribe = null;
+
+    function attach() {
+      const db = window._fbDb;
+      const fbRef = window._fbRef;
+      const fbOnValue = window._fbOnValue;
+      if (!db || !fbRef || !fbOnValue) return false;
+      const r = fbRef(db, path);
+      fbOnValue(r, snap => {
+        const val = snap.val();
+        if (val === null) {
+          setData(fallback);
+        } else if (Array.isArray(fallback)) {
+          setData(Object.values(val));
+        } else {
+          setData(val);
+        }
+        setReady(true);
+      });
+      return true;
+    }
+
+    // 이미 준비됐으면 바로 연결
+    if (attach()) return;
+
+    // 아직 안 됐으면 폴링으로 재시도 (최대 10초)
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      if (attach()) { clearInterval(iv); return; }
+      if (tries > 20) {
+        clearInterval(iv);
+        console.error("Firebase 연결 실패");
+        setReady(true); // 로딩 풀어주기
+      }
+    }, 500);
+
+    return () => clearInterval(iv);
+  }, [path]);
+
+  function setter(updater) {
+    setData(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (window._fbDb && window._fbRef && window._fbSet) {
+        const toSave = Array.isArray(next)
+          ? Object.fromEntries(next.map((v, i) => [v.id || i, v]))
+          : next;
+        window._fbSet(window._fbRef(window._fbDb, path), toSave)
+          .catch(e => console.error("FB write error:", e));
+      }
+      return next;
+    });
+  }
+
+  return [data, setter, ready];
+}
+
 // ── 유틸 ─────────────────────────────────────────────────────────────────────
 function pad(n) { return String(n).padStart(2, "0"); }
 function useNow() {
@@ -144,371 +232,730 @@ const FILIAL_COLOR = {
   C:{ bg:"#FAF4E8", text:"#B38B3A", border:"#E8D4A8", dot:"#C8A96A" },
 };
 
-// ── 독일어 월 이름 → YYYY-MM ─────────────────────────────────────────────────
-const DE_MONTH_MAP = {
-  januar:"01",februar:"02","m\u00e4rz":"03",maerz:"03",april:"04",mai:"05",juni:"06",
-  juli:"07",august:"08",september:"09",oktober:"10",november:"11",dezember:"12",
-};
-function parseMonthStr(text) {
-  if (!text) return null;
-  const lo = text.toLowerCase();
-  for (const [name, num] of Object.entries(DE_MONTH_MAP)) {
-    if (lo.includes(name)) {
-      const ym = text.match(/20\d{2}/);
-      const year = ym ? ym[0] : String(new Date().getFullYear());
-      return `${year}-${num}`;
-    }
-  }
-  return null;
-}
-
-// ── CSV 한 줄 파싱 ────────────────────────────────────────────────────────────
-function parseCSVLine(line) {
-  const res = []; let cur = "", inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') { if (inQ && line[i+1]==='"') { cur+='"'; i++; } else inQ=!inQ; }
-    else if (ch===',' && !inQ) { res.push(cur.trim()); cur=""; }
-    else cur+=ch;
-  }
-  res.push(cur.trim());
-  return res;
-}
-
-// ── ✅ 핵심: CSV → Dienstplan 변환 ───────────────────────────────────────────
-// A열에서 지점명(Arkaden/Aegidiimarkt/Teenjoy) 자동 탐지 →
-// 헤더 행의 날짜 컬럼 매핑 → 각 직원 행에서 근무일 추출
-// A1(또는 상단) 셀의 독일어 월 이름 자동 인식
-function csvToDienstplan(csvText) {
-  const lines = csvText.trim().split(/\r?\n/);
-  if (lines.length < 2) return { plan:{}, sheetMonth:null };
-  const rows = lines.map(l => parseCSVLine(l));
-
-  // 1. 월 이름 탐지 (첫 5행 × 첫 5열)
-  let sheetMonth = null;
-  outer: for (let r = 0; r < Math.min(5, rows.length); r++) {
-    for (let c = 0; c < Math.min(8, rows[r].length); c++) {
-      const m = parseMonthStr(rows[r][c] || "");
-      if (m) { sheetMonth = m; break outer; }
-    }
-  }
-
-  // 2. 날짜 헤더 행 탐지: B열 이후에 1~31 숫자가 3개 이상인 행
-  function extractDay(cell) {
-    const s = String(cell || "").trim();
-    if (/^\d{1,2}$/.test(s)) { const n=parseInt(s); return n>=1&&n<=31?n:null; }
-    const m1 = s.match(/^(\d{1,2})[.\/]\d/); if (m1) { const n=parseInt(m1[1]); return n>=1&&n<=31?n:null; }
-    const m2 = s.match(/(?:Mo|Di|Mi|Do|Fr|Sa|So)[.\s]+(\d{1,2})/i); if (m2) return parseInt(m2[1]);
-    return null;
-  }
-
-  let headerRowIdx = -1;
-  let dateColMap = {}; // colIndex(int) -> day(int)
-  for (let r = 0; r < rows.length; r++) {
-    const tmp = {}; let cnt = 0;
-    for (let c = 1; c < rows[r].length; c++) {
-      const d = extractDay(rows[r][c]);
-      if (d !== null) { tmp[c] = d; cnt++; }
-    }
-    if (cnt >= 3) { headerRowIdx = r; dateColMap = tmp; break; }
-  }
-
-  const plan = {};
-
-  if (headerRowIdx === -1) {
-    // 폴백: Datum+Name+Filiale 컬럼 구조
-    const hdr = rows[0].map(h => (h||"").toLowerCase());
-    const di = hdr.findIndex(h=>h.includes("datum")||h.includes("date")||h.includes("tag"));
-    const ni = hdr.findIndex(h=>h.includes("name")||h.includes("mitarbeit")||h.includes("person"));
-    const fi = hdr.findIndex(h=>h.includes("filiale")||h.includes("branch")||h.includes("laden"));
-    if (di>=0 && ni>=0) {
-      for (let r=1;r<rows.length;r++) {
-        const row=rows[r]; const rawD=row[di]||""; const name=(row[ni]||"").trim();
-        if(!rawD||!name) continue;
-        let dk="";
-        const d1=rawD.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-        const d2=rawD.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if(d1) dk=`${d1[3]}-${pad(d1[2])}-${pad(d1[1])}`;
-        else if(d2) dk=rawD;
-        else { const p=new Date(rawD); if(!isNaN(p)) dk=p.toISOString().slice(0,10); }
-        if(!dk) continue;
-        const rf=(fi>=0?row[fi]||"":"").toLowerCase();
-        let f="A";
-        if(rf.includes("aegidii")||rf.includes("markt")) f="B";
-        else if(rf.includes("teenjoy")||rf.includes("joy")) f="C";
-        if(!plan[dk]) plan[dk]=[];
-        if(!plan[dk].find(e=>e.n===name)) plan[dk].push({n:name,f});
-      }
-    }
-    return { plan, sheetMonth };
-  }
-
-  // 3. 지점 행 탐지 & 직원 근무일 추출
-  const baseYear  = sheetMonth ? sheetMonth.slice(0,4) : String(new Date().getFullYear());
-  const baseMonth = sheetMonth ? sheetMonth.slice(5,7) : pad(new Date().getMonth()+1);
-  let currentFil = null;
-
-  for (let r = headerRowIdx+1; r < rows.length; r++) {
-    const row = rows[r];
-    const a = (row[0]||"").trim();
-    if (!a) continue;
-
-    // A열이 지점명인지 확인 (텍스트 포함 검색)
-    const aLow = a.toLowerCase();
-    let detFil = null;
-    if      (aLow.includes("arkaden"))                          detFil = "A";
-    else if (aLow.includes("aegidii")||aLow.includes("markt")) detFil = "B";
-    else if (aLow.includes("teenjoy")||aLow.includes("joy"))   detFil = "C";
-
-    if (detFil) { currentFil = detFil; continue; }
-    if (!currentFil) continue;
-
-    // 직원 이름 행: 날짜 컬럼 순회
-    const name = a;
-    for (const [colStr, day] of Object.entries(dateColMap)) {
-      const cell = (row[parseInt(colStr)]||"").trim();
-      // 비어있거나 휴무 표시면 skip
-      if (!cell || cell==="-" || cell==="0" || cell.toLowerCase()==="frei" || cell.toLowerCase()==="x" || cell==="") continue;
-      const dk = `${baseYear}-${baseMonth}-${pad(day)}`;
-      if (!plan[dk]) plan[dk]=[];
-      if (!plan[dk].find(e=>e.n===name&&e.f===currentFil)) {
-        // shift 값이 의미있는 시간 정보면 저장 (1,true,o,v 같은 단순 체크는 제외)
-        const isTimeInfo = /^\d{1,2}:\d{2}/.test(cell) || (cell.length>2&&cell.includes(":"));
-        plan[dk].push({ n:name, f:currentFil, shift: isTimeInfo ? cell : null });
-      }
-    }
-  }
-
-  return { plan, sheetMonth };
-}
-
-// ── ✅ CSV fetch 훅 (allorigins 프록시) ──────────────────────────────────────
+// ── Dienstplan: CSV 연동 없이 plan.png 이미지 뷰어만 사용 ──────────────────
 function useDienstplanCSV() {
-  const [plan, setPlan] = useState(null);
-  const [sheetMonth, setSheetMonth] = useState(null);
-  const [error, setError] = useState(null);
-  const [lastFetch, setLastFetch] = useState(null);
-
-  const fetchData = useCallback(async () => {
-    setError(null);
-    try {
-      const url = PROXY_URL + encodeURIComponent(SHEET_CSV_URL);
-      const res = await fetch(url, { cache:"no-cache" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      if (!text || text.length < 10) throw new Error("Leere Antwort");
-      const { plan: parsed, sheetMonth: sm } = csvToDienstplan(text);
-      setPlan(parsed);
-      if (sm) setSheetMonth(sm);
-      setLastFetch(new Date());
-    } catch(e) {
-      setError(e.message||"Fehler");
-      setPlan(p => p || {});
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-    const iv = setInterval(fetchData, 5*60*1000);
-    return () => clearInterval(iv);
-  }, [fetchData]);
-
-  return { plan, sheetMonth, error, lastFetch, refresh:fetchData };
+  // CSV/구글 시트 연동 제거 – 빈 컨텍스트 반환 (다른 뷰에서 props로 받으므로 구조 유지)
+  return { plan: {}, sheetMonth: null, error: null, lastFetch: null, refresh: () => {} };
 }
 
-// ── KALENDER VIEW ─────────────────────────────────────────────────────────────
-function KalenderView({ csvCtx }) {
-  const { plan:dienstplan, sheetMonth, error:csvError, lastFetch:csvLastFetch, refresh:onRefresh } = csvCtx;
-  const csvLoading = dienstplan === null;
-  const todayKey = today();
-  const allMonths = ["2026-04","2026-05","2026-06","2026-07","2026-08","2026-09","2026-10","2026-11","2026-12"];
-  const mlMap = {
-    "2026-04":"April 2026","2026-05":"Mai 2026","2026-06":"Juni 2026",
-    "2026-07":"Juli 2026","2026-08":"August 2026","2026-09":"September 2026",
-    "2026-10":"Oktober 2026","2026-11":"November 2026","2026-12":"Dezember 2026",
-  };
-  const [selMonth, setSelMonth] = useState(sheetMonth||"2026-06");
-  const [selDay, setSelDay] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => { if (sheetMonth) setSelMonth(sheetMonth); }, [sheetMonth]);
 
-  const [yr, mo] = selMonth.split("-").map(Number);
-  const daysInMonth = new Date(yr, mo, 0).getDate();
-  const offset = (new Date(yr, mo-1, 1).getDay()+6)%7;
-  const daysWithData = dienstplan ? Object.keys(dienstplan).filter(k=>k.startsWith(selMonth)).length : 0;
+// ── KALENDER VIEW (plan.png 이미지 뷰어 + 내 일정) ──────────────────────────
+function KalenderView({ csvCtx, userName, records, users }) {
+  const [imgErr, setImgErr] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const containerRef = useRef(null);
+  const lastTouchRef = useRef(null);
+  const lastDistRef = useRef(null);
+  const lastScaleRef = useRef(1);
+  const lastOffsetRef = useRef({ x: 0, y: 0 });
 
-  async function handleRefresh() { setRefreshing(true); await onRefresh(); setRefreshing(false); }
+  const [schedule] = useFirebase("schedule", {});
+  const [planImg] = useFirebase("planImage", null);
+  const myShifts = (userName && schedule[userName]) ? schedule[userName] : [];
 
-  const selKey = selDay ? `${selMonth}-${pad(selDay)}` : null;
-  const selEntries = selKey ? (dienstplan?.[selKey]||[]) : [];
-  const byFil = { A:[], B:[], C:[] };
-  selEntries.forEach(e => { if(byFil[e.f]) byFil[e.f].push(e); });
+  // viewport는 그대로 유지 (페이지 줌 비활성화 상태 유지)
 
-  const monthStats = {};
-  if (dienstplan) {
-    Object.entries(dienstplan).forEach(([dk,entries]) => {
-      if (!dk.startsWith(selMonth)) return;
-      entries.forEach(e => {
-        if (!monthStats[e.n]) monthStats[e.n]={name:e.n,days:0,filialen:{}};
-        monthStats[e.n].days++;
-        monthStats[e.n].filialen[e.f]=(monthStats[e.n].filialen[e.f]||0)+1;
-      });
-    });
+  function clampOffset(ox, oy, sc, el) {
+    if (!el) return { x: ox, y: oy };
+    const cw = el.clientWidth;
+    const ch = el.clientHeight;
+    const imgW = cw * sc;
+    const imgH = ch * sc; // height auto이므로 근사
+    const maxX = Math.max(0, (imgW - cw) / 2);
+    const maxY = Math.max(0, (imgH - ch) / 2);
+    return { x: Math.min(maxX, Math.max(-maxX, ox)), y: Math.min(maxY, Math.max(-maxY, oy)) };
   }
-  const staffList = Object.values(monthStats).sort((a,b)=>b.days-a.days);
+
+  function getDist(t1, t2) {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  function getMid(t1, t2) {
+    return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
+  }
+
+  function onTouchStart(e) {
+    e.stopPropagation();
+    if (e.touches.length === 2) {
+      lastDistRef.current = getDist(e.touches[0], e.touches[1]);
+      lastScaleRef.current = scale;
+      lastOffsetRef.current = offset;
+    } else if (e.touches.length === 1) {
+      lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      lastOffsetRef.current = offset;
+    }
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = containerRef.current;
+    if (e.touches.length === 2) {
+      const dist = getDist(e.touches[0], e.touches[1]);
+      const ratio = dist / lastDistRef.current;
+      const newScale = Math.min(5, Math.max(1, lastScaleRef.current * ratio));
+      setScale(newScale);
+      if (newScale === 1) setOffset({ x: 0, y: 0 });
+    } else if (e.touches.length === 1 && scale > 1) {
+      const dx = e.touches[0].clientX - lastTouchRef.current.x;
+      const dy = e.touches[0].clientY - lastTouchRef.current.y;
+      const raw = { x: lastOffsetRef.current.x + dx, y: lastOffsetRef.current.y + dy };
+      setOffset(clampOffset(raw.x, raw.y, scale, el));
+    }
+  }
+
+  function onTouchEnd(e) {
+    e.stopPropagation();
+    lastDistRef.current = null;
+    if (e.touches.length === 1) {
+      lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      lastOffsetRef.current = offset;
+    }
+  }
+
+  function onDoubleClick() {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  }
 
   return (
-    <div style={{padding:"14px 12px"}}>
-
-      {/* 상태 바 */}
-      <div style={{marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-        <div style={{display:"flex",alignItems:"center",gap:6,flex:1}}>
-          {csvLoading
-            ? <><div style={{width:8,height:8,borderRadius:"50%",background:C.mint,animation:"pulse 1.2s infinite"}}/><span style={{fontSize:10,color:C.muted}}>Lade Dienstplan…</span></>
-            : csvError
-            ? <><div style={{width:8,height:8,borderRadius:"50%",background:C.yellow}}/><span style={{fontSize:10,color:C.yellow,fontWeight:600}}>Offline-Modus</span></>
-            : <><div style={{width:8,height:8,borderRadius:"50%",background:"#5BAD72"}}/><span style={{fontSize:10,color:"#5BAD72",fontWeight:600}}>{daysWithData>0?`${daysWithData} Tage geladen`:"Keine Daten für diesen Monat"}</span></>
-          }
-        </div>
-        <button onClick={handleRefresh} disabled={refreshing}
-          style={{flexShrink:0,padding:"5px 10px",borderRadius:8,border:`1px solid ${C.border}`,background:C.card,cursor:"pointer",display:"flex",alignItems:"center",gap:5,fontSize:10,color:C.muted,fontWeight:600,opacity:refreshing?.6:1}}>
-          <span style={{display:"inline-block",animation:refreshing?"spin .8s linear infinite":"none",fontSize:11}}>↻</span>Aktualisieren
-        </button>
-      </div>
-
-      {csvError&&<div style={{marginBottom:10,padding:"9px 12px",borderRadius:10,background:C.yellowLight,border:`1px solid ${C.yellow}`,fontSize:10,color:"#8B6914"}}>⚠ Verbindung zu Google Sheets fehlgeschlagen. Prüfe deine Internetverbindung.</div>}
-
-      {/* 월 네비게이션 */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-        <button onClick={()=>{const i=allMonths.indexOf(selMonth);if(i>0){setSelMonth(allMonths[i-1]);setSelDay(null);}}}
-          style={{width:34,height:34,borderRadius:9,border:`1.5px solid ${C.border}`,background:C.card,cursor:"pointer",fontSize:16,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
-        <div style={{textAlign:"center"}}>
-          <div style={{fontSize:15,fontWeight:800,color:C.text}}>{mlMap[selMonth]||selMonth}</div>
-          {sheetMonth===selMonth&&!csvLoading&&<div style={{fontSize:9,color:C.mintDark,marginTop:1,fontWeight:600}}>● Aus Google Sheets</div>}
-          {csvLastFetch&&!csvLoading&&<div style={{fontSize:9,color:C.muted,marginTop:1}}>Stand: {csvLastFetch.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})} Uhr</div>}
-        </div>
-        <button onClick={()=>{const i=allMonths.indexOf(selMonth);if(i<allMonths.length-1){setSelMonth(allMonths[i+1]);setSelDay(null);}}}
-          style={{width:34,height:34,borderRadius:9,border:`1.5px solid ${C.border}`,background:C.card,cursor:"pointer",fontSize:16,color:C.text,display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
-      </div>
-
-      {/* 요일 헤더 */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>
-        {["Mo","Di","Mi","Do","Fr","Sa","So"].map(d=><div key={d} style={{textAlign:"center",fontSize:9,fontWeight:700,color:d==="So"?C.red:C.muted,padding:"4px 0"}}>{d}</div>)}
-      </div>
-
-      {/* 달력 */}
-      {csvLoading&&!dienstplan
-        ? <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>{Array.from({length:35}).map((_,i)=><div key={i} style={{minHeight:52,borderRadius:7,background:C.border,opacity:.3,animation:"pulse 1.4s infinite",animationDelay:`${(i%7)*0.07}s`}}/>)}</div>
-        : <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
-            {Array.from({length:offset}).map((_,i)=><div key={"e"+i}/>)}
-            {Array.from({length:daysInMonth}).map((_,i)=>{
-              const day=i+1; const key=`${selMonth}-${pad(day)}`;
-              const isToday=key===todayKey; const isSel=selDay===day;
-              const entries=(dienstplan?.[key])||[]; const hasEntries=entries.length>0;
-              const wd=new Date(yr,mo-1,day).getDay(); const isWE=wd===0||wd===6;
-              return(
-                <div key={key} onClick={()=>{if(hasEntries||isToday)setSelDay(selDay===day?null:day);}}
-                  style={{minHeight:56,border:`1.5px solid ${isSel?C.mintDark:isToday?C.mint:C.border}`,borderRadius:8,padding:"4px 3px",
-                    background:isSel?C.navy:isToday?C.mintLight:isWE?"rgba(244,240,236,.5)":C.card,
-                    cursor:hasEntries?"pointer":"default",transition:"all .15s",position:"relative"}}>
-                  <div style={{fontSize:10,fontWeight:isSel||isToday?800:600,color:isSel?"#fff":isToday?C.mintDark:wd===0?C.red:wd===6?C.red:C.text,textAlign:"center",marginBottom:2,lineHeight:1}}>{day}</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:1}}>
-                    {entries.slice(0,3).map((e,j)=>{const col=FILIAL_COLOR[e.f];return(
-                      <div key={j} style={{fontSize:7,borderRadius:3,padding:"1px 3px",background:isSel?"rgba(255,255,255,.18)":col.bg,color:isSel?"rgba(255,255,255,.9)":col.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",fontWeight:600,lineHeight:1.3}}>{e.n}</div>
-                    );})}
-                    {entries.length>3&&<div style={{fontSize:7,color:isSel?"rgba(255,255,255,.6)":C.muted,fontWeight:600,paddingLeft:2}}>+{entries.length-3}</div>}
-                  </div>
-                  {isToday&&!isSel&&<div style={{position:"absolute",top:3,right:4,width:5,height:5,borderRadius:"50%",background:C.mint}}/>}
-                </div>
-              );
-            })}
+    <div style={{ width: "100%", background: C.card, borderRadius: 14, overflow: "hidden" }}>
+      {(imgErr && !planImg) ? (
+        <div style={{
+          display: "flex", flexDirection: "column", alignItems: "center",
+          justifyContent: "center", padding: "48px 24px", gap: 12, textAlign: "center",
+        }}>
+          <span style={{fontSize: 36}}>📋</span>
+          <div style={{fontSize: 13, fontWeight: 700, color: C.text}}>Kein Dienstplan vorhanden</div>
+          <div style={{fontSize: 11, color: C.muted, lineHeight: 1.5}}>
+            Der Manager hat noch keinen Dienstplan hochgeladen.
           </div>
-      }
-
-      {/* 선택된 날 상세 */}
-      {selDay&&(
-        <div style={{marginTop:12,borderRadius:14,border:`1.5px solid ${C.mint}`,background:"#fff",boxShadow:"0 2px 14px rgba(92,127,148,.12)",animation:"fadeIn .18s"}}>
-          <div style={{padding:"13px 14px 10px",background:C.mintLight,borderRadius:"12px 12px 0 0",borderBottom:`1px solid ${C.border}`}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:800,color:C.mintDark}}>{new Date(yr,mo-1,selDay).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}</div>
-                <div style={{fontSize:10,color:C.mintDark,opacity:.7,marginTop:1}}>{selEntries.length} Mitarbeiter{selEntries.length!==1?"innen":"in"} eingeplant</div>
-              </div>
-              <button onClick={()=>setSelDay(null)} style={{width:26,height:26,borderRadius:"50%",border:`1px solid ${C.border}`,background:C.card,cursor:"pointer",fontSize:13,color:C.muted,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-            </div>
-          </div>
-          <div style={{padding:"12px 14px 14px"}}>
-            {selEntries.length===0
-              ? <div style={{fontSize:12,color:C.muted,textAlign:"center",padding:"16px 0"}}>Kein Dienstplan für diesen Tag.</div>
-              : <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  {["A","B","C"].map(f=>{
-                    const fe=byFil[f]; if(!fe||fe.length===0) return null;
-                    const col=FILIAL_COLOR[f];
-                    return(
-                      <div key={f} style={{borderRadius:10,border:`1px solid ${col.border}`,overflow:"hidden"}}>
-                        <div style={{background:col.bg,padding:"8px 12px",display:"flex",alignItems:"center",gap:6}}>
-                          <div style={{width:8,height:8,borderRadius:"50%",background:col.dot,flexShrink:0}}/>
-                          <span style={{fontSize:11,fontWeight:700,color:col.text,flex:1}}>{FILIAL_NAMES[f]}</span>
-                          <span style={{fontSize:10,color:col.text,opacity:.7}}>{fe.length} Pers.</span>
-                        </div>
-                        <div style={{padding:"9px 12px",display:"flex",flexWrap:"wrap",gap:6}}>
-                          {fe.map((e,idx)=>(
-                            <div key={idx} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-                              <span style={{fontSize:12,fontWeight:700,padding:"5px 11px",borderRadius:99,background:col.bg,color:col.text,border:`1px solid ${col.border}`}}>{e.n}</span>
-                              {e.shift&&<span style={{fontSize:9,color:C.muted}}>{e.shift}</span>}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-            }
+        </div>
+      ) : (
+        <div>
+          <div
+            ref={containerRef}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onDoubleClick={onDoubleClick}
+            style={{ overflow: "hidden", touchAction: "none", cursor: scale > 1 ? "grab" : "default" }}
+          >
+            <img
+              src={planImg || "plan.png"}
+              alt="Dienstplan"
+              onError={() => setImgErr(true)}
+              style={{
+                display: "block", width: "100%", height: "auto",
+                transform: `scale(${scale}) translate(${offset.x / scale}px, ${offset.y / scale}px)`,
+                transformOrigin: "center center", transition: "none",
+                userSelect: "none", pointerEvents: "none",
+              }}
+            />
           </div>
         </div>
       )}
 
-      {/* 인원 현황 */}
-      {staffList.length>0&&(
-        <div style={{marginTop:14}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".06em"}}>Personalübersicht – {mlMap[selMonth]||selMonth}</div>
+      {/* 내 일정 */}
+      {userName && myShifts.length > 0 && (
+        <MeineSchichtenSection userName={userName} myShifts={myShifts} records={records} users={users}/>
+      )}
+    </div>
+  );
+}
+
+// ── 근무 시간 비교 헬퍼 ───────────────────────────────────────────────────────
+function parseMinutes(timeStr) {
+  if (!timeStr) return null;
+  const [h, m] = timeStr.split(":").map(Number);
+  return h * 60 + m;
+}
+function calcShiftMinutes(timeRange) {
+  if (!timeRange) return null;
+  const [start, end] = timeRange.split("-");
+  const s = parseMinutes(start), e = parseMinutes(end);
+  if (s == null || e == null) return null;
+  return e > s ? e - s : null;
+}
+function getShiftStatus(shift, actualRec) {
+  if (!actualRec) return "ausstehend";
+  if (!actualRec.aus) return "aktiv";
+  const planned = calcShiftMinutes(shift.time || shift.t);
+  const actual = calcShiftMinutes(`${actualRec.ein}-${actualRec.aus}`);
+  if (planned == null || actual == null) return "gearbeitet";
+  return actual >= planned ? "gearbeitet" : "prüfen";
+}
+
+// ── SCHICHTTAUSCH MODAL ────────────────────────────────────────────────────────
+function SchichttauschModal({ userName, myShifts, users, onClose }) {
+  const [step, setStep] = useState(1); // 1:내 근무 선택, 2:상대방 선택, 3:상대 근무 선택, 4:사유
+  const [myShift, setMyShift] = useState(null);
+  const [targetUser, setTargetUser] = useState(null);
+  const [targetShift, setTargetShift] = useState(null);
+  const [grund, setGrund] = useState("");
+  const [err, setErr] = useState("");
+  const [schedule] = useFirebase("schedule", {});
+  const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
+  const [, setNotifications] = useFirebase("notifications", {});
+
+  const empList = (users||[]).filter(u => !MANAGERS.includes(u.key) && u.vorname !== userName);
+  const targetShifts = targetUser ? (schedule[targetUser.vorname] || []) : [];
+
+  function doSubmit() {
+    if (!grund.trim()) { setErr("Bitte einen Grund angeben."); return; }
+    const id = Date.now();
+    const antrag = {
+      id, status: "ausstehend_bestaetigung",
+      initiator: userName,
+      initiatorDate: myShift.d||myShift.date,
+      initiatorFiliale: myShift.f||myShift.filiale,
+      initiatorTime: myShift.t||myShift.time,
+      partner: targetUser.vorname,
+      partnerDate: targetShift.d||targetShift.date,
+      partnerFiliale: targetShift.f||targetShift.filiale,
+      partnerTime: targetShift.t||targetShift.time,
+      grund,
+      partnerBestaetigt: false,
+      ts: Date.now(),
+    };
+    setTauschAntraege(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
+
+    // 상대방에게 수락 요청 알림
+    const zustaendig = antrag.initiatorFiliale === "Teenjoy" ? "teddy" : "yeaji";
+    setNotifications(prev => ({
+      ...(prev||{}),
+      [`tausch_anfrage_${id}`]: {
+        type: "tausch_anfrage", targetUser: targetUser.vorname,
+        initiator: userName, antragId: id,
+        myDate: antrag.partnerDate, myFiliale: antrag.partnerFiliale, myTime: antrag.partnerTime,
+        theirDate: antrag.initiatorDate, theirFiliale: antrag.initiatorFiliale,
+        zustaendig, gelesen: false, ts: Date.now()
+      }
+    }));
+    onClose();
+  }
+
+  const steps = ["Meine Schicht","Partner","Partner-Schicht","Senden"];
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
+      <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))",maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 16px"}}/>
+
+        {/* 스텝 인디케이터 */}
+        <div style={{display:"flex",gap:4,marginBottom:16}}>
+          {steps.map((s,i)=>(
+            <div key={i} style={{flex:1,height:3,borderRadius:99,
+              background:i+1<=step?C.mint:C.border,transition:"background .2s"}}/>
+          ))}
+        </div>
+
+        <div style={{fontSize:15,fontWeight:800,color:C.text,marginBottom:4}}>🔄 Schichttausch</div>
+        <div style={{fontSize:11,color:C.muted,marginBottom:14}}>
+          {step===1&&"Welche deiner Schichten möchtest du tauschen?"}
+          {step===2&&"Mit wem möchtest du tauschen?"}
+          {step===3&&`Welche Schicht von ${targetUser?.vorname} möchtest du übernehmen?`}
+          {step===4&&"Zusammenfassung & Grund"}
+        </div>
+
+        {/* Step 1: 내 근무 선택 */}
+        {step===1&&(
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {staffList.map(s=>(
-              <div key={s.name} style={{...S.card,padding:"10px 12px",display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:32,height:32,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,color:"#fff",flexShrink:0}}>{s.name.slice(0,2)}</div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,fontWeight:700,color:C.text}}>{s.name}</div>
-                  <div style={{display:"flex",gap:4,marginTop:4,flexWrap:"wrap"}}>
-                    {["A","B","C"].map(f=>s.filialen[f]?(
-                      <span key={f} style={{fontSize:9,fontWeight:600,padding:"2px 6px",borderRadius:99,background:FILIAL_COLOR[f].bg,color:FILIAL_COLOR[f].text}}>{FILIAL_NAMES[f].split(" ").pop()} ×{s.filialen[f]}</span>
-                    ):null)}
+            {myShifts.map((s,i)=>{
+              const d=s.d||s.date; const f=s.f||s.filiale; const t=s.t||s.time;
+              const isSel=myShift===s;
+              return(
+                <button key={i} onClick={()=>setMyShift(s)}
+                  style={{padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
+                    border:`2px solid ${isSel?C.mint:C.border}`,background:isSel?C.mintLight:"#fff"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:isSel?C.mintDark:C.text}}>
+                    {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                   </div>
+                  <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Step 2: 상대방 선택 */}
+        {step===2&&(
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {empList.map(u=>(
+              <button key={u.key} onClick={()=>setTargetUser(u)}
+                style={{padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
+                  display:"flex",alignItems:"center",gap:10,
+                  border:`2px solid ${targetUser?.key===u.key?C.mint:C.border}`,
+                  background:targetUser?.key===u.key?C.mintLight:"#fff"}}>
+                <div style={{width:32,height:32,borderRadius:"50%",background:C.navy,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontWeight:800,fontSize:11,color:"#fff",flexShrink:0}}>{u.kuerzel}</div>
+                <span style={{fontSize:13,fontWeight:700,color:targetUser?.key===u.key?C.mintDark:C.text}}>{u.vorname}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Step 3: 상대 근무 선택 */}
+        {step===3&&(
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {targetShifts.length===0
+              ? <div style={{textAlign:"center",color:C.muted,padding:"20px",fontSize:12}}>
+                  {targetUser?.vorname} hat keine geplanten Schichten.
                 </div>
-                <div style={{textAlign:"right",flexShrink:0}}>
-                  <div style={{fontSize:16,fontWeight:800,color:C.mintDark}}>{s.days}</div>
-                  <div style={{fontSize:9,color:C.muted}}>Tage</div>
+              : targetShifts.map((s,i)=>{
+                  const d=s.d||s.date; const f=s.f||s.filiale; const t=s.t||s.time;
+                  const isSel=targetShift===s;
+                  return(
+                    <button key={i} onClick={()=>setTargetShift(s)}
+                      style={{padding:"11px 13px",borderRadius:10,textAlign:"left",cursor:"pointer",
+                        border:`2px solid ${isSel?C.mint:C.border}`,background:isSel?C.mintLight:"#fff"}}>
+                      <div style={{fontSize:12,fontWeight:700,color:isSel?C.mintDark:C.text}}>
+                        {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                      </div>
+                      <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                    </button>
+                  );
+                })
+            }
+          </div>
+        )}
+
+        {/* Step 4: 요약 + 사유 */}
+        {step===4&&(
+          <div>
+            <div style={{...S.card,background:C.mintLight,border:`1px solid ${C.mint}`,marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>TAUSCH ÜBERSICHT</div>
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
+                <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
+                  <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{userName} gibt ab:</div>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                    {new Date(myShift?.d||myShift?.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                  </div>
+                  <div style={{fontSize:10,color:C.muted}}>{myShift?.f||myShift?.filiale}</div>
+                </div>
+                <div style={{fontSize:18}}>⇄</div>
+                <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
+                  <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{targetUser?.vorname} gibt ab:</div>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                    {new Date(targetShift?.d||targetShift?.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                  </div>
+                  <div style={{fontSize:10,color:C.muted}}>{targetShift?.f||targetShift?.filiale}</div>
+                </div>
+              </div>
+              <div style={{fontSize:10,color:C.mintDark,textAlign:"center"}}>
+                ⏳ {targetUser?.vorname} muss zuerst bestätigen, dann geht es zum Manager.
+              </div>
+            </div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund</div>
+              <textarea value={grund} onChange={e=>{setGrund(e.target.value);setErr("");}}
+                placeholder="Grund für den Tausch..."
+                style={{...S.input,width:"100%",minHeight:70,resize:"none",fontFamily:"inherit"}}/>
+            </div>
+            {err&&<div style={{fontSize:11,color:C.red,marginBottom:8,fontWeight:600}}>⚠ {err}</div>}
+          </div>
+        )}
+
+        {/* 버튼 */}
+        <div style={{display:"flex",gap:9,marginTop:16}}>
+          <button onClick={()=>step===1?onClose():setStep(s=>s-1)}
+            style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,
+              background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
+            {step===1?"Abbrechen":"Zurück"}
+          </button>
+          <button
+            disabled={step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift}
+            onClick={()=>step<4?setStep(s=>s+1):doSubmit()}
+            style={{flex:2,padding:"12px",borderRadius:11,border:"none",
+              background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
+              color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",
+              opacity:(step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift)?.4:1}}>
+            {step<4?"Weiter →":"Anfrage senden"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// ── MEINE SCHICHTEN SECTION ───────────────────────────────────────────────────
+function MeineSchichtenSection({ userName, myShifts, records, users }) {
+  const [showTausch, setShowTausch] = useState(false);
+  const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
+  const [antraege] = useFirebase("antraege", []);
+  const [notifications, setNotifications] = useFirebase("notifications", {});
+  const [schedule, setSchedule] = useFirebase("schedule", {});
+
+  // 나에게 온 Tausch 수락 요청
+  const pendingTausch = Object.entries(notifications||{})
+    .filter(([,n]) => n.type==="tausch_anfrage" && n.targetUser===userName && !n.gelesen);
+
+  function bestaetigenTausch(notifKey, antragId, ok) {
+    // 알림 읽음 처리
+    setNotifications(prev => ({...(prev||{}), [notifKey]: {...(prev[notifKey]||{}), gelesen: true}}));
+
+    setTauschAntraege(prev => {
+      const list = Array.isArray(prev)?prev:[];
+      if (!ok) {
+        // 거절 → 상태 업데이트
+        return list.map(a => a.id===antragId ? {...a, status:"abgelehnt_partner"} : a);
+      }
+      // 수락 → 둘 다 동의 완료, 관리자에게 전달
+      const antrag = list.find(a => a.id===antragId);
+      if (!antrag) return list;
+      const zustaendig = antrag.initiatorFiliale==="Teenjoy"?"teddy":"yeaji";
+      // 관리자 알림
+      setNotifications(prev2 => ({
+        ...(prev2||{}),
+        [`tausch_manager_${antragId}`]: {
+          type: "tausch_manager",
+          initiator: antrag.initiator,
+          partner: antrag.partner,
+          initiatorDate: antrag.initiatorDate, initiatorFiliale: antrag.initiatorFiliale,
+          partnerDate: antrag.partnerDate, partnerFiliale: antrag.partnerFiliale,
+          antragId, zustaendig, gelesen: false, ts: Date.now()
+        }
+      }));
+      return list.map(a => a.id===antragId ? {...a, status:"ausstehend_manager", partnerBestaetigt:true} : a);
+    });
+  }
+
+  // 모든 항목(schichten + anträge)을 날짜 기준으로 묶기
+  const myAntraege = (Array.isArray(antraege)?antraege:[]).filter(a => a.user === userName);
+  const allDates = [...new Set([
+    ...myShifts.map(s => s.d || s.date),
+    ...myAntraege.map(a => a.date),
+    ...(Array.isArray(records)?records:[]).filter(r => r.user === userName).map(r => r.date),
+  ])].sort();
+
+  return (
+    <div style={{padding:"14px", borderTop:`1px solid ${C.border}`}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".05em"}}>
+          Meine Schichten & Anträge
+        </div>
+        <button onClick={()=>setShowTausch(true)}
+          style={{fontSize:10,fontWeight:700,padding:"5px 10px",borderRadius:8,
+            border:`1.5px solid ${C.mint}`,background:C.mintLight,color:C.mintDark,cursor:"pointer"}}>
+          🔄 Schichttausch
+        </button>
+      </div>
+
+      {/* 나에게 온 Tausch 수락 요청 */}
+      {pendingTausch.map(([key, n]) => (
+        <div key={key} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.mint}`,background:C.mintLight}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.mintDark,marginBottom:4}}>
+            🔄 Tausch-Anfrage von {n.initiator}
+          </div>
+          <div style={{fontSize:10,color:C.text,marginBottom:2}}>
+            Du gibst ab: <strong>{new Date(n.myDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} · {n.myFiliale}</strong>
+          </div>
+          <div style={{fontSize:10,color:C.text,marginBottom:10}}>
+            Du bekommst: <strong>{new Date(n.theirDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} · {n.theirFiliale}</strong>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>bestaetigenTausch(key, n.antragId, false)}
+              style={{flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.border}`,
+                background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
+              Ablehnen
+            </button>
+            <button onClick={()=>bestaetigenTausch(key, n.antragId, true)}
+              style={{flex:2,padding:"8px",borderRadius:8,border:"none",
+                background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
+                color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
+              ✅ Bestätigen
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {allDates.map(d => {
+        const shift = myShifts.find(s => (s.d||s.date) === d);
+        const rec = (Array.isArray(records)?records:[]).find(r => r.user === userName && r.date === d);
+        const antr = myAntraege.filter(a => a.date === d);
+        const status = shift ? getShiftStatus({ time: shift.t||shift.time }, rec) : null;
+
+        return (
+          <div key={d} style={{marginBottom:14}}>
+            {/* 날짜 헤더 */}
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:6}}>
+              {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"2-digit"})}
+            </div>
+
+            {/* 근무 카드 */}
+            {shift && (
+              <ShiftRow s={shift} userName={userName} records={records} setNotifications={setNotifications}/>
+            )}
+
+            {/* shift 없이 출근한 경우 */}
+            {!shift && rec && (
+              <div style={{padding:"9px 12px",borderRadius:10,marginBottom:5,
+                background:C.mintLight,border:`1px solid ${C.mint}`,
+                display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.text}}>{rec.filiale} · {rec.ein} – {rec.aus||"läuft"}</div>
+                <span style={{fontSize:11,fontWeight:700,color:C.mintDark}}>{stdLabel(rec.ein,rec.aus)}</span>
+              </div>
+            )}
+
+            {/* 관련 Anträge 타임라인 */}
+            {antr.map((a,i) => (
+              <div key={i} style={{marginLeft:12,paddingLeft:10,borderLeft:`2px solid ${C.border}`,marginBottom:4}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"7px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:C.text}}>📌 Nachtrag · {a.filiale}</div>
+                    <div style={{fontSize:9,color:C.muted}}>{a.ein} – {a.aus}</div>
+                  </div>
+                  <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"✅":"❌"}</span>
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        );
+      })}
+
+      {allDates.length === 0 && (
+        <div style={{textAlign:"center",color:C.muted,fontSize:12,padding:"20px 0"}}>Noch keine Schichten geplant.</div>
       )}
 
-      {/* 범례 */}
-      <div style={{marginTop:12,display:"flex",gap:10,flexWrap:"wrap",paddingTop:10,borderTop:`1px solid ${C.border}`}}>
-        {["A","B","C"].map(f=>{const col=FILIAL_COLOR[f];return(
-          <div key={f} style={{display:"flex",alignItems:"center",gap:5}}>
-            <div style={{width:10,height:10,borderRadius:3,background:col.bg,border:`1.5px solid ${col.dot}`}}/>
-            <span style={{fontSize:9,color:C.muted,fontWeight:600}}>{FILIAL_NAMES[f]}</span>
+      {showTausch && (
+        <SchichttauschModal userName={userName} myShifts={myShifts} users={users}
+          onClose={()=>setShowTausch(false)}/>
+      )}
+    </div>
+  );
+}
+
+// ── ABSAGEN MODAL ─────────────────────────────────────────────────────────────
+function AbsagenModal({ shift, userName, onClose, onSubmit }) {
+  const [grund, setGrund] = useState("");
+  const [err, setErr] = useState("");
+  const d = shift.d || shift.date;
+  const f = shift.f || shift.filiale;
+  const t = shift.t || shift.time;
+
+  function doSubmit() {
+    if (!grund.trim()) { setErr("Bitte einen Grund angeben."); return; }
+    onSubmit({ id: Date.now(), userName, date: d, filiale: f, time: t, grund, status: "offen" });
+    onClose();
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
+      <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))"}}>
+        <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 20px"}}/>
+        <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>Schicht absagen</div>
+        <div style={{...S.card,background:C.redLight,border:`1px solid ${C.red}`,marginBottom:14}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.red}}>
+            {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-        );})}
+          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{f}{t?` · ${t}`:""}</div>
+        </div>
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund <span style={{color:C.red}}>*</span></div>
+          <textarea value={grund} onChange={e=>{setGrund(e.target.value);setErr("");}}
+            placeholder="z. B. Ich bin krank und kann nicht kommen…"
+            style={{...S.input,width:"100%",minHeight:80,resize:"none",fontFamily:"inherit"}}/>
+        </div>
+        {err&&<div style={{fontSize:11,color:C.red,marginBottom:10,fontWeight:600}}>⚠ {err}</div>}
+        <div style={{fontSize:10,color:C.muted,marginBottom:14}}>
+          ℹ️ Der Manager wird benachrichtigt. Nach Genehmigung wird deine Schicht als freie Schicht veröffentlicht.
+        </div>
+        <div style={{display:"flex",gap:9}}>
+          <button onClick={onClose} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
+          <button onClick={doSubmit} style={{flex:2,padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>Absagen & senden</button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── LOGIN ─────────────────────────────────────────────────────────────────────
+function ShiftRow({ s, userName, records, setNotifications }) {
+  const d = s.d || s.date;
+  const f = s.f || s.filiale;
+  const t = s.t || s.time;
+  const actualRec = (Array.isArray(records)?records:[]).find(r => r.user === userName && r.date === d);
+  const status = getShiftStatus({ time: t }, actualRec);
+  const [showAbsagen, setShowAbsagen] = useState(false);
+  const [absagenList, setAbsagenList] = useFirebase("absagen", []);
+  const [, setNotif] = useFirebase("notifications", {});
+
+  useEffect(() => {
+    if (status === "prüfen" && actualRec) {
+      const zustaendig = f === "Teenjoy" ? "teddy" : "yeaji";
+      const notifKey = `prüfen_${userName}_${d}`;
+      setNotifications(prev => {
+        if (prev && prev[notifKey]) return prev;
+        return { ...(prev||{}), [notifKey]: {
+          type: "prüfen", user: userName, date: d, filiale: f,
+          plannedTime: t, actualEin: actualRec.ein, actualAus: actualRec.aus,
+          zustaendig, gelesen: false, ts: Date.now()
+        }};
+      });
+    }
+  }, [status]);
+
+  const alreadyAbgesagt = (Array.isArray(absagenList)?absagenList:[])
+    .find(a => a.userName === userName && a.date === d);
+
+  function handleAbsagen(antrag) {
+    setAbsagenList(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
+    const zustaendig = f === "Teenjoy" ? "teddy" : "yeaji";
+    setNotif(prev => ({
+      ...(prev||{}),
+      [`absagen_${antrag.id}`]: {
+        type: "absagen", user: userName, date: d, filiale: f, time: t,
+        grund: antrag.grund, zustaendig, status: "offen", gelesen: false, ts: Date.now()
+      }
+    }));
+  }
+
+  // 상태별 배지 색상
+  const badge = {
+    gearbeitet: { color: C.mintDark, bg: C.mintLight, label: "Gearbeitet" },
+    prüfen:     { color: C.yellow,   bg: C.yellowLight,label: "Prüfen"    },
+    aktiv:      { color: C.yellow,   bg: "#FFF9E6",    label: "Im Dienst" },
+    ausstehend: { color: C.muted,    bg: C.bg,         label: "Ausstehend"},
+  }[alreadyAbgesagt ? "ausstehend" : status] || { color: C.muted, bg: C.bg, label: "Ausstehend" };
+
+  return (
+    <>
+      <div style={{borderRadius:10,overflow:"hidden",marginBottom:6,
+        border:`1px solid ${alreadyAbgesagt?C.red:status==="aktiv"||status==="gearbeitet"?C.mint:C.border}`}}>
+
+        {/* 계획된 근무 행 */}
+        <div onClick={()=>{ if(status==="ausstehend"&&!alreadyAbgesagt) setShowAbsagen(true); }}
+          style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+            padding:"10px 12px",
+            background:alreadyAbgesagt?C.redLight:C.card,
+            cursor:status==="ausstehend"&&!alreadyAbgesagt?"pointer":"default"}}>
+          <div style={{fontSize:12,fontWeight:600,color:alreadyAbgesagt?C.red:C.text}}>
+            {f}{t ? ` · ${t}` : ""}
+            {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>🚫 Absage {alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            {status==="ausstehend"&&!alreadyAbgesagt&&(
+              <span style={{fontSize:8,color:C.muted}}>tippen</span>
+            )}
+            <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
+              color:alreadyAbgesagt?C.red:badge.color,
+              background:alreadyAbgesagt?"#fff":badge.bg,
+              border:`1px solid ${alreadyAbgesagt?C.red:badge.color}`}}>
+              {alreadyAbgesagt?"🚫 Abgesagt":badge.label}
+            </span>
+          </div>
+        </div>
+
+        {/* 실제 기록 행 (출근했을 때만) */}
+        {actualRec && (
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+            padding:"8px 12px",
+            background:status==="gearbeitet"?C.mintLight:status==="prüfen"?C.yellowLight:"#FFF9E6",
+            borderTop:`1px dashed ${status==="gearbeitet"?C.mint:C.yellow}`}}>
+            <div style={{fontSize:11,color:status==="gearbeitet"?C.mintDark:C.yellow,fontWeight:600}}>
+              {f} · {actualRec.ein}–{actualRec.aus||"läuft"}
+            </div>
+            <span style={{fontSize:11,fontWeight:700,color:status==="gearbeitet"?C.mintDark:C.yellow}}>
+              {actualRec.aus ? stdLabel(actualRec.ein, actualRec.aus) : "🟡"}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {showAbsagen&&(
+        <AbsagenModal shift={s} userName={userName}
+          onClose={()=>setShowAbsagen(false)} onSubmit={handleAbsagen}/>
+      )}
+    </>
+  );
+}
+
+// ── EINSPRINGEN VIEW ──────────────────────────────────────────────────────────
+function EinspringenView({ userName }) {
+  const [freieSchichten, setFreieSchichten] = useFirebase("freieSchichten", []);
+  const [, setNotifications] = useFirebase("notifications", {});
+  const [schedule, setSchedule] = useFirebase("schedule", {});
+  const [msg, setMsg] = useState(null);
+
+  function einspringen(schicht) {
+    // 내 일정에 추가
+    setSchedule(prev => {
+      const updated = { ...(prev||{}) };
+      if (!updated[userName]) updated[userName] = [];
+      updated[userName] = [...updated[userName], { d: schicht.date, f: schicht.filiale, t: schicht.time }];
+      return updated;
+    });
+    // 빈 근무에서 제거
+    setFreieSchichten(prev => (Array.isArray(prev)?prev:[]).filter(s => s.id !== schicht.id));
+    // 담당자 알림
+    const zustaendig = schicht.filiale === "Teenjoy" ? "teddy" : "yeaji";
+    setNotifications(prev => ({
+      ...(prev||{}),
+      [`einspringen_${schicht.id}`]: {
+        type: "einspringen", user: userName,
+        date: schicht.date, filiale: schicht.filiale, time: schicht.time,
+        zustaendig, gelesen: false, ts: Date.now()
+      }
+    }));
+    setMsg(`✅ Du bist jetzt für ${new Date(schicht.date).toLocaleDateString("de-DE")} in ${schicht.filiale} eingeplant!`);
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  const offene = (Array.isArray(freieSchichten)?freieSchichten:[]).filter(s => !s.besetzt);
+
+  return (
+    <div style={{padding:"14px"}}>
+      <div style={{...S.card,marginBottom:12,background:`linear-gradient(135deg,${C.mintLight},#f0f7fa)`,border:`1.5px solid ${C.mint}`}}>
+        <div style={{fontSize:14,fontWeight:800,color:C.mintDark,marginBottom:4}}>🙋 Freie Schichten</div>
+        <div style={{fontSize:11,color:C.muted}}>Hier kannst du offene Schichten übernehmen.</div>
+      </div>
+
+      {msg && (
+        <div style={{padding:"11px 14px",borderRadius:10,background:C.mintLight,border:`1px solid ${C.mint}`,
+          fontSize:12,fontWeight:600,color:C.mintDark,marginBottom:12}}>
+          {msg}
+        </div>
+      )}
+
+      {offene.length === 0 ? (
+        <div style={{...S.card,textAlign:"center",padding:"32px 16px"}}>
+          <div style={{fontSize:28,marginBottom:8}}>🎉</div>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Keine offenen Schichten</div>
+          <div style={{fontSize:11,color:C.muted}}>Aktuell sind alle Schichten besetzt.</div>
+        </div>
+      ) : (
+        offene.map(s => (
+          <div key={s.id} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.border}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:800,color:C.text}}>
+                  {new Date(s.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+                </div>
+                <div style={{fontSize:11,color:C.muted,marginTop:2}}>{s.filiale}</div>
+                {s.time&&<div style={{fontSize:11,fontWeight:600,color:C.mintDark,marginTop:2}}>🕐 {s.time}</div>}
+                {s.note&&<div style={{fontSize:10,color:C.muted,marginTop:4}}>📌 {s.note}</div>}
+              </div>
+              <div style={{width:40,height:40,borderRadius:10,background:C.mintLight,
+                display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>
+                {s.filiale==="Teenjoy"?"🧋":"☕"}
+              </div>
+            </div>
+            <button onClick={()=>einspringen(s)}
+              style={{width:"100%",padding:"11px",borderRadius:10,border:"none",
+                background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
+                color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
+              🙋 Ich springe ein!
+            </button>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 function LoginView({onLogin,users,setUsers,csvCtx}){
   const now=useNow();
   const [page,setPage]=useState("list");
@@ -553,7 +1000,7 @@ function LoginView({onLogin,users,setUsers,csvCtx}){
         <div style={{fontSize:18,fontWeight:800}}>Dienstplan</div>
         <div style={{fontSize:11,opacity:.45,marginTop:2}}>Leseansicht – ohne Anmeldung</div>
       </div>
-      <div style={{padding:"14px"}}><div style={{...S.card,padding:0,overflow:"hidden"}}><KalenderView csvCtx={csvCtx}/></div></div>
+      <div style={{padding:"14px"}}><KalenderView csvCtx={csvCtx} records={[]}/></div>
     </div>
   );
 
@@ -682,17 +1129,141 @@ function LoginView({onLogin,users,setUsers,csvCtx}){
   );
 }
 
+// ── CLOCK MODAL ───────────────────────────────────────────────────────────────
+function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onClose,onEin,onAus}){
+  const isEin = modal==="ein";
+  const nowStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const [manualMode, setManualMode] = useState(false);
+  const [manualTime, setManualTime] = useState(nowStr);
+
+  const ausInvalid = !isEin && manualMode && clockInTime && (()=>{
+    const [ah,am] = manualTime.split(":").map(Number);
+    return (ah*60+am) - (clockInTime.getHours()*60+clockInTime.getMinutes()) <= 0;
+  })();
+
+  function doEin(){
+    const t = manualMode ? manualTime : nowStr;
+    const [h,m] = t.split(":").map(Number);
+    const d = new Date(); d.setHours(h,m,0,0);
+    onEin(d);
+  }
+  function doAus(){
+    if(ausInvalid) return;
+    const t = manualMode ? manualTime : nowStr;
+    const inStr = `${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`;
+    onAus(inStr, t);
+  }
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200}}>
+      <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))"}}>
+        <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 20px"}}/>
+        <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>
+          {isEin?"Einstempeln bestätigen":"Ausstempeln bestätigen"}
+        </div>
+        <div style={{fontSize:12,color:C.muted,marginBottom:14}}>
+          Filiale: <strong style={{color:C.text}}>{isEin?selFiliale:clockFiliale}</strong>
+        </div>
+
+        <div style={{marginBottom:16}}>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={()=>setManualMode(false)}
+              style={{flex:1,padding:"9px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",
+                border:`2px solid ${!manualMode?C.mint:C.border}`,
+                background:!manualMode?C.mintLight:"#fff",
+                color:!manualMode?C.mintDark:C.muted}}>
+              🕐 Jetzt ({nowStr})
+            </button>
+            <button onClick={()=>setManualMode(true)}
+              style={{flex:1,padding:"9px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",
+                border:`2px solid ${manualMode?C.yellow:C.border}`,
+                background:manualMode?C.yellowLight:"#fff",
+                color:manualMode?C.yellow:C.muted}}>
+              ✏️ Zeit eingeben
+            </button>
+          </div>
+          {manualMode&&(
+            <div style={{background:C.yellowLight,borderRadius:10,padding:"12px 14px",border:`1.5px solid ${ausInvalid?C.red:C.yellow}`}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:6}}>
+                {isEin?"Tatsächliche Einstempelzeit":"Tatsächliche Ausstempelzeit"}
+              </div>
+              <input type="time" value={manualTime} onChange={e=>setManualTime(e.target.value)}
+                style={{...S.input,width:"80%",display:"block",margin:"0 auto",fontSize:20,fontWeight:700,textAlign:"center",borderColor:ausInvalid?C.red:C.yellow}}/>
+              {!isEin&&clockInTime&&(()=>{
+                const [ah,am]=manualTime.split(":").map(Number);
+                const diff=(ah*60+am)-(clockInTime.getHours()*60+clockInTime.getMinutes());
+                if(diff<=0) return(
+                  <div style={{fontSize:11,color:C.red,fontWeight:700,marginTop:7,textAlign:"center"}}>
+                    ⚠ Die Zeit liegt vor der Einstempelzeit ({pad(clockInTime.getHours())}:{pad(clockInTime.getMinutes())} Uhr)
+                  </div>
+                );
+                return(
+                  <div style={{fontSize:11,color:"#3a7a55",fontWeight:700,marginTop:7,textAlign:"center"}}>
+                    ⏱ {Math.floor(diff/60)}h {diff%60}min Arbeitszeit
+                  </div>
+                );
+              })()}
+              {isEin&&(()=>{
+                const [ah,am]=manualTime.split(":").map(Number);
+                const diff=(now.getHours()*60+now.getMinutes())-(ah*60+am);
+                if(diff<=0) return null;
+                return(
+                  <div style={{fontSize:11,color:C.yellow,fontWeight:700,marginTop:7,textAlign:"center"}}>
+                    ⏱ {Math.floor(diff/60)}h {diff%60}min bereits vergangen
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+
+        <div style={{display:"flex",gap:9}}>
+          <button onClick={onClose} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
+          <button onClick={isEin?doEin:doAus} disabled={!!ausInvalid}
+            style={{flex:2,padding:"12px",borderRadius:11,border:"none",
+              background:ausInvalid?"#ccc":isEin?`linear-gradient(135deg,${C.mint},${C.mintDark})`:`linear-gradient(135deg,${C.red},#A8432E)`,
+              color:"#fff",fontWeight:800,fontSize:14,cursor:ausInvalid?"not-allowed":"pointer",opacity:ausInvalid?0.6:1}}>
+            {isEin?"Einstempeln":"Ausstempeln"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── MITARBEITER ───────────────────────────────────────────────────────────────
 function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,onLogout,csvCtx}){
   const user=users.find(u=>u.key===userKey);
   const now=useNow();
   const [tab,setTab]=useState("home");
-  const [clockedIn,setClockedIn]=useState(false);
-  const [clockInTime,setClockInTime]=useState(null);
-  const [clockFiliale,setClockFiliale]=useState("");
+
+  // ── 근무 상태 localStorage 유지 ──────────────────────────────────────────────
+  const CLOCK_KEY = `teeamo_clock_${userKey}`;
+  const [clockedIn,setClockedIn]=useState(()=>{
+    try { const s=localStorage.getItem(CLOCK_KEY); return s?JSON.parse(s).clockedIn:false; } catch{return false;}
+  });
+  const [clockInTime,setClockInTime]=useState(()=>{
+    try { const s=localStorage.getItem(CLOCK_KEY); const v=s?JSON.parse(s).clockInTime:null; return v?new Date(v):null; } catch{return null;}
+  });
+  const [clockFiliale,setClockFiliale]=useState(()=>{
+    try { const s=localStorage.getItem(CLOCK_KEY); return s?JSON.parse(s).clockFiliale:""; } catch{return "";}
+  });
+
+  // 상태 바뀔 때마다 즉시 저장
+  useEffect(()=>{
+    try { localStorage.setItem(CLOCK_KEY, JSON.stringify({clockedIn, clockInTime:clockInTime?clockInTime.toISOString():null, clockFiliale})); } catch{}
+  },[clockedIn, clockInTime, clockFiliale]);
+
   const [selFiliale,setSelFiliale]=useState(FILIALEN[0]);
   const [grund,setGrund]=useState("");
-  const [elapsed,setElapsed]=useState(0);
+  const [elapsed,setElapsed]=useState(()=>{
+    // 앱 재시작 시 이미 근무 중이면 경과시간 복원
+    try {
+      const s=localStorage.getItem(CLOCK_KEY); const v=s?JSON.parse(s):null;
+      if(v&&v.clockedIn&&v.clockInTime) return Math.floor((Date.now()-new Date(v.clockInTime).getTime())/1000);
+    } catch{}
+    return 0;
+  });
   const [modal,setModal]=useState(null);
   const [nDatum,setNDatum]=useState(today());
   const [nFiliale,setNFiliale]=useState(FILIALEN[0]);
@@ -717,6 +1288,7 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
     const inStr=`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`;
     setRecords(prev=>[...prev,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ:"normal"}]);
     setClockedIn(false);setClockInTime(null);setElapsed(0);setGrund("");setModal(null);
+    try{localStorage.removeItem(CLOCK_KEY);}catch{}
   }
   function submitNachtrag(){
     if(!nGrund.trim()){setNMsg("Bitte einen Grund angeben.");return;}
@@ -753,6 +1325,24 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
           </div>
         </div>
       </div>
+
+      {clockedIn&&(
+        <div style={{background:"#d4f0e0",borderBottom:`2px solid #a8dfc0`,padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:90}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:9,height:9,borderRadius:"50%",background:"#3a9e68",boxShadow:"0 0 0 3px rgba(58,158,104,.25)",animation:"pulse 1.4s infinite"}}/>
+            <div>
+              <div style={{fontSize:12,fontWeight:800,color:"#1a5c38"}}>Im Dienst · {clockFiliale}</div>
+              <div style={{fontSize:10,color:"#3a7a55"}}>
+                {clockInTime?`seit ${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())} Uhr`:""} · {elStr}
+              </div>
+            </div>
+          </div>
+          <button onClick={()=>{setModal("aus");setTab("home");}}
+            style={{fontSize:11,fontWeight:800,color:"#fff",background:"#3a9e68",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer"}}>
+            Ausstempeln
+          </button>
+        </div>
+      )}
 
       {tab==="home"&&(
         <div style={{padding:"18px 16px"}}>
@@ -799,25 +1389,7 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
 
       {tab==="dienstplan"&&(
         <div style={{padding:"14px"}}>
-          <div style={{...S.card,padding:0,overflow:"hidden",marginBottom:12}}><KalenderView csvCtx={csvCtx}/></div>
-          <div style={S.card}>
-            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Meine Einträge</div>
-            {myRecs.length===0?<div style={{fontSize:12,color:C.muted}}>Keine Einträge.</div>:myRecs.map((r,i)=>(
-              <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:i<myRecs.length-1?9:0,marginBottom:i<myRecs.length-1?9:0,borderBottom:i<myRecs.length-1?`1px solid ${C.border}`:"none"}}>
-                <div style={{display:"flex",gap:9,alignItems:"center"}}>
-                  <div style={{width:32,height:32,borderRadius:8,background:r.aus?C.mintLight:C.yellowLight,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-                    <span style={{fontSize:7,color:C.muted}}>{r.date.slice(5)}</span>
-                    <span style={{fontSize:10,fontWeight:700,color:r.aus?C.mintDark:C.yellow}}>{r.filiale.slice(-1)}</span>
-                  </div>
-                  <div>
-                    <div style={{fontSize:11,color:C.muted}}>{r.ein} → {r.aus||"läuft"}</div>
-                    <div style={{fontSize:9,color:C.muted}}>{r.filiale}</div>
-                  </div>
-                </div>
-                <span style={{fontSize:12,fontWeight:700,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</span>
-              </div>
-            ))}
-          </div>
+          <div style={{marginBottom:12}}><KalenderView csvCtx={csvCtx} userName={user.vorname} records={records} users={users}/></div>
         </div>
       )}
 
@@ -827,7 +1399,9 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
             <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:12}}>Nachträgliche Zeiterfassung</div>
             <div style={{marginBottom:10}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Datum</div>
-              <input type="date" value={nDatum} onChange={e=>setNDatum(e.target.value)} style={S.input}/>
+              <div style={{display:"flex"}}>
+                <input type="date" value={nDatum} onChange={e=>setNDatum(e.target.value)} style={{...S.input, flex:1}}/>
+              </div>
             </div>
             <div style={{marginBottom:10}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Filiale</div>
@@ -839,9 +1413,9 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
               {[["Einstempeln",nEin,setNEin],["Ausstempeln",nAus,setNAus]].map(([lbl,val,set])=>(
-                <div key={lbl}>
+                <div key={lbl} style={{display:"flex",flexDirection:"column"}}>
                   <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>{lbl}</div>
-                  <input type="time" value={val} onChange={e=>set(e.target.value)} style={S.input}/>
+                  <input type="time" value={val} onChange={e=>set(e.target.value)} style={{...S.input, width:"50%", display:"block", margin:"0 auto", minWidth:0, boxSizing:"border-box"}}/>
                 </div>
               ))}
             </div>
@@ -852,6 +1426,8 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
             {nMsg&&<div style={{fontSize:11,color:nMsg.startsWith("Bitte")?C.red:C.mintDark,marginBottom:9,fontWeight:600}}>{nMsg}</div>}
             <button onClick={submitNachtrag} style={{width:"100%",padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer"}}>Antrag einreichen</button>
           </div>
+
+          {/* Meine Anträge - Nachtrag 탭 아래 통합 */}
           {myAntraege.length>0&&(
             <div style={S.card}>
               <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Meine Anträge</div>
@@ -872,8 +1448,17 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
         </div>
       )}
 
+      {tab==="einspringen"&&(
+        <EinspringenView userName={user.vorname} setNotifications={null}/>
+      )}
+
       <div style={S.nav}>
-        {[{id:"home",icon:"🏠",lbl:"Startseite"},{id:"dienstplan",icon:"📋",lbl:"Dienstplan"},{id:"nachtrag",icon:"🕐",lbl:"Nachtrag"}].map(t=>(
+        {[
+          {id:"home",      icon:"🏠", lbl:"Startseite"},
+          {id:"dienstplan",icon:"📋", lbl:"Dienstplan"},
+          {id:"einspringen",icon:"🙋",lbl:"Einspringen"},
+          {id:"nachtrag",  icon:"🕐", lbl:"Nachtrag"},
+        ].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0"}}>
             <span style={{fontSize:19}}>{t.icon}</span>
             <span style={{fontSize:9,fontWeight:600,color:tab===t.id?C.mintDark:C.muted}}>{t.lbl}</span>
@@ -883,22 +1468,22 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
       </div>
 
       {modal&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200}}>
-          <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))"}}>
-            <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 20px"}}/>
-            <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>{modal==="ein"?"Einstempeln bestätigen":"Ausstempeln bestätigen"}</div>
-            <div style={{fontSize:12,color:C.muted,marginBottom:16}}>
-              Filiale: <strong style={{color:C.text}}>{modal==="ein"?selFiliale:clockFiliale}</strong> · <strong style={{color:C.text}}>{pad(now.getHours())}:{pad(now.getMinutes())}</strong> Uhr
-            </div>
-            <div style={{display:"flex",gap:9}}>
-              <button onClick={()=>setModal(null)} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
-              <button onClick={modal==="ein"?handleEin:handleAus}
-                style={{flex:2,padding:"12px",borderRadius:11,border:"none",background:modal==="ein"?`linear-gradient(135deg,${C.mint},${C.mintDark})`:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>
-                {modal==="ein"?"Jetzt einstempeln":"Jetzt ausstempeln"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ClockModal
+          modal={modal}
+          now={now}
+          selFiliale={selFiliale}
+          clockFiliale={clockFiliale}
+          clockInTime={clockInTime}
+          grund={grund}
+          CLOCK_KEY={CLOCK_KEY}
+          onClose={()=>setModal(null)}
+          onEin={(d)=>{setClockedIn(true);setClockInTime(d);setClockFiliale(selFiliale);setModal(null);}}
+          onAus={(inStr,outStr)=>{
+            setRecords(prev=>[...prev,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ:"normal"}]);
+            setClockedIn(false);setClockInTime(null);setElapsed(0);setGrund("");setModal(null);
+            try{localStorage.removeItem(CLOCK_KEY);}catch{}
+          }}
+        />
       )}
     </div>
   );
@@ -1012,7 +1597,217 @@ function StatistikTab({records,users}){
   );
 }
 
-// ── MANAGER ───────────────────────────────────────────────────────────────────
+// ── DIENSTPLAN UPLOAD + AI ANALYSE ───────────────────────────────────────────
+function DienstplanUploadView({ records, users }) {
+  const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
+  const [schedule, setSchedule, scheduleReady] = useFirebase("schedule", {});
+  const [imgSrc, setImgSrc] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const fileRef = useRef(null);
+
+  // plan.png도 Firebase Storage 대신 base64로 Firebase에 저장
+  const [planImg, setPlanImg, planReady] = useFirebase("planImage", null);
+
+  // 이미지 선택 → 분석
+  async function handleFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!apiKey) { setShowKeyInput(true); return; }
+
+    // HEIC/HEIF 체크
+    if (file.type === "image/heic" || file.type === "image/heif" || file.name.toLowerCase().endsWith(".heic")) {
+      setMsg({ type: "err", text: "❌ HEIC 형식은 지원되지 않아요. JPEG로 변환 후 업로드해주세요." });
+      return;
+    }
+
+    const isPdf = file.type === "application/pdf";
+
+    setAnalyzing(true);
+    setMsg(null);
+
+    const b64 = await new Promise(res => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(",")[1]);
+      r.readAsDataURL(file);
+    });
+    const dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
+    if (!isPdf) setImgSrc(dataUrl);
+
+    const empNames = users.filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
+    const promptText = `이 근무표를 매우 주의깊게 읽어줘.
+
+추출할 직원 목록: ${empNames}
+
+각 날짜 칸에서 직원 이름 뒤에 오는 시간(예: Anna: 15:00-20:00)을 정확히 읽어줘.
+- Arkaden = TEEAMO Arkaden 섹션
+- Aegdiimarkt 또는 Aegdimarkt = TEEAMO Aegidiimarkt 섹션  
+- TEEnJOY 또는 Teenjoy = Teenjoy 섹션
+- 각 섹션 안에 있는 직원 이름과 시간을 정확히 매칭해줘
+- 날짜는 ${new Date().getFullYear()}년 기준 YYYY-MM-DD 형식
+
+JSON만 응답 (다른 텍스트 없이):
+{"이름":[{"d":"YYYY-MM-DD","f":"지점명","t":"HH:MM-HH:MM"}]}
+
+지점명은 정확히 "TEEAMO Arkaden", "TEEAMO Aegidiimarkt", "Teenjoy" 중 하나만 사용.`;
+
+    const contentBlock = isPdf
+      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+      : { type: "image", source: { type: "base64", media_type: file.type, data: b64 } };
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5",
+          max_tokens: 8000,
+          messages: [{
+            role: "user",
+            content: [ contentBlock, { type: "text", text: promptText } ]
+          }]
+        })
+      });
+
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const data = await res.json();
+      const text = data.content.map(c => c.text || "").join("");
+      const clean = text.replace(/```json|```/g, "").trim();
+      let parsed;
+      try {
+        const raw = JSON.parse(clean);
+        // 짧은 키(d/f/t) → 긴 키(date/filiale/time) 변환
+        parsed = {};
+        for (const [name, shifts] of Object.entries(raw)) {
+          parsed[name] = (shifts || []).map(s => ({
+            date: s.date || s.d,
+            filiale: s.filiale || s.f,
+            time: s.time || s.t || null,
+          }));
+        }
+      } catch(pe) {
+        console.error("Raw response:", text);
+        throw new Error(`Raw: ${text.slice(0, 200)}`);
+      }
+
+      // Firebase에 저장 (schedule + planImage)
+      setSchedule(parsed);
+      // 이미지만 Firebase에 저장 (PDF는 저장 안 함)
+      if (!isPdf && b64.length < 4000000) {
+        setPlanImg(dataUrl);
+      }
+      setMsg({ type: "ok", text: `✅ 분석 완료! ${Object.keys(parsed).length}명의 일정을 추출했어요.` });
+    } catch (err) {
+      setMsg({ type: "err", text: `❌ 오류: ${err.message}` });
+    }
+    setAnalyzing(false);
+  }
+
+  const displayImg = imgSrc || planImg;
+
+  return (
+    <div style={{padding:"14px"}}>
+
+      {/* API 키 입력 */}
+      {showKeyInput && (
+        <div style={{...S.card, marginBottom:12, border:`1.5px solid ${C.yellow}`}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>🔑 Anthropic API-Schlüssel</div>
+          <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
+            placeholder="sk-ant-..."
+            style={{...S.input, width:"100%", fontSize:11, marginBottom:8}}/>
+          <button onClick={()=>setShowKeyInput(false)}
+            style={{width:"100%",padding:"9px",borderRadius:9,border:"none",background:C.mint,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+            Speichern
+          </button>
+        </div>
+      )}
+
+      {/* 업로드 버튼 */}
+      <div style={{...S.card, marginBottom:12}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>📋 Dienstplan hochladen</div>
+        <div style={{fontSize:10,color:C.muted,marginBottom:12}}>Bild hochladen → KI analysiert automatisch die Schichten</div>
+        <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" onChange={handleFile} style={{display:"none"}}/>
+        <button onClick={()=>fileRef.current.click()} disabled={analyzing}
+          style={{width:"100%",padding:"12px",borderRadius:11,border:`2px dashed ${C.mint}`,
+            background:C.mintLight,color:C.mintDark,fontWeight:800,fontSize:13,cursor:"pointer",
+            opacity:analyzing?0.6:1}}>
+          {analyzing ? "⏳ KI analysiert…" : "📷 Bild oder PDF auswählen & analysieren"}
+        </button>
+        {!apiKey&&(
+          <button onClick={()=>setShowKeyInput(true)}
+            style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
+            🔑 API-Schlüssel eingeben
+          </button>
+        )}
+        {apiKey&&(
+          <button onClick={()=>setShowKeyInput(v=>!v)}
+            style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
+            🔑 API-Schlüssel ändern
+          </button>
+        )}
+        {msg&&(
+          <div style={{marginTop:10,padding:"9px 12px",borderRadius:9,
+            background:msg.type==="ok"?C.mintLight:C.redLight,
+            color:msg.type==="ok"?C.mintDark:C.red,fontSize:11,fontWeight:600}}>
+            {msg.text}
+          </div>
+        )}
+      </div>
+
+      {/* 근무표 이미지 */}
+      {displayImg && (
+        <div style={{marginBottom:12}}>
+          <img src={displayImg} alt="Dienstplan"
+            style={{width:"100%",height:"auto",borderRadius:14,display:"block"}}/>
+        </div>
+      )}
+
+      {/* 추출된 일정 */}
+      {schedule && Object.keys(schedule).length > 0 && (
+        <div>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>
+            Extrahierte Schichten
+          </div>
+          {Object.entries(schedule).map(([name, shifts]) => {
+            if (!Array.isArray(shifts) || shifts.length === 0) return null;
+            return (
+              <div key={name} style={{...S.card, marginBottom:10}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:8}}>{name}</div>
+                {shifts.map((s, i) => {
+                  const actualRec = records.find(r => r.user === name && r.date === s.date);
+                  const status = !actualRec ? "ausstehend" : !actualRec.aus ? "aktiv" : "erledigt";
+                  return (
+                    <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+                      padding:"8px 10px",borderRadius:9,marginBottom:5,
+                      background:status==="erledigt"?C.mintLight:status==="aktiv"?"#FFF9E6":C.bg}}>
+                      <div>
+                        <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                          {new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                        </div>
+                        <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                      </div>
+                      <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
+                        color:status==="erledigt"?C.mintDark:status==="aktiv"?C.yellow:C.muted,
+                        background:status==="erledigt"?C.mintLight:status==="aktiv"?C.yellowLight:C.border}}>
+                        {status==="erledigt"?"✅ Gearbeitet":status==="aktiv"?"🟡 Aktiv":"⏳ Ausstehend"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx}){
   const [tab,setTab]=useState("uebersicht");
   const [detailKey,setDetailKey]=useState(null);
@@ -1025,6 +1820,65 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   const getStatus=name=>{const r=todayRecs.find(x=>x.user===name);if(!r)return"Nicht erschienen";if(!r.aus)return"Aktiv";return"Feierabend";};
   const getBranch=name=>{const r=todayRecs.find(x=>x.user===name);return r?.filiale||null;};
   const sColor=s=>s==="Aktiv"?C.mintDark:s==="Feierabend"?C.muted:C.red;
+
+  // 알림 & Schichttausch & Einspringen & Absagen
+  const [notifications, setNotifications] = useFirebase("notifications", {});
+  const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
+  const [freieSchichten, setFreieSchichten] = useFirebase("freieSchichten", []);
+  const [absagenList, setAbsagenList] = useFirebase("absagen", []);
+  const [schedule, setSchedule] = useFirebase("schedule", {});
+  const [fsDate, setFsDate] = useState(today());
+  const [fsFiliale, setFsFiliale] = useState(FILIALEN[0]);
+  const [fsTime, setFsTime] = useState("");
+  const [fsNote, setFsNote] = useState("");
+
+  const myNotifs = Object.entries(notifications||{})
+    .filter(([,n]) => n.zustaendig === userKey && !n.gelesen)
+    .sort((a,b) => b[1].ts - a[1].ts);
+  const myAbsagen = (Array.isArray(absagenList)?absagenList:[])
+    .filter(a => {
+      const z = a.filiale === "Teenjoy" ? "teddy" : "yeaji";
+      return z === userKey && a.status === "offen";
+    });
+  const unreadCount = myNotifs.length + myAbsagen.length;
+
+  function markRead(key) {
+    setNotifications(prev => ({ ...(prev||{}), [key]: { ...(prev[key]||{}), gelesen: true } }));
+  }
+  function addFreieSchicht() {
+    if (!fsDate) return;
+    setFreieSchichten(prev => [...(Array.isArray(prev)?prev:[]), {
+      id: Date.now(), date: fsDate, filiale: fsFiliale, time: fsTime||null, note: fsNote, besetzt: false
+    }]);
+    setFsTime(""); setFsNote("");
+  }
+  function handleAbsagen(antrag, ok) {
+    // 신청 상태 업데이트
+    setAbsagenList(prev => (Array.isArray(prev)?prev:[]).map(a =>
+      a.id===antrag.id ? {...a, status: ok?"genehmigt":"abgelehnt"} : a
+    ));
+    if (ok) {
+      // schedule에서 해당 근무 제거
+      setSchedule(prev => {
+        const updated = { ...(prev||{}) };
+        if (updated[antrag.userName]) {
+          updated[antrag.userName] = updated[antrag.userName].filter(s => (s.d||s.date) !== antrag.date);
+        }
+        return updated;
+      });
+      // 자동으로 Freie Schicht으로 등록
+      setFreieSchichten(prev => [...(Array.isArray(prev)?prev:[]), {
+        id: Date.now(), date: antrag.date, filiale: antrag.filiale,
+        time: antrag.time||null, note: `Abgesagt von ${antrag.userName}`, besetzt: false
+      }]);
+    }
+    // 알림 읽음 처리
+    const notifKey = Object.keys(notifications||{}).find(k => {
+      const n = notifications[k];
+      return n.type==="absagen" && n.user===antrag.userName && n.date===antrag.date;
+    });
+    if (notifKey) markRead(notifKey);
+  }
   const sBg=s=>s==="Aktiv"?C.mintLight:s==="Feierabend"?"#F0F0F0":C.redLight;
 
   return(
@@ -1127,9 +1981,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       })()}
 
       {tab==="dienstplan"&&(
-        <div style={{padding:"14px"}}>
-          <div style={{...S.card,padding:0,overflow:"hidden"}}><KalenderView csvCtx={csvCtx}/></div>
-        </div>
+        <DienstplanUploadView records={records} users={users}/>
       )}
 
       {tab==="antraege"&&(
@@ -1172,10 +2024,189 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
 
       {tab==="statistik"&&<StatistikTab records={records} users={users}/>}
 
+      {tab==="benachrichtigungen"&&(
+        <div style={{padding:"14px"}}>
+
+          {/* 빈 근무 등록 */}
+          <div style={{...S.card,marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>➕ Freie Schicht eintragen</div>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Datum</div>
+                <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)} style={{...S.input,width:"100%"}}/>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Uhrzeit</div>
+                <input type="time" value={fsTime} onChange={e=>setFsTime(e.target.value)} style={{...S.input,width:"100%"}}/>
+              </div>
+            </div>
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Filiale</div>
+              <div style={{display:"flex",gap:6}}>
+                {FILIALEN.map(f=>(
+                  <button key={f} onClick={()=>setFsFiliale(f)}
+                    style={{flex:1,padding:"7px 2px",borderRadius:8,fontSize:9,fontWeight:700,cursor:"pointer",
+                      border:`2px solid ${fsFiliale===f?C.mint:C.border}`,
+                      background:fsFiliale===f?C.mintLight:"#fff",
+                      color:fsFiliale===f?C.mintDark:C.muted}}>
+                    {f.replace("TEEAMO ","")}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <input value={fsNote} onChange={e=>setFsNote(e.target.value)} placeholder="Hinweis (optional)"
+              style={{...S.input,width:"100%",marginBottom:8}}/>
+            <button onClick={addFreieSchicht}
+              style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
+                background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
+                color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
+              Schicht veröffentlichen
+            </button>
+          </div>
+
+          {/* 등록된 빈 근무 목록 */}
+          {(Array.isArray(freieSchichten)?freieSchichten:[]).length>0&&(
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>Veröffentlichte Schichten</div>
+              {(Array.isArray(freieSchichten)?freieSchichten:[]).map(s=>(
+                <div key={s.id} style={{...S.card,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>{new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}</div>
+                    <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                  </div>
+                  <button onClick={()=>setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==s.id))}
+                    style={{fontSize:10,color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:"3px 8px",background:C.redLight,cursor:"pointer"}}>
+                    Löschen
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Absagen 승인 대기 */}
+          {myAbsagen.length > 0 && (
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🚫 Absage-Anträge</div>
+              {myAbsagen.map(a => (
+                <div key={a.id} style={{...S.card,marginBottom:8,border:`1.5px solid ${C.red}`}}>
+                  <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:2}}>{a.userName}</div>
+                  <div style={{fontSize:11,fontWeight:600,color:C.red,marginBottom:2}}>
+                    {new Date(a.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+                  </div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{a.filiale}{a.time?` · ${a.time}`:""}</div>
+                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>
+                    📌 "{a.grund}"
+                  </div>
+                  <div style={{fontSize:9,color:C.muted,marginBottom:8}}>
+                    ℹ️ Bei Genehmigung wird die Schicht automatisch als freie Schicht veröffentlicht.
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>handleAbsagen(a, false)}
+                      style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,
+                        background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                      Ablehnen
+                    </button>
+                    <button onClick={()=>handleAbsagen(a, true)}
+                      style={{flex:2,padding:"9px",borderRadius:9,border:"none",
+                        background:`linear-gradient(135deg,${C.red},#A8432E)`,
+                        color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
+                      ✅ Genehmigen & Freigeben
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🔔 Benachrichtigungen</div>
+              {myNotifs.map(([key, n]) => (
+                <div key={key} style={{...S.card,marginBottom:8,border:`1.5px solid ${
+                  n.type==="prüfen"?C.yellow:n.type==="einspringen"?C.mint:C.border}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      {n.type==="prüfen"&&<>
+                        <div style={{fontSize:12,fontWeight:800,color:C.text}}>⚠️ Prüfen: {n.user}</div>
+                        <div style={{fontSize:10,color:C.muted,marginTop:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}</div>
+                        <div style={{fontSize:10,color:C.yellow,marginTop:2}}>Geplant: {n.plannedTime} · Gearbeitet: {n.actualEin}–{n.actualAus}</div>
+                      </>}
+                      {n.type==="tausch_manager"&&<>
+                <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>
+                  🔄 Schichttausch: {n.initiator} ↔ {n.partner}
+                </div>
+                <div style={{display:"flex",gap:6,marginBottom:4}}>
+                  <div style={{flex:1,padding:"6px 8px",borderRadius:7,background:C.bg,border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:9,color:C.muted}}>{n.initiator}</div>
+                    <div style={{fontSize:10,fontWeight:700,color:C.text}}>
+                      {new Date(n.initiatorDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})} · {n.initiatorFiliale?.replace("TEEAMO ","")}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",fontSize:14}}>⇄</div>
+                  <div style={{flex:1,padding:"6px 8px",borderRadius:7,background:C.bg,border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:9,color:C.muted}}>{n.partner}</div>
+                    <div style={{fontSize:10,fontWeight:700,color:C.text}}>
+                      {new Date(n.partnerDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})} · {n.partnerFiliale?.replace("TEEAMO ","")}
+                    </div>
+                  </div>
+                </div>
+                <div style={{fontSize:9,color:C.mintDark,marginBottom:8}}>✅ Beide haben bestätigt. Bitte genehmigen.</div>
+                <div style={{display:"flex",gap:7}}>
+                  <button onClick={()=>markRead(key)}
+                    style={{flex:1,padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,
+                      background:"#fff",color:C.muted,fontWeight:700,fontSize:10,cursor:"pointer"}}>
+                    Ablehnen
+                  </button>
+                  <button onClick={()=>{
+                    // 근무표 교체
+                    if(window._fbDb&&window._fbRef&&window._fbSet) {
+                      const db=window._fbDb;
+                      const ref=window._fbRef;
+                      const fbOnValue=window._fbOnValue;
+                      fbOnValue(ref(db,"schedule"), snap => {
+                        const sched=snap.val()||{};
+                        // initiator: 원래 날짜 제거 → 파트너 날짜 추가
+                        sched[n.initiator]=(sched[n.initiator]||[]).filter(s=>(s.d||s.date)!==n.initiatorDate);
+                        sched[n.initiator]=[...(sched[n.initiator]||[]),{d:n.partnerDate,f:n.partnerFiliale,t:null}];
+                        // partner: 원래 날짜 제거 → initiator 날짜 추가
+                        sched[n.partner]=(sched[n.partner]||[]).filter(s=>(s.d||s.date)!==n.partnerDate);
+                        sched[n.partner]=[...(sched[n.partner]||[]),{d:n.initiatorDate,f:n.initiatorFiliale,t:null}];
+                        window._fbSet(ref(db,"schedule"),sched);
+                      },{onlyOnce:true});
+                    }
+                    markRead(key);
+                  }}
+                    style={{flex:2,padding:"7px",borderRadius:8,border:"none",
+                      background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
+                      color:"#fff",fontWeight:800,fontSize:10,cursor:"pointer"}}>
+                    ✅ Genehmigen & Tauschen
+                  </button>
+                </div>
+              </>}
+                      {n.type==="einspringen"&&<>
+                        <div style={{fontSize:12,fontWeight:800,color:C.mintDark}}>🙋 Eingesprungen: {n.user}</div>
+                        <div style={{fontSize:10,color:C.muted,marginTop:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}{n.time?` · ${n.time}`:""}</div>
+                      </>}
+                    </div>
+                    <button onClick={()=>markRead(key)}
+                      style={{fontSize:9,padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,cursor:"pointer",flexShrink:0}}>
+                      ✓
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {myNotifs.length===0&&myAbsagen.length===0&&(Array.isArray(freieSchichten)?freieSchichten:[]).length===0&&(
+            <div style={{textAlign:"center",color:C.muted,fontSize:12,padding:"20px 0"}}>Keine neuen Benachrichtigungen.</div>
+          )}
+        </div>
+      )}
+
       <div style={S.nav}>
         {[{id:"uebersicht",icon:"👥",lbl:"Übersicht"},
           {id:"dienstplan",icon:"📋",lbl:"Dienstplan"},
-          {id:"antraege",icon:"📥",lbl:`Anträge${offene.length>0?" ("+offene.length+")":""}`},
+          {id:"antraege",icon:"📥",lbl:`Anträge${offene.length>0?" ("+offene.length+")":""}` },
+          {id:"benachrichtigungen",icon:"🔔",lbl:`Alarm${unreadCount>0?" ("+unreadCount+")":""}` },
           {id:"statistik",icon:"📊",lbl:"Statistik"}].map(t=>(
           <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0"}}>
             <span style={{fontSize:19}}>{t.icon}</span>
@@ -1212,10 +2243,11 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
 function App(){
   const [screen,setScreen]=useState("login");
   const [userKey,setUserKey]=useState(null);
-  // ✅ usePersist: ls 우선, INIT은 최초 1회만 사용, 변경 즉시 저장
-  const [records, setRecords]   = usePersist("teeamo_records",  INIT_RECORDS);
-  const [antraege,setAntraege]  = usePersist("teeamo_antraege", INIT_ANTRAEGE);
-  const [users,   setUsers]     = usePersist("teeamo_users",    INIT_USERS);
+  // users/PIN은 로컬 유지 (보안)
+  const [users, setUsers] = usePersist("teeamo_users", INIT_USERS);
+  // records/antraege는 Firebase 실시간 동기화
+  const [records,  setRecords,  recordsReady]  = useFirebase("records",  INIT_RECORDS);
+  const [antraege, setAntraege, antraegeReady] = useFirebase("antraege", INIT_ANTRAEGE);
   // ✅ CSV: 앱 최상단 1회 fetch, 모든 화면에 공유
   const csvCtx = useDienstplanCSV();
 
@@ -1228,9 +2260,15 @@ function App(){
 
   return(
     <div style={{maxWidth:500,margin:"0 auto",minHeight:"100vh",background:C.bg}}>
-      {screen==="login"&&<LoginView onLogin={handleLogin} users={users} setUsers={setUsers} csvCtx={csvCtx}/>}
-      {screen==="mitarbeiter"&&<MitarbeiterView userKey={userKey} users={users} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx}/>}
-      {screen==="manager"&&<ManagerView records={records} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsers} csvCtx={csvCtx}/>}
+      {!recordsReady&&(
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",gap:14}}>
+          <div style={{width:36,height:36,border:`3px solid ${C.mint}`,borderTop:"3px solid transparent",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
+          <div style={{fontSize:13,color:C.muted,fontWeight:600}}>Verbindung zu Firebase…</div>
+        </div>
+      )}
+      {recordsReady&&screen==="login"&&<LoginView onLogin={handleLogin} users={users} setUsers={setUsers} csvCtx={csvCtx}/>}
+      {recordsReady&&screen==="mitarbeiter"&&<MitarbeiterView userKey={userKey} users={users} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx}/>}
+      {recordsReady&&screen==="manager"&&<ManagerView records={records} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsers} csvCtx={csvCtx}/>}
     </div>
   );
 }
