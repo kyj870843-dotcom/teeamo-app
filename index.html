@@ -50,6 +50,7 @@
   window.dispatchEvent(new Event("firebase-ready"));
 </script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -75,26 +76,26 @@ const NACHTRAG_ROUTING = {
 };
 
 const INIT_USERS = [
-  {key:"anna",    vorname:"Anna",    nachname:"",kuerzel:"An",role:"Mitarbeiterin",pin:"1001"},
-  {key:"dayoung", vorname:"Dayoung", nachname:"",kuerzel:"Da",role:"Mitarbeiterin",pin:"1002"},
-  {key:"eunjin",  vorname:"Eunjin",  nachname:"",kuerzel:"Eu",role:"Mitarbeiterin",pin:"1003"},
-  {key:"gayeon",  vorname:"Gayeon",  nachname:"",kuerzel:"Ga",role:"Mitarbeiterin",pin:"1004"},
-  {key:"jiwoo",   vorname:"Jiwoo",   nachname:"",kuerzel:"Ji",role:"Mitarbeiterin",pin:"1005"},
-  {key:"jiye",    vorname:"Jiye",    nachname:"",kuerzel:"Ji",role:"Mitarbeiterin",pin:"1006"},
-  {key:"mengjun", vorname:"Mengjun", nachname:"",kuerzel:"Me",role:"Mitarbeiterin",pin:"1007"},
-  {key:"saemee",  vorname:"Saemee",  nachname:"",kuerzel:"Sa",role:"Mitarbeiterin",pin:"1008"},
-  {key:"sangeun", vorname:"Sangeun", nachname:"",kuerzel:"Sa",role:"Mitarbeiterin",pin:"1009"},
-  {key:"semi",    vorname:"Semi",    nachname:"",kuerzel:"Se",role:"Mitarbeiterin",pin:"1010"},
-  {key:"shakira", vorname:"Shakira", nachname:"",kuerzel:"Sh",role:"Mitarbeiterin",pin:"1011"},
-  {key:"siyi",    vorname:"Siyi",    nachname:"",kuerzel:"Si",role:"Mitarbeiterin",pin:"1012"},
-  {key:"uuree",   vorname:"Uuree",   nachname:"",kuerzel:"Uu",role:"Mitarbeiterin",pin:"1013"},
-  {key:"yaya",    vorname:"Yaya",    nachname:"",kuerzel:"Ya",role:"Mitarbeiterin",pin:"1014"},
-  {key:"yeonjoo", vorname:"Yeonjoo", nachname:"",kuerzel:"Ye",role:"Mitarbeiterin",pin:"1016"},
-  {key:"yewon",   vorname:"Yewon",   nachname:"",kuerzel:"Ye",role:"Mitarbeiterin",pin:"1017"},
-  {key:"yujin",   vorname:"Yujin",   nachname:"",kuerzel:"Yu",role:"Mitarbeiterin",pin:"1018"},
-  {key:"tingting",vorname:"Tingting",nachname:"",kuerzel:"Ti",role:"Chefin",       pin:"9001"},
-  {key:"teddy",   vorname:"Teddy",   nachname:"",kuerzel:"Te",role:"Manager",      pin:"9002"},
-  {key:"yeaji",   vorname:"Yeaji",   nachname:"",kuerzel:"Yj",role:"Managerin",    pin:"9003"},
+  {key:"anna",    vorname:"Anna",    nachname:"",kuerzel:"An",role:"Mitarbeiterin",pin:"1001",contractHours:0},
+  {key:"dayoung", vorname:"Dayoung", nachname:"",kuerzel:"Da",role:"Mitarbeiterin",pin:"1002",contractHours:0},
+  {key:"eunjin",  vorname:"Eunjin",  nachname:"",kuerzel:"Eu",role:"Mitarbeiterin",pin:"1003",contractHours:0},
+  {key:"gayeon",  vorname:"Gayeon",  nachname:"",kuerzel:"Ga",role:"Mitarbeiterin",pin:"1004",contractHours:0},
+  {key:"jiwoo",   vorname:"Jiwoo",   nachname:"",kuerzel:"Ji",role:"Mitarbeiterin",pin:"1005",contractHours:0},
+  {key:"jiye",    vorname:"Jiye",    nachname:"",kuerzel:"Ji",role:"Mitarbeiterin",pin:"1006",contractHours:0},
+  {key:"mengjun", vorname:"Mengjun", nachname:"",kuerzel:"Me",role:"Mitarbeiterin",pin:"1007",contractHours:0},
+  {key:"saemee",  vorname:"Saemee",  nachname:"",kuerzel:"Sa",role:"Mitarbeiterin",pin:"1008",contractHours:0},
+  {key:"sangeun", vorname:"Sangeun", nachname:"",kuerzel:"Sa",role:"Mitarbeiterin",pin:"1009",contractHours:0},
+  {key:"semi",    vorname:"Semi",    nachname:"",kuerzel:"Se",role:"Mitarbeiterin",pin:"1010",contractHours:0},
+  {key:"shakira", vorname:"Shakira", nachname:"",kuerzel:"Sh",role:"Mitarbeiterin",pin:"1011",contractHours:0},
+  {key:"siyi",    vorname:"Siyi",    nachname:"",kuerzel:"Si",role:"Mitarbeiterin",pin:"1012",contractHours:0},
+  {key:"uuree",   vorname:"Uuree",   nachname:"",kuerzel:"Uu",role:"Mitarbeiterin",pin:"1013",contractHours:0},
+  {key:"yaya",    vorname:"Yaya",    nachname:"",kuerzel:"Ya",role:"Mitarbeiterin",pin:"1014",contractHours:0},
+  {key:"yeonjoo", vorname:"Yeonjoo", nachname:"",kuerzel:"Ye",role:"Mitarbeiterin",pin:"1016",contractHours:0},
+  {key:"yewon",   vorname:"Yewon",   nachname:"",kuerzel:"Ye",role:"Mitarbeiterin",pin:"1017",contractHours:0},
+  {key:"yujin",   vorname:"Yujin",   nachname:"",kuerzel:"Yu",role:"Mitarbeiterin",pin:"1018",contractHours:0},
+  {key:"tingting",vorname:"Tingting",nachname:"",kuerzel:"Ti",role:"Chefin",       pin:"9001",contractHours:0},
+  {key:"teddy",   vorname:"Teddy",   nachname:"",kuerzel:"Te",role:"Manager",      pin:"9002",contractHours:0},
+  {key:"yeaji",   vorname:"Yeaji",   nachname:"",kuerzel:"Yj",role:"Managerin",    pin:"9003",contractHours:0},
 ];
 const INIT_RECORDS = [
   {id:1, user:"Anna",   date:"2026-06-02",filiale:"TEEAMO Arkaden",     ein:"09:02",aus:"18:10",note:"",typ:"normal"},
@@ -108,26 +109,18 @@ const INIT_RECORDS = [
   {id:9, user:"Saemee", date:"2026-06-08",filiale:"TEEAMO Arkaden",     ein:"09:00",aus:"18:00",note:"",typ:"normal"},
   {id:10,user:"Yujin",  date:"2026-06-09",filiale:"TEEAMO Aegidiimarkt",ein:"09:05",aus:null,   note:"",typ:"normal"},
 ];
-const INIT_ANTRAEGE = [
-  {id:101,user:"Sangeun",date:"2026-06-01",filiale:"TEEAMO Arkaden",   ein:"10:00",aus:"18:00",grund:"Vergessen einzustempeln",status:"offen",zustaendig:"yeaji"},
-  {id:102,user:"Shakira",date:"2026-06-05",filiale:"Teenjoy",          ein:"09:30",aus:"17:30",grund:"Kein Internet im Laden", status:"offen",zustaendig:"teddy"},
-];
+const INIT_ANTRAEGE = [];
 
-// ── ✅ LocalStorage: 최초 1회만 INIT 사용, 이후 변경은 즉시 저장 ─────────────
+// ── PIN은 LocalStorage에만 저장 (보안) ─────────────────────────────────────
 function lsGet(key, fallback) {
-  try {
-    const v = localStorage.getItem(key);
-    if (v !== null) return JSON.parse(v);
-    localStorage.setItem(key, JSON.stringify(fallback));
-    return fallback;
-  } catch { return fallback; }
+  try { const v=localStorage.getItem(key); if(v!==null) return JSON.parse(v); return fallback; } catch { return fallback; }
 }
-function lsSet(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
-}
+function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
+
+// API 키 등 개인 설정용 localStorage 훅
 function usePersist(lsKey, init) {
-  const [state, setState] = useState(() => lsGet(lsKey, init));
-  const setAndSave = useCallback((updater) => {
+  const [state, setState] = React.useState(() => lsGet(lsKey, init));
+  const setAndSave = React.useCallback((updater) => {
     setState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       lsSet(lsKey, next);
@@ -137,13 +130,28 @@ function usePersist(lsKey, init) {
   return [state, setAndSave];
 }
 
-// ── Firebase 실시간 동기화 훅 ─────────────────────────────────────────────────
+// PIN 전용 로컬 훅
+function usePinStore() {
+  // PIN은 항상 localStorage에서만 읽고 씀
+  function getPin(userKey) { return lsGet(`pin_${userKey}`, null); }
+  function setPin(userKey, pin) { lsSet(`pin_${userKey}`, pin); }
+  function initPins(users) {
+    // INIT_USERS의 PIN을 LS에 저장 (최초 1회)
+    users.forEach(u => {
+      if (!lsGet(`pin_${u.key}`, null)) lsSet(`pin_${u.key}`, u.pin);
+    });
+  }
+  return { getPin, setPin, initPins };
+}
+
+// ── Firebase 실시간 동기화 훅 (완전판) ────────────────────────────────────────
 function useFirebase(path, fallback) {
   const [data, setData] = useState(fallback);
   const [ready, setReady] = useState(false);
+  const unsubRef = useRef(null);
 
   useEffect(() => {
-    let unsubscribe = null;
+    let cancelled = false;
 
     function attach() {
       const db = window._fbDb;
@@ -151,11 +159,14 @@ function useFirebase(path, fallback) {
       const fbOnValue = window._fbOnValue;
       if (!db || !fbRef || !fbOnValue) return false;
       const r = fbRef(db, path);
-      fbOnValue(r, snap => {
+      // onValue returns unsubscribe fn
+      unsubRef.current = fbOnValue(r, snap => {
+        if (cancelled) return;
         const val = snap.val();
         if (val === null) {
           setData(fallback);
         } else if (Array.isArray(fallback)) {
+          // Firebase stores arrays as objects with numeric/string keys
           setData(Object.values(val));
         } else {
           setData(val);
@@ -165,39 +176,62 @@ function useFirebase(path, fallback) {
       return true;
     }
 
-    // 이미 준비됐으면 바로 연결
-    if (attach()) return;
+    if (attach()) return () => { cancelled=true; if(unsubRef.current) unsubRef.current(); };
 
-    // 아직 안 됐으면 폴링으로 재시도 (최대 10초)
     let tries = 0;
     const iv = setInterval(() => {
       tries++;
       if (attach()) { clearInterval(iv); return; }
-      if (tries > 20) {
+      if (tries > 30) {
         clearInterval(iv);
-        console.error("Firebase 연결 실패");
-        setReady(true); // 로딩 풀어주기
+        console.error("Firebase 연결 실패:", path);
+        setData(fallback);
+        setReady(true);
       }
     }, 500);
 
-    return () => clearInterval(iv);
+    return () => { cancelled=true; clearInterval(iv); if(unsubRef.current) unsubRef.current(); };
   }, [path]);
 
+  // setter: Firebase에 씀 → onValue가 자동으로 UI 갱신
+  function fbWrite(next) {
+    if (!window._fbDb || !window._fbRef || !window._fbSet) return;
+    let toSave;
+    if (Array.isArray(next)) {
+      if (next.length === 0) { toSave = null; }
+      else {
+        // users path: PIN은 Firebase에 저장하지 않음
+        const sanitize = path === "users"
+          ? v => { const {pin:_, ...rest} = v; return rest; }
+          : v => v;
+        toSave = Object.fromEntries(next.map((v,i) => [String(v.id||v.key||i), sanitize(v)]));
+      }
+    } else if (next && typeof next === "object" && Object.keys(next).length === 0) {
+      toSave = null;
+    } else {
+      toSave = next;
+    }
+    window._fbSet(window._fbRef(window._fbDb, path), toSave)
+      .catch(e => console.error("FB write error ["+path+"]:", e));
+  }
+
   function setter(updater) {
+    // 낙관적 업데이트: 로컬 즉시 반영 + Firebase 쓰기
     setData(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      if (window._fbDb && window._fbRef && window._fbSet) {
-        const toSave = Array.isArray(next)
-          ? Object.fromEntries(next.map((v, i) => [v.id || i, v]))
-          : next;
-        window._fbSet(window._fbRef(window._fbDb, path), toSave)
-          .catch(e => console.error("FB write error:", e));
-      }
+      fbWrite(next);
       return next;
     });
   }
 
-  return [data, setter, ready];
+  // 단일 필드 업데이트 (path/field 만 변경, 전체 재쓰기 방지)
+  function fbUpdateField(subPath, value) {
+    if (!window._fbDb || !window._fbRef || !window._fbSet) return;
+    window._fbSet(window._fbRef(window._fbDb, path + "/" + subPath), value)
+      .catch(e => console.error("FB field write error:", e));
+  }
+
+  return [data, setter, ready, fbUpdateField];
 }
 
 // ── 유틸 ─────────────────────────────────────────────────────────────────────
@@ -416,7 +450,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
     };
   }, []);
 
-  const empList = (users||[]).filter(u => !MANAGERS.includes(u.key) && u.vorname !== userName);
+  const empList = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key) && u.vorname !== userName);
   const targetShifts = targetUser ? (schedule[targetUser.vorname] || []) : [];
 
   function onDragStart(e) {
@@ -454,26 +488,15 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
       grund, partnerBestaetigt: false, ts: Date.now(),
     };
     setTauschAntraege(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
-    const zustaendig = antrag.initiatorFiliale === "Teenjoy" ? "teddy" : "yeaji";
-    // 파트너에게 알림 (직접 Firebase 쓰기)
+    // 파트너에게만 알림 전송 – 관리자 알림은 파트너 수락 후 전송
     if (window._fbDb && window._fbRef && window._fbSet) {
-      const notifKey = `tausch_anfrage_${id}`;
-      window._fbSet(window._fbRef(window._fbDb, `notifications/${notifKey}`), {
+      window._fbSet(window._fbRef(window._fbDb, `notifications/tausch_anfrage_${id}`), {
         type: "tausch_anfrage", targetUser: targetUser.vorname,
         initiator: userName, antragId: id,
         myDate: antrag.partnerDate, myFiliale: antrag.partnerFiliale, myTime: antrag.partnerTime,
         theirDate: antrag.initiatorDate, theirFiliale: antrag.initiatorFiliale,
-        zustaendig, gelesen: false, ts: Date.now()
+        gelesen: false, ts: Date.now()
       }).catch(e => console.error("notif write error:", e));
-
-      // 관리자 Anträge에 즉시 "im_prozess"로 등록
-      window._fbSet(window._fbRef(window._fbDb, `notifications/tausch_manager_${id}`), {
-        type: "tausch_manager", status: "im_prozess",
-        initiator: userName, partner: targetUser.vorname,
-        initiatorDate: antrag.initiatorDate, initiatorFiliale: antrag.initiatorFiliale,
-        partnerDate: antrag.partnerDate, partnerFiliale: antrag.partnerFiliale,
-        antragId: id, zustaendig, gelesen: false, ts: Date.now()
-      }).catch(e => console.error("manager notif write error:", e));
     }
     onClose();
   }
@@ -660,8 +683,9 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
 
     // 수락 → 즉시 schedule 교체 (관리자 승인 불필요)
     if (window._fbDb && window._fbRef && window._fbSet && window._fbOnValue) {
+      // once는 unsubscribe 불필요 (onlyOnce: true)
       window._fbOnValue(window._fbRef(window._fbDb, "schedule"), snap => {
-        const sched = snap.val() || {};
+        const sched = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
         // initiator: 원래 날짜 제거 → 파트너 날짜 추가
         sched[antrag.initiator] = (sched[antrag.initiator]||[])
           .filter(s => (s.d||s.date) !== antrag.initiatorDate);
@@ -672,7 +696,9 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
           .filter(s => (s.d||s.date) !== antrag.partnerDate);
         sched[antrag.partner] = [...sched[antrag.partner],
           {d: antrag.initiatorDate, f: antrag.initiatorFiliale, t: antrag.initiatorTime||null}];
-        window._fbSet(window._fbRef(window._fbDb, "schedule"), sched);
+        window._fbSet(window._fbRef(window._fbDb, "schedule"), sched)
+          .then(() => console.log("✅ Schedule getauscht:", antrag.initiator, "↔", antrag.partner))
+          .catch(e => console.error("Schedule swap error:", e));
       }, {onlyOnce: true});
     }
 
@@ -681,16 +707,19 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
       a.id===antragId ? {...a, status:"getauscht", partnerBestaetigt:true} : a
     ));
 
-    // 관리자에게 완료 알림
+    // 관리자 2명 모두에게 알림 전송 (teddy + yeaji)
     if (window._fbDb && window._fbRef && window._fbSet) {
-      const zustaendig = antrag.initiatorFiliale==="Teenjoy"?"teddy":"yeaji";
-      window._fbSet(window._fbRef(window._fbDb, `notifications/tausch_manager_${antragId}`), {
-        type: "tausch_manager", status: "getauscht",
-        initiator: antrag.initiator, partner: antrag.partner,
-        initiatorDate: antrag.initiatorDate, initiatorFiliale: antrag.initiatorFiliale,
-        partnerDate: antrag.partnerDate, partnerFiliale: antrag.partnerFiliale,
-        antragId, zustaendig, gelesen: false, ts: Date.now()
-      }).catch(e => console.error(e));
+      const ts = Date.now();
+      ["teddy","yeaji"].forEach(mgr => {
+        window._fbSet(window._fbRef(window._fbDb, `notifications/tausch_manager_${antragId}_${mgr}`), {
+          type: "tausch_manager", status: "partner_ok",
+          kategorie: "Schichttausch",
+          initiator: antrag.initiator, partner: antrag.partner,
+          initiatorDate: antrag.initiatorDate, initiatorFiliale: antrag.initiatorFiliale,
+          partnerDate: antrag.partnerDate, partnerFiliale: antrag.partnerFiliale,
+          antragId, zustaendig: mgr, bearbeitetVon: null, gelesen: false, ts
+        }).catch(e => console.error(e));
+      });
     }
   }
 
@@ -873,26 +902,38 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const alreadyAbgesagt = (Array.isArray(absagenList)?absagenList:[])
     .find(a => a.userName === userName && a.date === d);
 
-  // Tausch 신청 상태 확인
+  // Tausch 신청 상태 확인 (initiator 입장 A)
   const myTausch = (Array.isArray(tauschAntraege)?tauschAntraege:[])
     .find(t => t.initiator === userName && t.initiatorDate === d);
+  // 파트너(B) 입장: 이 날짜에 tausch 요청 받은 경우
+  const partnerTausch = !myTausch ? (Array.isArray(tauschAntraege)?tauschAntraege:[])
+    .find(t => t.partner === userName && t.partnerDate === d) : null;
+
   const tauschLabel = myTausch ? ({
     ausstehend_bestaetigung: `🔄 Tausch-Anfrage an ${myTausch.partner} · Warte auf Bestätigung`,
     ausstehend_manager:      `🔄 Tausch wartet auf Manager-Genehmigung`,
     getauscht:               `✅ Getauscht mit ${myTausch.partner}`,
     abgelehnt_partner:       `❌ Tausch von ${myTausch.partner} abgelehnt`,
-  }[myTausch.status] || null) : null;
+  }[myTausch.status] || null) : partnerTausch ? ({
+    ausstehend_bestaetigung: `🔄 Tausch angefragt von ${partnerTausch.initiator} · Deine Antwort ausstehend`,
+    getauscht:               `✅ Getauscht mit ${partnerTausch.initiator}`,
+    abgelehnt_partner:       `❌ Tausch abgelehnt`,
+  }[partnerTausch.status] || null) : null;
 
   function handleAbsagen(antrag) {
     setAbsagenList(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
-    const zustaendig = f === "Teenjoy" ? "teddy" : "yeaji";
-    setNotif(prev => ({
-      ...(prev||{}),
-      [`absagen_${antrag.id}`]: {
-        type: "absagen", user: userName, date: d, filiale: f, time: t,
-        grund: antrag.grund, zustaendig, status: "offen", gelesen: false, ts: Date.now()
-      }
-    }));
+    // 관리자 2명 모두에게 알림 전송
+    const ts = Date.now();
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      ["teddy","yeaji"].forEach(mgr => {
+        window._fbSet(window._fbRef(window._fbDb, `notifications/absagen_${antrag.id}_${mgr}`), {
+          type: "absagen", kategorie: "Schichtabsage",
+          user: userName, date: d, filiale: f, time: t,
+          userName, grund: antrag.grund, absageId: antrag.id,
+          zustaendig: mgr, bearbeitetVon: null, status: "offen", gelesen: false, ts
+        }).catch(e => console.error(e));
+      });
+    }
   }
 
   // 상태별 배지 색상
@@ -973,16 +1014,17 @@ function EinspringenView({ userName }) {
     });
     // 빈 근무에서 제거
     setFreieSchichten(prev => (Array.isArray(prev)?prev:[]).filter(s => s.id !== schicht.id));
-    // 담당자 알림
-    const zustaendig = schicht.filiale === "Teenjoy" ? "teddy" : "yeaji";
-    setNotifications(prev => ({
-      ...(prev||{}),
-      [`einspringen_${schicht.id}`]: {
-        type: "einspringen", user: userName,
-        date: schicht.date, filiale: schicht.filiale, time: schicht.time,
-        zustaendig, gelesen: false, ts: Date.now()
-      }
-    }));
+    // 관리자 2명 모두에게 알림
+    const ts = Date.now();
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      ["teddy","yeaji"].forEach(mgr => {
+        window._fbSet(window._fbRef(window._fbDb, `notifications/einspringen_${schicht.id}_${mgr}`), {
+          type: "einspringen", kategorie: "Einspringen",
+          user: userName, date: schicht.date, filiale: schicht.filiale, time: schicht.time,
+          zustaendig: mgr, bearbeitetVon: null, gelesen: false, ts
+        }).catch(e => console.error(e));
+      });
+    }
     setMsg(`✅ Du bist jetzt für ${new Date(schicht.date).toLocaleDateString("de-DE")} in ${schicht.filiale} eingeplant!`);
     setTimeout(() => setMsg(null), 4000);
   }
@@ -1039,7 +1081,7 @@ function EinspringenView({ userName }) {
   );
 }
 
-function LoginView({onLogin,users,setUsers,csvCtx}){
+function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   const now=useNow();
   const [page,setPage]=useState("list");
   const [selUser,setSelUser]=useState(null);
@@ -1052,9 +1094,10 @@ function LoginView({onLogin,users,setUsers,csvCtx}){
   const [regErr,setRegErr]=useState("");
   const [regRole,setRegRole]=useState("Staff");
   const ADMIN_NAMES=["yeaji","tingting","teddy","huy"];
+  const safeUsers=Array.isArray(users)?users:[];
   const isAdminName=regV.trim().toLowerCase()!==""&&ADMIN_NAMES.includes(regV.trim().toLowerCase());
-  const empList=[...users.filter(u=>!MANAGERS.includes(u.key))].sort((a,b)=>a.vorname.localeCompare(b.vorname));
-  const mgrList=[...users.filter(u=>MANAGERS.includes(u.key))].sort((a,b)=>a.vorname.localeCompare(b.vorname));
+  const empList=[...safeUsers.filter(u=>!MANAGERS.includes(u.key))].sort((a,b)=>a.vorname.localeCompare(b.vorname));
+  const mgrList=[...safeUsers.filter(u=>MANAGERS.includes(u.key))].sort((a,b)=>a.vorname.localeCompare(b.vorname));
 
   function selectUser(u){setSelUser(u);setPin("");setErr("");setPage("pin");}
   function back(){setPage("list");setSelUser(null);setPin("");setErr("");}
@@ -1062,7 +1105,10 @@ function LoginView({onLogin,users,setUsers,csvCtx}){
     if(pin.length>=4)return;
     const next=pin+k; setPin(next);
     if(next.length===4){
-      if(next===selUser.pin) onLogin(selUser.key);
+      // PIN은 localStorage에서 확인 (Firebase에 PIN 저장 안 함)
+      const stored = getPin(selUser.key);
+      const correct = stored || selUser.pin; // fallback to INIT pin
+      if(next===correct) onLogin(selUser.key);
       else{setErr("Falsche PIN. Erneut versuchen.");setTimeout(()=>{setPin("");setErr("");},1400);}
     }
   }
@@ -1072,7 +1118,10 @@ function LoginView({onLogin,users,setUsers,csvCtx}){
     if(regP!==regP2){setRegErr("PINs stimmen nicht überein.");return;}
     const vn=regV.trim(),nn=regN.trim(),key=vn.toLowerCase()+"_"+Date.now();
     const isAdmin=isAdminName&&regRole==="Admin";
-    setUsers(prev=>[...prev,{key,vorname:vn,nachname:nn,kuerzel:vn.slice(0,2),role:isAdmin?"Admin":"Staff",pin:regP,isAdmin}]);
+    // PIN은 LS에만 저장, 나머지 user 정보는 Firebase
+    const newUser={key,vorname:vn,nachname:nn,kuerzel:vn.slice(0,2),role:isAdmin?"Admin":"Staff",isAdmin,contractHours:0};
+    savePinFn(key, regP);
+    setUsers(prev=>[...(Array.isArray(prev)?prev:[]),newUser]);
     setRegV("");setRegN("");setRegP("");setRegP2("");setRegErr("");setRegRole("Staff");setPage("list");
   }
 
@@ -1316,7 +1365,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
 
 // ── MITARBEITER ───────────────────────────────────────────────────────────────
 function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,onLogout,csvCtx}){
-  const user=users.find(u=>u.key===userKey);
+  const user=(Array.isArray(users)?users:[]).find(u=>u.key===userKey);
   const now=useNow();
   const [tab,setTab]=useState("home");
 
@@ -1380,9 +1429,21 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
   }
   function submitNachtrag(){
     if(!nGrund.trim()){setNMsg("Bitte einen Grund angeben.");return;}
-    const z=NACHTRAG_ROUTING[nFiliale]||"yeaji";
-    setAntraege(prev=>[...prev,{id:Date.now(),user:user.vorname,date:nDatum,filiale:nFiliale,ein:nEin,aus:nAus,grund:nGrund,status:"offen",zustaendig:z}]);
-    setNMsg(`Antrag eingereicht! Wird von ${z==="yeaji"?"Yeaji":"Teddy"} geprüft.`);setNGrund("");
+    const id = Date.now();
+    const ts = id;
+    // Firebase에 직접 저장 (antraege배열 + 양쪽 관리자 notifications)
+    setAntraege(prev=>[...prev,{id,user:user.vorname,date:nDatum,filiale:nFiliale,ein:nEin,aus:nAus,grund:nGrund,status:"offen",zustaendig:"all"}]);
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      ["teddy","yeaji"].forEach(mgr => {
+        window._fbSet(window._fbRef(window._fbDb, `notifications/nachtrag_${id}_${mgr}`), {
+          type: "nachtrag", kategorie: "Nachtrag",
+          user: user.vorname, date: nDatum, filiale: nFiliale, ein: nEin, aus: nAus,
+          grund: nGrund, antragId: id,
+          zustaendig: mgr, bearbeitetVon: null, status: "offen", gelesen: false, ts
+        }).catch(e => console.error(e));
+      });
+    }
+    setNMsg("Antrag eingereicht! Wird von Yeaji oder Teddy geprüft.");setNGrund("");
   }
 
   const elStr=`${pad(Math.floor(elapsed/3600))}:${pad(Math.floor((elapsed%3600)/60))}:${pad(elapsed%60)}`;
@@ -1537,7 +1598,7 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
       )}
 
       {tab==="einspringen"&&(
-        <EinspringenView userName={user.vorname} setNotifications={null}/>
+        <EinspringenView userName={user.vorname} users={users}/>
       )}
 
       <div style={S.nav}>
@@ -1591,7 +1652,7 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
 function StatistikTab({records,users}){
   const [selMonth,setSelMonth]=useState("2026-06");
   const [exported,setExported]=useState(null);
-  const empList=users.filter(u=>!MANAGERS.includes(u.key)).sort((a,b)=>a.vorname.localeCompare(b.vorname));
+  const empList=(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort((a,b)=>a.vorname.localeCompare(b.vorname));
   const monthRecs=records.filter(r=>r.date.startsWith(selMonth)&&r.aus);
 
   function downloadCSV(rows,filename){
@@ -1603,23 +1664,38 @@ function StatistikTab({records,users}){
     URL.revokeObjectURL(url);
     setExported(filename);setTimeout(()=>setExported(null),3000);
   }
-  function exportDetail(){
+  function downloadXLSX(rows, filename, sheetName="Daten") {
+    try {
+      const ws = window.XLSX.utils.aoa_to_sheet(rows);
+      // 헤더 행 굵게 (기본 스타일)
+      const wb = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      window.XLSX.writeFile(wb, filename);
+      setExported(filename);setTimeout(()=>setExported(null),3000);
+    } catch(e) {
+      // fallback to CSV if XLSX unavailable
+      downloadCSV(rows, filename.replace(".xlsx",".csv"));
+    }
+  }
+  function exportDetail(fmt="xlsx"){
     const hdr=["Name","Datum","Wochentag","Filiale","Einstempeln","Ausstempeln","Arbeitsstunden","Typ","Anmerkung"];
     const rows=[hdr,...[...monthRecs].sort((a,b)=>a.date.localeCompare(b.date)).map(r=>{
       const h=stunden(r.ein,r.aus);
       return[r.user,r.date,TAGE_DE[new Date(r.date).getDay()],r.filiale,r.ein,r.aus,h!=null?h.toFixed(2):"",r.typ==="nachtrag"?"Nachtrag":"Normal",r.note||""];
     })];
-    downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
+    if(fmt==="xlsx") downloadXLSX(rows,`Stundennachweis_Detail_${selMonth}.xlsx`,"Stundennachweis");
+    else downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
   }
-  function exportSummary(){
+  function exportSummary(fmt="xlsx"){
     const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","Teenjoy (Std)","Ø Std/Tag"];
     const rows=[hdr,...empList.map(emp=>{
       const er=monthRecs.filter(r=>r.user===emp.vorname);
       const total=er.reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
-      return[emp.vorname,emp.role,er.length,total.toFixed(2),byFil["TEEAMO Arkaden"].toFixed(2),byFil["TEEAMO Aegidiimarkt"].toFixed(2),byFil["Teenjoy"].toFixed(2),er.length?(total/er.length).toFixed(2):"0.00"];
+      return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["Teenjoy"].toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
     })];
-    downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
+    if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monatsübersicht");
+    else downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
   }
 
   return(
@@ -1642,17 +1718,24 @@ function StatistikTab({records,users}){
           const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
           const fColors=[C.mintLight,C.yellowLight,C.redLight];
           const fTColors=[C.mintDark,"#b37400",C.red];
+          const contract = emp.contractHours || 0;
+          const diff = contract > 0 ? total - contract : null;
           return(
             <div key={emp.key} style={S.card}>
               <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:9}}>
                 <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:12,color:"#fff",flexShrink:0}}>{emp.kuerzel}</div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:800,color:C.text}}>{emp.vorname}</div>
-                  <div style={{fontSize:9,color:C.muted}}>{emp.role}</div>
+                  <div style={{fontSize:9,color:C.muted}}>{emp.role}{contract>0?` · Vertrag: ${contract}h`:""}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:18,fontWeight:800,color:C.mintDark}}>{total.toFixed(1)}<span style={{fontSize:10,color:C.muted}}> Std</span></div>
                   <div style={{fontSize:9,color:C.muted}}>{er.length} Tage</div>
+                  {diff !== null && (
+                    <div style={{fontSize:10,fontWeight:700,color:diff>=0?C.mintDark:C.red}}>
+                      {diff>=0?`+${diff.toFixed(1)}h Mehr`:`${diff.toFixed(1)}h Weniger`}
+                    </div>
+                  )}
                 </div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
@@ -1670,15 +1753,18 @@ function StatistikTab({records,users}){
       </div>
       <div style={{background:C.navy,borderRadius:14,padding:"16px",marginBottom:12}}>
         <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>📥 Daten exportieren</div>
-        <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>Als CSV – öffnet direkt in Excel</div>
+        <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>Excel oder CSV – öffnet direkt in Excel</div>
         {[
-          {title:"Stundennachweis (Details)",sub:"Jeder Tag · Name · Datum · Filiale · Ein/Aus · Std",fn:exportDetail,file:`Detail_${selMonth}.csv`},
-          {title:"Monatsübersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin · Gesamtstunden · je Filiale",fn:exportSummary,file:`Übersicht_${selMonth}.csv`},
-        ].map(({title,sub,fn,file})=>(
+          {title:"Stundennachweis (Details)",sub:"Jeder Tag · Name · Datum · Filiale · Ein/Aus · Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
+          {title:"Monatsübersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin · Gesamtstunden · je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`Übersicht_${selMonth}`},
+        ].map(({title,sub,fnXlsx,fnCsv,file})=>(
           <div key={file} style={{background:"rgba(255,255,255,.07)",borderRadius:10,padding:"12px",marginBottom:8}}>
             <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{title}</div>
             <div style={{fontSize:9,color:"rgba(255,255,255,.4)",marginBottom:10}}>{sub}</div>
-            <button onClick={fn} style={{width:"100%",padding:"10px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>⬇ {file}</button>
+            <div style={{display:"flex",gap:7}}>
+              <button onClick={fnXlsx} style={{flex:2,padding:"10px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>⬇ Excel (.xlsx)</button>
+              <button onClick={fnCsv} style={{flex:1,padding:"10px",borderRadius:8,border:`1px solid rgba(255,255,255,.2)`,background:"transparent",color:"rgba(255,255,255,.6)",fontWeight:700,fontSize:10,cursor:"pointer"}}>CSV</button>
+            </div>
           </div>
         ))}
       </div>
@@ -1733,22 +1819,23 @@ function DienstplanUploadView({ records, users }) {
     const dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
     if (!isPdf) setImgSrc(dataUrl);
 
-    const empNames = users.filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
-    const promptText = `이 근무표를 매우 주의깊게 읽어줘.
+    const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
+    const promptText = `Du bist ein Assistent, der Dienstpläne analysiert. Analysiere diesen Dienstplan sehr sorgfältig.
 
-추출할 직원 목록: ${empNames}
+WICHTIG: Erkenne nur Namen aus dieser exakten Liste (Groß-/Kleinschreibung ignorieren):
+${empNames}
 
-각 날짜 칸에서 직원 이름 뒤에 오는 시간(예: Anna: 15:00-20:00)을 정확히 읽어줘.
-- Arkaden = TEEAMO Arkaden 섹션
-- Aegdiimarkt 또는 Aegdimarkt = TEEAMO Aegidiimarkt 섹션  
-- TEEnJOY 또는 Teenjoy = Teenjoy 섹션
-- 각 섹션 안에 있는 직원 이름과 시간을 정확히 매칭해줘
-- 날짜는 ${new Date().getFullYear()}년 기준 YYYY-MM-DD 형식
+Regeln:
+- Jeder Name in der Liste entspricht GENAU einem Mitarbeiter. Ordne gefundene Namen der Liste zu (auch bei leichten Schreibfehlern im Bild).
+- Filialen: "Arkaden" oder "TEEAMO Arkaden" → "TEEAMO Arkaden"; "Aegidiimarkt" oder "Aegidiimarkt" oder ähnlich → "TEEAMO Aegidiimarkt"; "Teenjoy" oder "TEEnJOY" → "Teenjoy"
+- Datum: Jahr ${new Date().getFullYear()}, Format YYYY-MM-DD
+- Zeit: Format HH:MM-HH:MM (z.B. "09:00-17:00"), null wenn nicht angegeben
+- Ignoriere Namen die NICHT in der obigen Liste sind
 
-JSON만 응답 (다른 텍스트 없이):
-{"이름":[{"d":"YYYY-MM-DD","f":"지점명","t":"HH:MM-HH:MM"}]}
+Antworte NUR mit validem JSON, ohne jeglichen anderen Text, keine Markdown-Backticks:
+{"VornameGenauWieInListe":[{"d":"YYYY-MM-DD","f":"TEEAMO Arkaden","t":"09:00-17:00"}]}
 
-지점명은 정확히 "TEEAMO Arkaden", "TEEAMO Aegidiimarkt", "Teenjoy" 중 하나만 사용.`;
+Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
 
     const contentBlock = isPdf
       ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
@@ -1910,38 +1997,55 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   const [tab,setTab]=useState("uebersicht");
   const [detailKey,setDetailKey]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
-  const manager=users.find(u=>u.key===userKey);
-  const offene=antraege.filter(a=>a.status==="offen"&&a.zustaendig===userKey);
-  const empList=users.filter(u=>!MANAGERS.includes(u.key)).sort((a,b)=>a.vorname.localeCompare(b.vorname));
+  const [erledigtExpanded,setErledigtExpanded]=useState({});
+  const safeUsers=Array.isArray(users)?users:[];
+  const manager=safeUsers.find(u=>u.key===userKey);
+  const empList=safeUsers.filter(u=>!MANAGERS.includes(u.key)).sort((a,b)=>a.vorname.localeCompare(b.vorname));
   const todayRecs=records.filter(r=>r.date===today());
-  const approve=(id,ok)=>setAntraege(prev=>prev.map(a=>a.id===id?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
   const getStatus=name=>{const r=todayRecs.find(x=>x.user===name);if(!r)return"Nicht erschienen";if(!r.aus)return"Aktiv";return"Feierabend";};
   const getBranch=name=>{const r=todayRecs.find(x=>x.user===name);return r?.filiale||null;};
   const sColor=s=>s==="Aktiv"?C.mintDark:s==="Feierabend"?C.muted:C.red;
+  const sBg=s=>s==="Aktiv"?C.mintLight:s==="Feierabend"?"#F0F0F0":C.redLight;
 
-  // 알림 & Schichttausch & Einspringen & Absagen
   const [notifications, setNotifications] = useFirebase("notifications", {});
   const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
   const [freieSchichten, setFreieSchichten] = useFirebase("freieSchichten", []);
   const [absagenList, setAbsagenList] = useFirebase("absagen", []);
   const [schedule, setSchedule] = useFirebase("schedule", {});
+  const [archiv, setArchiv] = useFirebase("archiv", {});
   const [fsDate, setFsDate] = useState(today());
   const [fsFiliale, setFsFiliale] = useState(FILIALEN[0]);
   const [fsTime, setFsTime] = useState("");
   const [fsNote, setFsNote] = useState("");
 
-  const myNotifs = Object.entries(notifications||{})
-    .filter(([,n]) => n.zustaendig === userKey && !n.gelesen)
+  // 내 담당 미처리 알림 (Alarm 탭에 표시)
+  const pendingNotifs = Object.entries(notifications||{})
+    .filter(([,n]) => n.zustaendig === userKey && !n.gelesen && !n.bearbeitetVon)
     .sort((a,b) => b[1].ts - a[1].ts);
-  const myAbsagen = (Array.isArray(absagenList)?absagenList:[])
-    .filter(a => {
-      const z = a.filiale === "Teenjoy" ? "teddy" : "yeaji";
-      return z === userKey && a.status === "offen";
-    });
-  const unreadCount = myNotifs.length + myAbsagen.length;
+
+  // 이미 다른 관리자가 처리했지만 내 알림으로도 온 경우 (읽음 처리만)
+  const handledByOther = Object.entries(notifications||{})
+    .filter(([,n]) => n.zustaendig === userKey && !n.gelesen && n.bearbeitetVon && n.bearbeitetVon !== userKey);
+
+  // Nachtrag(antraege) 미처리: 양쪽 관리자에게 표시, 한명이 처리하면 숨김
+  const offeneNachtraege = antraege.filter(a => a.status==="offen");
+
+  // 알림 + Nachtraege 합산 뱃지
+  const alarmCount = pendingNotifs.length + offeneNachtraege.length;
+
+  // Archiv (처리완료)
+  const myArchiv = Object.entries(archiv||{})
+    .filter(([,a]) => a.bearbeitetVon === userKey || a.zustaendig === userKey)
+    .sort((a,b) => b[1].ts - a[1].ts);
 
   function markRead(key) {
     setNotifications(prev => ({ ...(prev||{}), [key]: { ...(prev[key]||{}), gelesen: true } }));
+  }
+  function deleteArchiv(key) {
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      const { [key]: _, ...rest } = (archiv||{});
+      window._fbSet(window._fbRef(window._fbDb, "archiv"), rest || {}).catch(e=>console.error(e));
+    }
   }
   function addFreieSchicht() {
     if (!fsDate) return;
@@ -1950,34 +2054,285 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     }]);
     setFsTime(""); setFsNote("");
   }
-  function handleAbsagen(antrag, ok) {
-    // 신청 상태 업데이트
-    setAbsagenList(prev => (Array.isArray(prev)?prev:[]).map(a =>
-      a.id===antrag.id ? {...a, status: ok?"genehmigt":"abgelehnt"} : a
-    ));
+
+  // ── 처리 함수들 ──
+  function handleTausch(notifKey, n, ok) {
+    // 이미 다른 관리자가 처리했으면 그냥 읽음만
+    const antrag = (Array.isArray(tauschAntraege)?tauschAntraege:[]).find(a=>a.id===n.antragId);
+
+    if (ok && antrag) {
+      // schedule swap
+      if (window._fbDb && window._fbRef && window._fbSet && window._fbOnValue) {
+        window._fbOnValue(window._fbRef(window._fbDb, "schedule"), snap => {
+          const sched = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
+          sched[antrag.initiator] = (sched[antrag.initiator]||[])
+            .filter(s => (s.d||s.date) !== antrag.initiatorDate);
+          sched[antrag.initiator] = [...(sched[antrag.initiator]||[]),
+            {d: antrag.partnerDate, f: antrag.partnerFiliale, t: antrag.partnerTime||null}];
+          sched[antrag.partner] = (sched[antrag.partner]||[])
+            .filter(s => (s.d||s.date) !== antrag.partnerDate);
+          sched[antrag.partner] = [...(sched[antrag.partner]||[]),
+            {d: antrag.initiatorDate, f: antrag.initiatorFiliale, t: antrag.initiatorTime||null}];
+          window._fbSet(window._fbRef(window._fbDb, "schedule"), sched).catch(e=>console.error(e));
+        }, {onlyOnce:true});
+      }
+      setTauschAntraege(prev=>(Array.isArray(prev)?prev:[]).map(a=>
+        a.id===n.antragId?{...a,status:"getauscht",partnerBestaetigt:true}:a));
+    }
+
+    const entscheidung = ok ? "genehmigt" : "abgelehnt";
+    // 양쪽 관리자 알림 모두 bearbeitetVon 표시
+    ["teddy","yeaji"].forEach(mgr => {
+      const k = `${notifKey.replace(/_teddy$|_yeaji$/,"")}_${mgr}`;
+      if (window._fbDb && window._fbRef && window._fbSet) {
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/bearbeitetVon`), userKey).catch(()=>{});
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/gelesen`), true).catch(()=>{});
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/entscheidung`), entscheidung).catch(()=>{});
+      }
+    });
+    markRead(notifKey);
+
+    // Archiv에 저장
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      window._fbSet(window._fbRef(window._fbDb, `archiv/${notifKey}`), {
+        ...n, entscheidung, bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
+      }).catch(e=>console.error(e));
+    }
+  }
+
+  function handleAbsagenNotif(notifKey, n, ok) {
+    const empName = n.userName || n.user;
     if (ok) {
-      // schedule에서 해당 근무 제거
       setSchedule(prev => {
-        const updated = { ...(prev||{}) };
-        if (updated[antrag.userName]) {
-          updated[antrag.userName] = updated[antrag.userName].filter(s => (s.d||s.date) !== antrag.date);
-        }
+        const updated = {...(prev||{})};
+        if (updated[empName]) updated[empName] = updated[empName].filter(s=>(s.d||s.date)!==n.date);
         return updated;
       });
-      // 자동으로 Freie Schicht으로 등록
       setFreieSchichten(prev => [...(Array.isArray(prev)?prev:[]), {
-        id: Date.now(), date: antrag.date, filiale: antrag.filiale,
-        time: antrag.time||null, note: `Abgesagt von ${antrag.userName}`, besetzt: false
+        id: Date.now(), date: n.date, filiale: n.filiale,
+        time: n.time||null, note: `Abgesagt von ${empName}`, besetzt: false
       }]);
     }
-    // 알림 읽음 처리
-    const notifKey = Object.keys(notifications||{}).find(k => {
-      const n = notifications[k];
-      return n.type==="absagen" && n.user===antrag.userName && n.date===antrag.date;
+    setAbsagenList(prev=>(Array.isArray(prev)?prev:[]).map(a=>
+      a.id===n.absageId?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
+
+    const entscheidung = ok ? "genehmigt" : "abgelehnt";
+    ["teddy","yeaji"].forEach(mgr => {
+      const k = `absagen_${n.absageId}_${mgr}`;
+      if (window._fbDb && window._fbRef && window._fbSet) {
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/bearbeitetVon`), userKey).catch(()=>{});
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/gelesen`), true).catch(()=>{});
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/entscheidung`), entscheidung).catch(()=>{});
+      }
     });
-    if (notifKey) markRead(notifKey);
+    markRead(notifKey);
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      window._fbSet(window._fbRef(window._fbDb, `archiv/${notifKey}`), {
+        ...n, entscheidung, bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
+      }).catch(e=>console.error(e));
+    }
   }
-  const sBg=s=>s==="Aktiv"?C.mintLight:s==="Feierabend"?"#F0F0F0":C.redLight;
+
+  function handleNachtragNotif(notifKey, n, ok) {
+    setAntraege(prev=>prev.map(a=>a.id===n.antragId?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
+    const entscheidung = ok ? "genehmigt" : "abgelehnt";
+    ["teddy","yeaji"].forEach(mgr => {
+      const k = `nachtrag_${n.antragId}_${mgr}`;
+      if (window._fbDb && window._fbRef && window._fbSet) {
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/bearbeitetVon`), userKey).catch(()=>{});
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/gelesen`), true).catch(()=>{});
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/entscheidung`), entscheidung).catch(()=>{});
+      }
+    });
+    markRead(notifKey);
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      window._fbSet(window._fbRef(window._fbDb, `archiv/${notifKey}`), {
+        ...n, entscheidung, bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
+      }).catch(e=>console.error(e));
+    }
+  }
+
+  function handleEinspringen(notifKey, n) {
+    markRead(notifKey);
+    ["teddy","yeaji"].forEach(mgr => {
+      const k = `einspringen_${n.id||notifKey.split("_")[1]}_${mgr}`;
+      if (window._fbDb && window._fbRef && window._fbSet) {
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/bearbeitetVon`), userKey).catch(()=>{});
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/gelesen`), true).catch(()=>{});
+      }
+    });
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      window._fbSet(window._fbRef(window._fbDb, `archiv/${notifKey}`), {
+        ...n, entscheidung: "zur_kenntnis", bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
+      }).catch(e=>console.error(e));
+    }
+  }
+
+  // Nachtrag 직접 처리 (notifications 경유 없이 antraege에서 직접)
+  function approveNachtrag(id, ok) {
+    setAntraege(prev=>prev.map(a=>a.id===id?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
+    // notifications에서 해당 nachtrag 알림 bearbeitetVon 처리
+    ["teddy","yeaji"].forEach(mgr => {
+      const k = `nachtrag_${id}_${mgr}`;
+      if (window._fbDb && window._fbRef && window._fbSet) {
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/bearbeitetVon`), userKey).catch(()=>{});
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/gelesen`), true).catch(()=>{});
+        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/entscheidung`), ok?"genehmigt":"abgelehnt").catch(()=>{});
+      }
+    });
+  }
+
+  // ── Alarm 탭 카드 렌더 ──
+  function renderAlarmCard(key, n) {
+    const isAbsagen   = n.type==="absagen"||n.kategorie==="Schichtabsage";
+    const isTausch    = n.type==="tausch_manager"||n.kategorie==="Schichttausch";
+    const isEinspring = n.type==="einspringen"||n.kategorie==="Einspringen";
+    const isNachtrag  = n.type==="nachtrag"||n.kategorie==="Nachtrag";
+    const isPrufen    = n.type==="prüfen";
+
+    const borderColor = isAbsagen?C.red:isTausch?C.mint:isEinspring?C.mint:isNachtrag?C.yellow:C.yellow;
+
+    return (
+      <div key={key} style={{...S.card,marginBottom:10,border:`1.5px solid ${borderColor}`}}>
+        {/* Schichtabsage */}
+        {isAbsagen && <>
+          <div style={{fontSize:11,fontWeight:800,color:C.red,marginBottom:4}}>🚫 Schichtabsage · {n.user||n.userName}</div>
+          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
+            {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+          </div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
+          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>📌 "{n.grund}"</div>
+          <div style={{fontSize:9,color:C.muted,marginBottom:8}}>ℹ️ Bei Genehmigung wird die Schicht als freie Schicht veröffentlicht.</div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>handleAbsagenNotif(key,n,false)}
+              style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
+            <button onClick={()=>handleAbsagenNotif(key,n,true)}
+              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>✅ Genehmigen & Freigeben</button>
+          </div>
+        </>}
+
+        {/* Schichttausch */}
+        {isTausch && <>
+          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:6}}>🔄 Schichttausch · Partner bestätigt</div>
+          <div style={{display:"flex",gap:6,marginBottom:8}}>
+            <div style={{flex:1,padding:"7px 9px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
+              <div style={{fontSize:9,color:C.muted}}>{n.initiator}</div>
+              <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                {new Date(n.initiatorDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+              </div>
+              <div style={{fontSize:9,color:C.muted}}>{n.initiatorFiliale?.replace("TEEAMO ","")}</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",fontSize:16}}>⇄</div>
+            <div style={{flex:1,padding:"7px 9px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
+              <div style={{fontSize:9,color:C.muted}}>{n.partner}</div>
+              <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                {new Date(n.partnerDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+              </div>
+              <div style={{fontSize:9,color:C.muted}}>{n.partnerFiliale?.replace("TEEAMO ","")}</div>
+            </div>
+          </div>
+          <div style={{fontSize:9,color:C.mintDark,marginBottom:8}}>✅ Beide Mitarbeiter haben bestätigt.</div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>handleTausch(key,n,false)}
+              style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
+            <button onClick={()=>handleTausch(key,n,true)}
+              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>✅ Genehmigen</button>
+          </div>
+        </>}
+
+        {/* Einspringen */}
+        {isEinspring && <>
+          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:4}}>🙋 Einspringen · {n.user}</div>
+          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
+            {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+          </div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
+          <button onClick={()=>handleEinspringen(key,n)}
+            style={{width:"100%",padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>✓ Zur Kenntnis genommen</button>
+        </>}
+
+        {/* Nachtrag (via notification) */}
+        {isNachtrag && <>
+          <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>🕐 Nachtrag · {n.user}</div>
+          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
+            {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+          </div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{n.filiale} · {n.ein} – {n.aus}</div>
+          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>📌 "{n.grund}"</div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>handleNachtragNotif(key,n,false)}
+              style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
+            <button onClick={()=>handleNachtragNotif(key,n,true)}
+              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>✅ Genehmigen</button>
+          </div>
+        </>}
+
+        {/* Prüfen */}
+        {isPrufen && <>
+          <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>⚠️ Stempelzeit prüfen · {n.user}</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}</div>
+          <div style={{fontSize:10,color:C.yellow,marginBottom:10}}>Geplant: {n.plannedTime} · Gearbeitet: {n.actualEin}–{n.actualAus}</div>
+          <button onClick={()=>markRead(key)}
+            style={{width:"100%",padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>✓ Zur Kenntnis</button>
+        </>}
+      </div>
+    );
+  }
+
+  // ── Erledigt 카드 ──
+  function renderErledigtCard(key, a) {
+    const isOpen = erledigtExpanded[key];
+    const label = a.kategorie || a.type || "Sonstige";
+    const emojiMap = {Schichtabsage:"🚫",Schichttausch:"🔄",Einspringen:"🙋",Nachtrag:"🕐"};
+    const emoji = emojiMap[label] || "📌";
+    const eColor = a.entscheidung==="genehmigt"?C.mintDark:a.entscheidung==="abgelehnt"?C.red:C.muted;
+    const eLabel = a.entscheidung==="genehmigt"?"✅ Genehmigt":a.entscheidung==="abgelehnt"?"❌ Abgelehnt":"✓ Bestätigt";
+    return (
+      <div key={key} style={{...S.card,marginBottom:6,border:`1px solid ${C.border}`}}>
+        <button onClick={()=>setErledigtExpanded(p=>({...p,[key]:!p[key]}))}
+          style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",background:"none",border:"none",cursor:"pointer",padding:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:14}}>{emoji}</span>
+            <div style={{textAlign:"left"}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.text}}>{label} · {a.user||a.initiator}</div>
+              <div style={{fontSize:9,color:C.muted}}>{a.date?new Date(a.date).toLocaleDateString("de-DE"):(a.initiatorDate?new Date(a.initiatorDate).toLocaleDateString("de-DE"):"")}</div>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:7}}>
+            <span style={{fontSize:9,fontWeight:700,color:eColor}}>{eLabel}</span>
+            <span style={{fontSize:10,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+          </div>
+        </button>
+        {isOpen && (
+          <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+            {a.kategorie==="Schichtabsage"&&<>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` · ${a.time}`:""}</div>
+              <div style={{fontSize:10,color:C.text,marginBottom:2}}>Grund: {a.grund}</div>
+            </>}
+            {a.kategorie==="Schichttausch"&&<>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>
+                {a.initiator} ({new Date(a.initiatorDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}) ⇄ {a.partner} ({new Date(a.partnerDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})})
+              </div>
+            </>}
+            {a.kategorie==="Nachtrag"&&<>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} · {a.ein} – {a.aus}</div>
+              <div style={{fontSize:10,color:C.text,marginBottom:2}}>Grund: {a.grund}</div>
+            </>}
+            {a.kategorie==="Einspringen"&&<>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` · ${a.time}`:""}</div>
+            </>}
+            <div style={{fontSize:9,color:C.muted,marginTop:4}}>Bearbeitet: {safeUsers.find(u=>u.key===a.bearbeitetVon)?.vorname||a.bearbeitetVon}</div>
+            <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
+              <button onClick={()=>deleteArchiv(key)}
+                style={{fontSize:9,color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:"3px 8px",background:C.redLight,cursor:"pointer"}}>
+                🗑 Löschen
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return(
     <div style={{background:C.bg,minHeight:"100vh",paddingBottom:80}}>
@@ -2004,6 +2359,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         </div>
       </div>
 
+      {/* ── ÜBERSICHT ── */}
       {tab==="uebersicht"&&!detailKey&&(
         <div style={{padding:"14px"}}>
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Heutige Mitarbeiterinnen</div>
@@ -2034,7 +2390,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       )}
 
       {tab==="uebersicht"&&detailKey&&(()=>{
-        const emp=users.find(u=>u.key===detailKey);
+        const emp=safeUsers.find(u=>u.key===detailKey);
         const empRecs=records.filter(r=>r.user===emp.vorname);
         const total=empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
         return(
@@ -2055,6 +2411,30 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                   <div style={{fontSize:20,fontWeight:800,color:C.mintDark}}>{v}</div>
                 </div>
               ))}
+            </div>
+            <div style={{...S.card,marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>📋 VERTRAGSSTUNDEN / MONAT</div>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <input type="number" min="0" max="300" step="0.5"
+                  defaultValue={emp.contractHours||0}
+                  onBlur={e=>{
+                    const h=parseFloat(e.target.value)||0;
+                    setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>u.key===emp.key?{...u,contractHours:h}:u));
+                  }}
+                  style={{...S.input,width:90,textAlign:"center",fontSize:16,fontWeight:700}}/>
+                <div style={{fontSize:11,color:C.muted}}>Std/Monat</div>
+                {(emp.contractHours||0)>0&&(()=>{
+                  const diff=total-(emp.contractHours||0);
+                  return(
+                    <div style={{marginLeft:"auto",textAlign:"right"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:diff>=0?C.mintDark:C.red}}>
+                        {diff>=0?`+${diff.toFixed(1)}h`:diff.toFixed(1)+"h"}
+                      </div>
+                      <div style={{fontSize:9,color:C.muted}}>{diff>=0?"Überstunden":"Fehlstunden"}</div>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
             <div style={{...S.card,padding:0,overflow:"hidden"}}>
               <div style={{padding:"11px 13px",borderBottom:`1px solid ${C.border}`,fontSize:11,fontWeight:700,color:C.text}}>Arbeitsnachweise</div>
@@ -2078,111 +2458,71 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         );
       })()}
 
+      {/* ── DIENSTPLAN ── */}
       {tab==="dienstplan"&&(
         <DienstplanUploadView records={records} users={users}/>
       )}
 
+      {/* ── ARCHIV (처리 완료 = 기존 Anträge) ── */}
       {tab==="antraege"&&(
         <div style={{padding:"14px"}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:".05em"}}>📂 Bearbeitete Vorgänge</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:14}}>Alle abgeschlossenen Anträge & Meldungen</div>
 
-          {/* Schichttausch 현황 */}
+          {/* Nachtrag 처리 완료 */}
           {(()=>{
-            const allTausch = Object.entries(notifications||{})
-              .filter(([,n]) => n.type==="tausch_manager" &&
-                (n.zustaendig===userKey || !n.zustaendig))
-              .sort((a,b) => b[1].ts - a[1].ts);
-            if (allTausch.length === 0) return null;
-            return (
+            const done = antraege.filter(a=>a.status!=="offen");
+            if(done.length===0) return null;
+            return(
               <div style={{marginBottom:14}}>
-                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🔄 Schichttausch</div>
-                {allTausch.map(([key, n]) => {
-                  const isProzess = n.status === "im_prozess";
-                  return (
-                    <div key={key} style={{...S.card,marginBottom:8,
-                      border:`1.5px solid ${isProzess?C.border:C.mint}`}}>
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>
-                            {n.initiator} · {new Date(n.initiatorDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
-                            <span style={{fontSize:12,color:C.muted,fontWeight:400}}> → </span>
-                            {n.partner} · {new Date(n.partnerDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
-                          </div>
-                          <div style={{fontSize:10,color:C.muted}}>
-                            {n.initiatorFiliale?.replace("TEEAMO ","")} ↔ {n.partnerFiliale?.replace("TEEAMO ","")}
-                          </div>
-                        </div>
-                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,marginLeft:10}}>
-                          {isProzess ? (
-                            <>
-                              <span style={{fontSize:18,animation:"spin 2s linear infinite",display:"inline-block"}}>⚙️</span>
-                              <span style={{fontSize:9,fontWeight:700,color:C.muted}}>im Prozess</span>
-                            </>
-                          ) : (
-                            <>
-                              <span style={{fontSize:18}}>✅</span>
-                              <span style={{fontSize:9,fontWeight:700,color:C.mintDark}}>getauscht</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
+                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🕐 Nachträge</div>
+                {done.map(a=>(
+                  <div key={a.id} style={{...S.card,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{a.user} · {a.date}</div>
+                      <div style={{fontSize:10,color:C.muted}}>{a.filiale} · {a.ein}–{a.aus}</div>
                     </div>
-                  );
-                })}
+                    <span style={S.pill(a.status)}>{a.status==="genehmigt"?"Genehmigt":"Abgelehnt"}</span>
+                  </div>
+                ))}
               </div>
             );
           })()}
-          {offene.length>0&&(
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Offene Anträge ({offene.length})</div>
-              {offene.map(a=>(
-                <div key={a.id} style={{...S.card,marginBottom:9}}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}>
-                    <div>
-                      <div style={{fontSize:12,fontWeight:700,color:C.text}}>{a.user}</div>
-                      <div style={{fontSize:10,color:C.muted}}>{a.date} · {a.filiale} · {a.ein}–{a.aus}</div>
-                    </div>
-                    <span style={{fontSize:9,fontWeight:700,color:C.yellow,background:C.yellowLight,padding:"3px 7px",borderRadius:99}}>Offen</span>
-                  </div>
-                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:7,padding:"6px 9px",marginBottom:9}}>📌 „{a.grund}"</div>
-                  <div style={{display:"flex",gap:7}}>
-                    <button onClick={()=>approve(a.id,false)} style={{flex:1,padding:"9px",borderRadius:9,border:`1.5px solid ${C.red}`,background:C.redLight,color:C.red,fontWeight:700,fontSize:12,cursor:"pointer"}}>✕ Ablehnen</button>
-                    <button onClick={()=>approve(a.id,true)} style={{flex:1,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>✓ Genehmigen</button>
-                  </div>
-                </div>
-              ))}
+
+          {/* Archiv (tausch/absage/einspringen 처리 완료) */}
+          {myArchiv.length>0&&(
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🗂 Archiv</div>
+              {myArchiv.map(([key,a])=>renderErledigtCard(key,a))}
             </div>
           )}
-          <div style={S.card}>
-            <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Alle Anträge</div>
-            {antraege.length===0?<div style={{fontSize:11,color:C.muted}}>Keine Anträge.</div>:antraege.map((a,i)=>(
-              <div key={a.id} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",paddingBottom:i<antraege.length-1?9:0,marginBottom:i<antraege.length-1?9:0,borderBottom:i<antraege.length-1?`1px solid ${C.border}`:"none"}}>
-                <div>
-                  <div style={{fontSize:11,fontWeight:700,color:C.text}}>{a.user} · {a.date}</div>
-                  <div style={{fontSize:10,color:C.muted}}>{a.filiale} · {a.ein}–{a.aus}</div>
-                </div>
-                <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"Genehmigt":"Abgelehnt"}</span>
-              </div>
-            ))}
-          </div>
+
+          {antraege.filter(a=>a.status!=="offen").length===0&&myArchiv.length===0&&(
+            <div style={{textAlign:"center",color:C.muted,fontSize:12,padding:"30px 0"}}>Noch keine bearbeiteten Vorgänge.</div>
+          )}
         </div>
       )}
 
+      {/* ── STATISTIK ── */}
       {tab==="statistik"&&<StatistikTab records={records} users={users}/>}
 
+      {/* ── ALARM ── */}
       {tab==="benachrichtigungen"&&(
         <div style={{padding:"14px"}}>
 
-          {/* 빈 근무 등록 */}
+          {/* ① Freie Schicht eintragen – 항상 맨 위 */}
           <div style={{...S.card,marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>➕ Freie Schicht eintragen</div>
-            <div style={{display:"flex",gap:8,marginBottom:8}}>
-              <div style={{flex:1}}>
+            <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
+              <div>
                 <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Datum</div>
-                <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)} style={{...S.input,width:"100%"}}/>
+                <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)}
+                  style={{...S.input,width:"auto",minWidth:0,fontSize:12}}/>
               </div>
-              <div style={{flex:1}}>
+              <div>
                 <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Uhrzeit</div>
-                <input type="time" value={fsTime} onChange={e=>setFsTime(e.target.value)} style={{...S.input,width:"100%"}}/>
+                <input type="time" value={fsTime} onChange={e=>setFsTime(e.target.value)}
+                  style={{...S.input,width:"auto",minWidth:0,fontSize:12}}/>
               </div>
             </div>
             <div style={{marginBottom:8}}>
@@ -2218,6 +2558,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                   <div>
                     <div style={{fontSize:11,fontWeight:700,color:C.text}}>{new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}</div>
                     <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                    {s.note&&<div style={{fontSize:9,color:C.muted}}>{s.note}</div>}
                   </div>
                   <button onClick={()=>setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==s.id))}
                     style={{fontSize:10,color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:"3px 8px",background:C.redLight,cursor:"pointer"}}>
@@ -2228,108 +2569,72 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             </div>
           )}
 
-          {/* Absagen 승인 대기 */}
-          {myAbsagen.length > 0 && (
+          {/* ② 미처리 알림 (Offene Vorgänge) */}
+          {(pendingNotifs.length>0||offeneNachtraege.length>0) ? (
             <div style={{marginBottom:14}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🚫 Absage-Anträge</div>
-              {myAbsagen.map(a => (
-                <div key={a.id} style={{...S.card,marginBottom:8,border:`1.5px solid ${C.red}`}}>
-                  <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:2}}>{a.userName}</div>
-                  <div style={{fontSize:11,fontWeight:600,color:C.red,marginBottom:2}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>
+                🔔 Offene Vorgänge ({pendingNotifs.length+offeneNachtraege.length})
+              </div>
+
+              {/* Nachtrag (antraege에서 직접) */}
+              {offeneNachtraege.map(a=>(
+                <div key={a.id} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.yellow}`}}>
+                  <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>🕐 Nachtrag · {a.user}</div>
+                  <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
                     {new Date(a.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
                   </div>
-                  <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{a.filiale}{a.time?` · ${a.time}`:""}</div>
-                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>
-                    📌 "{a.grund}"
-                  </div>
-                  <div style={{fontSize:9,color:C.muted,marginBottom:8}}>
-                    ℹ️ Bei Genehmigung wird die Schicht automatisch als freie Schicht veröffentlicht.
-                  </div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} · {a.ein} – {a.aus}</div>
+                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>📌 "{a.grund}"</div>
                   <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>handleAbsagen(a, false)}
-                      style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,
-                        background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                      Ablehnen
-                    </button>
-                    <button onClick={()=>handleAbsagen(a, true)}
-                      style={{flex:2,padding:"9px",borderRadius:9,border:"none",
-                        background:`linear-gradient(135deg,${C.red},#A8432E)`,
-                        color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
-                      ✅ Genehmigen & Freigeben
-                    </button>
+                    <button onClick={()=>approveNachtrag(a.id,false)}
+                      style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
+                    <button onClick={()=>approveNachtrag(a.id,true)}
+                      style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>✅ Genehmigen</button>
                   </div>
                 </div>
               ))}
+
+              {/* 알림 (tausch/absage/einspringen/prufen) */}
+              {pendingNotifs.map(([key,n])=>renderAlarmCard(key,n))}
             </div>
-          )}
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🔔 Benachrichtigungen</div>
-              {myNotifs.map(([key, n]) => (
-                <div key={key} style={{...S.card,marginBottom:8,border:`1.5px solid ${
-                  n.type==="prüfen"?C.yellow:n.type==="einspringen"?C.mint:C.border}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                    <div>
-                      {n.type==="prüfen"&&<>
-                        <div style={{fontSize:12,fontWeight:800,color:C.text}}>⚠️ Prüfen: {n.user}</div>
-                        <div style={{fontSize:10,color:C.muted,marginTop:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}</div>
-                        <div style={{fontSize:10,color:C.yellow,marginTop:2}}>Geplant: {n.plannedTime} · Gearbeitet: {n.actualEin}–{n.actualAus}</div>
-                      </>}
-                      {n.type==="tausch_manager"&&<>
-                <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>
-                  🔄 Schichttausch: {n.initiator} ↔ {n.partner}
-                </div>
-                <div style={{display:"flex",gap:6,marginBottom:4}}>
-                  <div style={{flex:1,padding:"6px 8px",borderRadius:7,background:C.bg,border:`1px solid ${C.border}`}}>
-                    <div style={{fontSize:9,color:C.muted}}>{n.initiator}</div>
-                    <div style={{fontSize:10,fontWeight:700,color:C.text}}>
-                      {new Date(n.initiatorDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})} · {n.initiatorFiliale?.replace("TEEAMO ","")}
-                    </div>
-                  </div>
-                  <div style={{display:"flex",alignItems:"center",fontSize:14}}>⇄</div>
-                  <div style={{flex:1,padding:"6px 8px",borderRadius:7,background:C.bg,border:`1px solid ${C.border}`}}>
-                    <div style={{fontSize:9,color:C.muted}}>{n.partner}</div>
-                    <div style={{fontSize:10,fontWeight:700,color:C.text}}>
-                      {new Date(n.partnerDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})} · {n.partnerFiliale?.replace("TEEAMO ","")}
-                    </div>
-                  </div>
-                </div>
-                <div style={{fontSize:9,color:n.status==="getauscht"?C.mintDark:C.muted,marginBottom:4}}>
-                  {n.status==="getauscht" ? "✅ Automatisch getauscht" : "⚙️ Partner bestätigt noch nicht"}
-                </div>
-                <button onClick={()=>markRead(key)}
-                  style={{fontSize:9,padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,cursor:"pointer"}}>
-                  ✓ Zur Kenntnis genommen
-                </button>
-              </>}
-                      {n.type==="einspringen"&&<>
-                        <div style={{fontSize:12,fontWeight:800,color:C.mintDark}}>🙋 Eingesprungen: {n.user}</div>
-                        <div style={{fontSize:10,color:C.muted,marginTop:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}{n.time?` · ${n.time}`:""}</div>
-                      </>}
-                    </div>
-                    <button onClick={()=>markRead(key)}
-                      style={{fontSize:9,padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,cursor:"pointer",flexShrink:0}}>
-                      ✓
-                    </button>
-                  </div>
-                </div>
-              ))}
+          ) : (
+            <div style={{...S.card,textAlign:"center",padding:"24px 16px",marginBottom:14}}>
+              <div style={{fontSize:24,marginBottom:6}}>✅</div>
+              <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Alles erledigt!</div>
+              <div style={{fontSize:11,color:C.muted}}>Keine offenen Vorgänge.</div>
             </div>
           )}
 
-          {myNotifs.length===0&&myAbsagen.length===0&&(Array.isArray(freieSchichten)?freieSchichten:[]).length===0&&(
-            <div style={{textAlign:"center",color:C.muted,fontSize:12,padding:"20px 0"}}>Keine neuen Benachrichtigungen.</div>
+          {/* ③ Erledigt (처리 완료, 맨 아래) */}
+          {myArchiv.length>0&&(
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
+                ✅ Erledigt ({myArchiv.length})
+              </div>
+              {myArchiv.map(([key,a])=>renderErledigtCard(key,a))}
+            </div>
           )}
         </div>
       )}
 
+      {/* ── NAVIGATION ── */}
       <div style={S.nav}>
         {[{id:"uebersicht",icon:"👥",lbl:"Übersicht"},
           {id:"dienstplan",icon:"📋",lbl:"Dienstplan"},
-          {id:"antraege",icon:"📥",lbl:`Anträge${offene.length>0?" ("+offene.length+")":""}` },
-          {id:"benachrichtigungen",icon:"🔔",lbl:`Alarm${unreadCount>0?" ("+unreadCount+")":""}` },
+          {id:"antraege",icon:"📂",lbl:"Vorgänge"},
+          {id:"benachrichtigungen",icon:"🔔",lbl:`Alarm${alarmCount>0?" ("+alarmCount+")":""}` },
           {id:"statistik",icon:"📊",lbl:"Statistik"}].map(t=>(
-          <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0"}}>
-            <span style={{fontSize:19}}>{t.icon}</span>
+          <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
+            <div style={{position:"relative",display:"inline-block"}}>
+              <span style={{fontSize:19}}>{t.icon}</span>
+              {t.id==="benachrichtigungen"&&alarmCount>0&&(
+                <span style={{position:"absolute",top:-4,right:-6,minWidth:16,height:16,borderRadius:99,
+                  background:C.red,color:"#fff",fontSize:9,fontWeight:800,
+                  display:"flex",alignItems:"center",justifyContent:"center",padding:"0 3px",lineHeight:1}}>
+                  {alarmCount}
+                </span>
+              )}
+            </div>
             <span style={{fontSize:9,fontWeight:600,color:tab===t.id?C.mintDark:C.muted}}>{t.lbl}</span>
             {tab===t.id&&<div style={{width:16,height:2,background:C.mint,borderRadius:99}}/>}
           </button>
@@ -2337,7 +2642,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       </div>
 
       {deleteConfirm&&(()=>{
-        const empToDel=users.find(u=>u.key===deleteConfirm);
+        const empToDel=safeUsers.find(u=>u.key===deleteConfirm);
         return(
           <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:"24px"}}>
             <div style={{background:C.card,borderRadius:18,padding:"24px 22px",width:"100%",maxWidth:340,boxShadow:"0 8px 32px rgba(0,0,0,.18)"}}>
@@ -2348,7 +2653,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
               </div>
               <div style={{display:"flex",gap:9}}>
                 <button onClick={()=>setDeleteConfirm(null)} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
-                <button onClick={()=>{setUsers(prev=>prev.filter(u=>u.key!==deleteConfirm));setDeleteConfirm(null);setDetailKey(null);}}
+                <button onClick={()=>{setUsers(prev=>(Array.isArray(prev)?prev:[]).filter(u=>u.key!==deleteConfirm));setDeleteConfirm(null);setDetailKey(null);}}
                   style={{flex:1,padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>Löschen</button>
               </div>
             </div>
@@ -2363,32 +2668,43 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
 function App(){
   const [screen,setScreen]=useState("login");
   const [userKey,setUserKey]=useState(null);
-  // users/PIN은 로컬 유지 (보안)
-  const [users, setUsers] = usePersist("teeamo_users", INIT_USERS);
-  // records/antraege는 Firebase 실시간 동기화
+  const { getPin, setPin, initPins } = usePinStore();
+
+  // 모든 데이터를 Firebase 실시간 동기화
+  const [users,    setUsers,    usersReady]    = useFirebase("users",    INIT_USERS);
   const [records,  setRecords,  recordsReady]  = useFirebase("records",  INIT_RECORDS);
   const [antraege, setAntraege, antraegeReady] = useFirebase("antraege", INIT_ANTRAEGE);
-  // ✅ CSV: 앱 최상단 1회 fetch, 모든 화면에 공유
   const csvCtx = useDienstplanCSV();
 
+  // INIT_USERS의 PIN을 LS에 최초 1회 저장
+  useEffect(() => { if (usersReady) initPins(INIT_USERS); }, [usersReady]);
+
+  const allReady = usersReady && recordsReady;
+
   function handleLogin(key){
-    const u=users.find(x=>x.key===key);
+    const u=(Array.isArray(users)?users:[]).find(x=>x.key===key);
     const isAdmin=MANAGERS.includes(key)||(u&&u.isAdmin);
     setUserKey(key);setScreen(isAdmin?"manager":"mitarbeiter");
   }
   function handleLogout(){setUserKey(null);setScreen("login");}
 
+  // users에 setUsers 대신 Firebase 직접 쓰기 wrapper
+  function setUsersFirebase(updater) {
+    setUsers(updater);
+  }
+
+  if(!allReady) return(
+    <div style={{maxWidth:500,margin:"0 auto",minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14}}>
+      <div style={{width:36,height:36,border:`3px solid ${C.mint}`,borderTop:"3px solid transparent",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
+      <div style={{fontSize:13,color:C.muted,fontWeight:600}}>Verbindung zu Firebase…</div>
+    </div>
+  );
+
   return(
     <div style={{maxWidth:500,margin:"0 auto",minHeight:"100vh",background:C.bg}}>
-      {!recordsReady&&(
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",gap:14}}>
-          <div style={{width:36,height:36,border:`3px solid ${C.mint}`,borderTop:"3px solid transparent",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>
-          <div style={{fontSize:13,color:C.muted,fontWeight:600}}>Verbindung zu Firebase…</div>
-        </div>
-      )}
-      {recordsReady&&screen==="login"&&<LoginView onLogin={handleLogin} users={users} setUsers={setUsers} csvCtx={csvCtx}/>}
-      {recordsReady&&screen==="mitarbeiter"&&<MitarbeiterView userKey={userKey} users={users} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx}/>}
-      {recordsReady&&screen==="manager"&&<ManagerView records={records} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsers} csvCtx={csvCtx}/>}
+      {screen==="login"&&<LoginView onLogin={handleLogin} users={users} setUsers={setUsersFirebase} getPin={getPin} setPin={setPin} csvCtx={csvCtx}/>}
+      {screen==="mitarbeiter"&&<MitarbeiterView userKey={userKey} users={users} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx}/>}
+      {screen==="manager"&&<ManagerView records={records} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsersFirebase} csvCtx={csvCtx}/>}
     </div>
   );
 }
