@@ -260,6 +260,11 @@ const S = {
 };
 
 const FILIAL_NAMES = { A:"TEEAMO Arkaden", B:"TEEAMO Aegidiimarkt", C:"Teenjoy" };
+const FILIAL_INIT = {
+  "TEEAMO Arkaden":"Ar", "TEEAMO Aegidiimarkt":"Ae", "Teenjoy":"Tj",
+  "Arkaden":"Ar", "Aegidiimarkt":"Ae", "Teenjoy":"Tj",
+};
+function filialInit(f){ return FILIAL_INIT[f]||f?.slice(0,2)||"?"; }
 const FILIAL_COLOR = {
   A:{ bg:"#EAF1F5", text:"#5C7F94", border:"#BDD3DF", dot:"#7A9BAE" },
   B:{ bg:"#FAF0EE", text:"#C4604A", border:"#EBBFB4", dot:"#C4604A" },
@@ -2066,6 +2071,374 @@ function StatistikTab({records,users}){
   );
 }
 
+
+
+// ── ADMIN ANTRÄGE VIEW ────────────────────────────────────────────────────────
+function AdminAntraegeView({ antraege, setAntraege, archiv, myArchiv, renderErledigtCard, setRecords, records, userKey, setArchiv }) {
+  const [openId, setOpenId] = useState(null);
+
+  const offene  = (Array.isArray(antraege)?antraege:[]).filter(a=>a.status==="offen");
+  const done    = (Array.isArray(antraege)?antraege:[]).filter(a=>a.status!=="offen");
+
+  // 날짜별 그룹화
+  const byDate = {};
+  done.forEach(a=>{ const d=a.date||""; if(!byDate[d]) byDate[d]=[]; byDate[d].push(a); });
+  const dateKeys = Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
+
+  function reopen(id) {
+    setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(a=>a.id===id?{...a,status:"offen"}:a));
+  }
+
+  function decide(a, ok) {
+    const newStatus = ok ? "genehmigt" : "abgelehnt";
+    setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:newStatus}:x));
+
+    if (ok) {
+      // 승인 시: records에 자동 추가 (통계 연동)
+      const exists = records.find(r=>r.user===a.user&&r.date===a.date&&r.typ==="nachtrag");
+      if (!exists) {
+        setRecords(prev=>[...(Array.isArray(prev)?prev:[]),{
+          id:Date.now(),user:a.user,date:a.date,filiale:a.filiale,
+          ein:a.ein,aus:a.aus,note:a.grund||"Nachtrag genehmigt",typ:"nachtrag"
+        }]);
+      }
+    }
+    // 거절 시: 기존 nachtrag record 제거
+    if (!ok) {
+      setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(
+        r=>!(r.user===a.user&&r.date===a.date&&r.typ==="nachtrag")
+      ));
+    }
+  }
+
+  function NachtragCard({a, showActions}) {
+    const isOpen = openId===a.id;
+    const statusColor = a.status==="genehmigt"?C.mintDark:a.status==="abgelehnt"?C.red:C.yellow;
+    const statusBg    = a.status==="genehmigt"?C.mintLight:a.status==="abgelehnt"?C.redLight:C.yellowLight;
+    const statusLabel = a.status==="genehmigt"?"✅ Genehmigt":a.status==="abgelehnt"?"❌ Abgelehnt":"⏳ Offen";
+    return (
+      <div style={{...S.card,marginBottom:8,padding:0,overflow:"hidden",
+        border:`1.5px solid ${a.status==="offen"?C.yellow:a.status==="genehmigt"?C.mint:C.border}`}}>
+        <button onClick={()=>setOpenId(isOpen?null:a.id)}
+          style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
+            display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{textAlign:"left"}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.text}}>🕐 {a.user}</div>
+            <div style={{fontSize:11,color:C.muted}}>
+              {new Date(a.date).toLocaleDateString("de-DE",{day:"numeric",month:"long"})} · {a.filiale}
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:statusColor,background:statusBg}}>
+              {statusLabel}
+            </span>
+            <span style={{fontSize:11,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+          </div>
+        </button>
+        {isOpen&&(
+          <div style={{borderTop:`1px solid ${C.border}`,padding:"12px 14px"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+              {[["Datum",new Date(a.date).toLocaleDateString("de-DE")],
+                ["Filiale",a.filiale],
+                ["Ein",a.ein],["Aus",a.aus]].map(([l,v])=>(
+                <div key={l}>
+                  <div style={{fontSize:9,color:C.muted}}>{l}</div>
+                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{v}</div>
+                </div>
+              ))}
+            </div>
+            {a.grund&&<div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>📌 „{a.grund}"</div>}
+            {/* 액션 버튼 */}
+            {a.status==="offen"&&(
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>decide(a,false)}
+                  style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
+                <button onClick={()=>decide(a,true)}
+                  style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>✅ Genehmigen</button>
+              </div>
+            )}
+            {/* 처리 완료 후 번복 버튼 */}
+            {a.status!=="offen"&&(
+              <div style={{display:"flex",gap:8,marginTop:4}}>
+                <button onClick={()=>reopen(a.id)}
+                  style={{flex:1,padding:"8px",borderRadius:9,border:`1px solid ${C.yellow}`,background:C.yellowLight,color:C.yellow,fontWeight:700,fontSize:10,cursor:"pointer"}}>
+                  🔄 Entscheidung ändern
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{padding:"14px"}}>
+
+      {/* ① 미처리 (자동 펼침) */}
+      <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
+        ⏳ Offene Anträge ({offene.length})
+      </div>
+      {offene.length===0?(
+        <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"18px",marginBottom:14}}>
+          Keine offenen Anträge ✅
+        </div>
+      ):offene.map(a=><NachtragCard key={a.id} a={a}/>)}
+
+      {/* ② 처리 완료 (날짜별 그룹) */}
+      {done.length>0&&(
+        <div style={{marginTop:16}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
+            📂 Bearbeitete Anträge
+          </div>
+          {/* 거절 통계 */}
+          {done.filter(a=>a.status==="abgelehnt").length>0&&(
+            <div style={{...S.card,marginBottom:10,display:"flex",gap:12,padding:"10px 14px",border:`1px solid ${C.redLight}`}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:18,fontWeight:800,color:C.red}}>{done.filter(a=>a.status==="abgelehnt").length}</div>
+                <div style={{fontSize:9,color:C.muted}}>Abgelehnt</div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:18,fontWeight:800,color:C.mintDark}}>{done.filter(a=>a.status==="genehmigt").length}</div>
+                <div style={{fontSize:9,color:C.muted}}>Genehmigt</div>
+              </div>
+            </div>
+          )}
+          {dateKeys.map(d=>(
+            <div key={d} style={{marginBottom:4}}>
+              <div style={{fontSize:10,color:C.muted,fontWeight:600,marginBottom:4,marginTop:8}}>
+                📅 {new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"long",year:"numeric"})}
+              </div>
+              {byDate[d].map(a=><NachtragCard key={a.id} a={a}/>)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ③ Archiv (tausch/absage/einspringen) */}
+      {myArchiv&&myArchiv.length>0&&(
+        <div style={{marginTop:16}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🗂 Archiv</div>
+          {myArchiv.map(([key,a])=>renderErledigtCard(key,a))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── ADMIN DIENSTPLAN VIEW ────────────────────────────────────────────────────
+function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedule }) {
+  const [viewMode, setViewMode] = useState("plan"); // "plan" | "by_emp" | "by_date"
+  const [openEmp, setOpenEmp] = useState(null);
+  const [openDate, setOpenDate] = useState(null);
+  const empList = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key))
+    .sort((a,b)=>a.vorname.localeCompare(b.vorname));
+
+  // 날짜별: schedule에서 이번달 날짜 목록
+  const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
+  const allDates = [...new Set(
+    empList.flatMap(emp => norm(schedule[emp.vorname]||[]).map(s=>s.date||s.d))
+  )].filter(Boolean).sort((a,b)=>a.localeCompare(b));
+
+  // 직원 상태 (오늘 기준)
+  const todayStr = today();
+  function getEmpStatus(vorname) {
+    const r = records.find(r=>r.user===vorname&&r.date===todayStr);
+    if(!r) return null;
+    return {ein:r.ein,aus:r.aus,filiale:r.filiale};
+  }
+
+  return (
+    <div style={{paddingBottom:20}}>
+      {/* 탭 선택 */}
+      <div style={{display:"flex",gap:0,margin:"14px 14px 0",borderRadius:12,overflow:"hidden",border:`1px solid ${C.border}`}}>
+        {[{id:"plan",l:"📋 Plan"},
+          {id:"by_emp",l:"👤 Nach Mitarbeiter"},
+          {id:"by_date",l:"📅 Nach Datum"}].map(({id,l})=>(
+          <button key={id} onClick={()=>setViewMode(id)}
+            style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",fontSize:10,fontWeight:700,
+              background:viewMode===id?C.navy:"#fff",
+              color:viewMode===id?"#fff":C.muted,transition:"all .15s"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* ① 근무표 이미지 (줌 가능) */}
+      {viewMode==="plan"&&(
+        <div style={{padding:"14px"}}>
+          {!MANAGERS.includes(userKey)&&manager?.vorname&&(
+            <div style={{marginBottom:12}}>
+              <KalenderView csvCtx={csvCtx} userName={manager.vorname} records={records} users={users}/>
+            </div>
+          )}
+          <DienstplanUploadView records={records} users={users}/>
+        </div>
+      )}
+
+      {/* ② 직원별 보기 */}
+      {viewMode==="by_emp"&&(
+        <div style={{padding:"14px"}}>
+          {empList.map(emp=>{
+            const shifts = norm(schedule[emp.vorname]||[])
+              .filter(s=>s.date||s.d)
+              .sort((a,b)=>(a.date||a.d).localeCompare(b.date||b.d));
+            const isOpen = openEmp===emp.key;
+            return (
+              <div key={emp.key} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden"}}>
+                <button onClick={()=>setOpenEmp(isOpen?null:emp.key)}
+                  style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
+                    display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:13,fontWeight:800,color:"#fff",flexShrink:0}}>
+                      {emp.kuerzel}
+                    </div>
+                    <div style={{textAlign:"left"}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}</div>
+                      <div style={{fontSize:10,color:C.muted}}>{shifts.length} Schichten geplant</div>
+                    </div>
+                  </div>
+                  <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                </button>
+                {isOpen&&(
+                  <div style={{borderTop:`1px solid ${C.border}`}}>
+                    {shifts.length===0?(
+                      <div style={{padding:"12px 14px",fontSize:12,color:C.muted}}>Keine Schichten eingetragen.</div>
+                    ):shifts.map((s,i)=>{
+                      const d=s.date||s.d, f=s.filiale||s.f, t=s.time||s.t;
+                      const rec=records.find(r=>r.user===emp.vorname&&r.date===d);
+                      return(
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                          padding:"10px 14px",borderBottom:i<shifts.length-1?`1px solid ${C.border}`:"none",
+                          background:rec?.aus?C.mintLight:rec?.ein?C.yellowLight:"#fff"}}>
+                          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                            <div style={{width:34,height:34,borderRadius:8,background:"rgba(255,255,255,.7)",
+                              display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                              <span style={{fontSize:8,color:C.muted}}>{["So","Mo","Di","Mi","Do","Fr","Sa"][new Date(d).getDay()]}</span>
+                              <span style={{fontSize:11,fontWeight:800,color:C.navy}}>{filialInit(f)}</span>
+                            </div>
+                            <div>
+                              <div style={{fontSize:13,fontWeight:700,color:C.text}}>
+                                {new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                              </div>
+                              <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                            </div>
+                          </div>
+                          <div style={{textAlign:"right"}}>
+                            {rec?(
+                              <div>
+                                <div style={{fontSize:11,fontWeight:700,color:rec.aus?C.mintDark:C.yellow}}>
+                                  {rec.ein}{rec.aus?` – ${rec.aus}`:" (läuft)"}
+                                </div>
+                                <div style={{fontSize:9,color:C.muted}}>{stdLabel(rec.ein,rec.aus)}</div>
+                              </div>
+                            ):(
+                              <span style={{fontSize:10,color:C.muted}}>—</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ③ 날짜별 보기 */}
+      {viewMode==="by_date"&&(
+        <div style={{padding:"14px"}}>
+          {allDates.length===0&&(
+            <div style={{textAlign:"center",color:C.muted,fontSize:13,padding:"30px 0"}}>
+              Kein Dienstplan vorhanden. Bitte erst hochladen & analysieren.
+            </div>
+          )}
+          {allDates.map(d=>{
+            const isOpen=openDate===d;
+            // 그 날 근무 예정 직원 목록
+            const dayEmps = empList.filter(emp=>
+              norm(schedule[emp.vorname]||[]).some(s=>(s.date||s.d)===d)
+            );
+            return(
+              <div key={d} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden"}}>
+                <button onClick={()=>setOpenDate(isOpen?null:d)}
+                  style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
+                    display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:800,color:C.text}}>
+                      {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+                    </div>
+                    <div style={{fontSize:10,color:C.muted,marginTop:2}}>{dayEmps.length}명 예정</div>
+                  </div>
+                  <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                </button>
+                {isOpen&&(
+                  <div style={{borderTop:`1px solid ${C.border}`}}>
+                    {/* 지점별로 묶어서 표시 */}
+                    {FILIALEN.map(fil=>{
+                      const filEmps=dayEmps.filter(emp=>{
+                        const s=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===d);
+                        return s&&(s.filiale||s.f)===fil;
+                      });
+                      if(filEmps.length===0) return null;
+                      return(
+                        <div key={fil}>
+                          <div style={{padding:"7px 14px",background:C.bg,fontSize:10,fontWeight:700,color:C.muted}}>
+                            {filialInit(fil)} · {fil}
+                          </div>
+                          {filEmps.map((emp,i)=>{
+                            const shift=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===d);
+                            const rec=records.find(r=>r.user===emp.vorname&&r.date===d);
+                            const status=rec?.aus?"퇴근":rec?.ein?"근무중":"미출근";
+                            const statusColor=rec?.aus?C.mintDark:rec?.ein?C.yellow:C.red;
+                            const statusBg=rec?.aus?C.mintLight:rec?.ein?C.yellowLight:C.redLight;
+                            const statusLabel=rec?.aus?"Feierabend ✓":rec?.ein?"Im Dienst ●":"Nicht erschienen";
+                            return(
+                              <div key={emp.key} style={{display:"flex",justifyContent:"space-between",
+                                alignItems:"center",padding:"10px 14px",
+                                borderBottom:i<filEmps.length-1?`1px solid ${C.border}`:"none"}}>
+                                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                                  <div style={{width:32,height:32,borderRadius:"50%",background:C.navy,
+                                    display:"flex",alignItems:"center",justifyContent:"center",
+                                    fontSize:11,fontWeight:800,color:"#fff",flexShrink:0}}>
+                                    {emp.kuerzel}
+                                  </div>
+                                  <div>
+                                    <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}</div>
+                                    {(shift?.time||shift?.t)&&(
+                                      <div style={{fontSize:10,color:C.muted}}>Geplant: {shift.time||shift.t}</div>
+                                    )}
+                                    {rec&&(
+                                      <div style={{fontSize:10,color:statusColor,fontWeight:600}}>
+                                        {rec.ein}{rec.aus?` – ${rec.aus}`:""} {rec.aus?`(${stdLabel(rec.ein,rec.aus)})`:""}</div>
+                                    )}
+                                  </div>
+                                </div>
+                                <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,
+                                  color:statusColor,background:statusBg}}>
+                                  {statusLabel}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── DIENSTPLAN UPLOAD + AI ANALYSE ───────────────────────────────────────────
 function DienstplanUploadView({ records, users }) {
   const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
@@ -2308,6 +2681,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   const [detailKey,setDetailKey]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
   const [erledigtExpanded,setErledigtExpanded]=useState({});
+  const [monthAccordion,setMonthAccordion]=useState({});
   const [showMgrSettings, setShowMgrSettings] = useState(false);
   const safeUsers=Array.isArray(users)&&users.length>0?users:INIT_USERS;
   // userKey로 찾되, 없으면 key prefix로 fallback (동적 생성 계정)
@@ -2703,7 +3077,28 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       {/* ── ÜBERSICHT ── */}
       {tab==="uebersicht"&&!detailKey&&(
         <div style={{padding:"14px"}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Heutige Mitarbeiterinnen</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".05em"}}>Heutige Mitarbeiterinnen</div>
+          </div>
+          {/* 범례 */}
+          <div style={{...S.card,marginBottom:10,padding:"9px 12px"}}>
+            <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>Legende</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:"6px 14px"}}>
+              {[
+                {c:C.mintLight,tc:C.mintDark,l:"Aktiv – aktuell eingestempelt"},
+                {c:"#F0F0F0",tc:C.muted,l:"Feierabend – heute ausgestempelt"},
+                {c:C.redLight,tc:C.red,l:"Nicht erschienen – kein Einstempeln heute"},
+              ].map(({c,tc,l})=>(
+                <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{width:10,height:10,borderRadius:3,background:c,border:`1px solid ${tc}`,flexShrink:0}}/>
+                  <span style={{fontSize:9,color:C.muted}}>{l}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{fontSize:8,color:C.muted,marginTop:6,borderTop:`1px solid ${C.border}`,paddingTop:5}}>
+              ℹ️ „Nicht erschienen" = kein Einstempeleintrag für heute in der Datenbank. Kein Rückschluss auf Entschuldigung oder Krankmeldung.
+            </div>
+          </div>
           <div style={{display:"flex",flexDirection:"column",gap:9}}>
             {empList.map(emp=>{
               const st=getStatus(emp.vorname),br=getBranch(emp.vorname);
@@ -2732,29 +3127,51 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
 
       {tab==="uebersicht"&&detailKey&&(()=>{
         const emp=safeUsers.find(u=>u.key===detailKey);
+        if(!emp) return null;
         const empRecs=records.filter(r=>r.user===emp.vorname);
         const total=empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+
+        // 월별 그룹화
+        const byMonth={};
+        empRecs.forEach(r=>{
+          const m=r.date.slice(0,7);
+          if(!byMonth[m]) byMonth[m]=[];
+          byMonth[m].push(r);
+        });
+        const monthKeys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+        const monthLabel=m=>{
+          const [y,mo]=m.split("-");
+          const mn=["","Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+          return `${mn[parseInt(mo)]} ${y}`;
+        };
+
         return(
           <div style={{padding:"14px"}}>
-            <button onClick={()=>setDetailKey(null)} style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:12,fontWeight:700,marginBottom:12}}>← Zurück</button>
+            <button onClick={()=>setDetailKey(null)} style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:13,fontWeight:700,marginBottom:12}}>← Zurück</button>
+
+            {/* 직원 프로필 */}
             <div style={{...S.card,display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
-              <div style={{width:48,height:48,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:emp.emoji?24:16,color:"#fff"}}>{emp.emoji||emp.kuerzel}</div>
-              <div>
-                <div style={{fontSize:16,fontWeight:800,color:C.text}}>{emp.emoji&&<span style={{marginRight:4}}>{emp.emoji}</span>}{emp.vorname}{emp.nachname&&<span style={{fontSize:13,fontWeight:400,color:C.muted}}> {emp.nachname}</span>}</div>
-                <div style={{fontSize:11,color:C.muted}}>{emp.role}</div>
-                <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:5,display:"inline-block",color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>{getStatus(emp.vorname)}</span>
+              <div style={{width:52,height:52,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:emp.vorname.match(/\p{Emoji}/u)?26:17,color:"#fff"}}>{emp.kuerzel}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:17,fontWeight:800,color:C.text}}>{emp.vorname}{emp.nachname&&<span style={{fontSize:13,fontWeight:400,color:C.muted}}> {emp.nachname}</span>}</div>
+                <div style={{fontSize:11,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
+                <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:4,display:"inline-block",color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>{getStatus(emp.vorname)}</span>
               </div>
             </div>
+
+            {/* 전체 요약 */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-              {[{l:"Std. gesamt",v:total.toFixed(1)+"h"},{l:"Arbeitstage",v:empRecs.length+"d"}].map(({l,v})=>(
+              {[{l:"Std. gesamt",v:total.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
                 <div key={l} style={S.card}>
-                  <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{l}</div>
-                  <div style={{fontSize:20,fontWeight:800,color:C.mintDark}}>{v}</div>
+                  <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div>
+                  <div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div>
                 </div>
               ))}
             </div>
+
+            {/* 계약 시간 설정 */}
             <div style={{...S.card,marginBottom:12}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>📋 VERTRAGSSTUNDEN / MONAT</div>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:8}}>📋 Vertragsstunden / Monat</div>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <input type="number" min="0" max="300" step="0.5"
                   defaultValue={emp.contractHours||0}
@@ -2763,100 +3180,145 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                     setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>u.key===emp.key?{...u,contractHours:h}:u));
                   }}
                   style={{...S.input,width:90,textAlign:"center",fontSize:16,fontWeight:700}}/>
-                <div style={{fontSize:11,color:C.muted}}>Std/Monat</div>
+                <div style={{fontSize:12,color:C.muted}}>Std/Monat</div>
                 {(emp.contractHours||0)>0&&(()=>{
                   const diff=total-(emp.contractHours||0);
                   return(
                     <div style={{marginLeft:"auto",textAlign:"right"}}>
-                      <div style={{fontSize:12,fontWeight:800,color:diff>=0?C.mintDark:C.red}}>
+                      <div style={{fontSize:13,fontWeight:800,color:diff>=0?C.mintDark:C.red}}>
                         {diff>=0?`+${diff.toFixed(1)}h`:diff.toFixed(1)+"h"}
                       </div>
-                      <div style={{fontSize:9,color:C.muted}}>{diff>=0?"Überstunden":"Fehlstunden"}</div>
+                      <div style={{fontSize:10,color:C.muted}}>{diff>=0?"Überstunden":"Fehlstunden"}</div>
                     </div>
                   );
                 })()}
               </div>
             </div>
-            <div style={{...S.card,padding:0,overflow:"hidden"}}>
-              <div style={{padding:"11px 13px",borderBottom:`1px solid ${C.border}`,fontSize:11,fontWeight:700,color:C.text}}>Arbeitsnachweise</div>
-              {empRecs.length===0?<div style={{padding:"12px",fontSize:11,color:C.muted}}>Keine Einträge.</div>:empRecs.map((r,i)=>(
-                <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",borderBottom:i<empRecs.length-1?`1px solid ${C.border}`:"none"}}>
-                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                    <div style={{width:30,height:30,borderRadius:7,background:r.aus?C.mintLight:C.yellowLight,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-                      <span style={{fontSize:7,color:C.muted}}>{r.date.slice(5)}</span>
-                      <span style={{fontSize:9,fontWeight:700,color:r.aus?C.mintDark:C.yellow}}>{r.filiale.slice(-1)}</span>
-                    </div>
-                    <div>
-                      <div style={{fontSize:11,color:C.muted}}>{r.ein} → {r.aus||"läuft"}</div>
-                      <div style={{fontSize:9,color:C.muted}}>{r.filiale}</div>
-                    </div>
-                  </div>
-                  <span style={{fontSize:11,fontWeight:700,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</span>
+
+            {/* 범례 */}
+            <div style={{display:"flex",gap:12,marginBottom:10,padding:"8px 10px",background:C.bg,borderRadius:9,flexWrap:"wrap"}}>
+              {[{c:C.mintLight,tc:C.mintDark,l:"Abgeschlossen"},{c:C.yellowLight,tc:C.yellow,l:"Läuft noch"}].map(({c,tc,l})=>(
+                <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{width:12,height:12,borderRadius:3,background:c,border:`1.5px solid ${tc}`}}/>
+                  <span style={{fontSize:10,color:C.muted}}>{l}</span>
+                </div>
+              ))}
+              {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"Teenjoy"}].map(({init,l})=>(
+                <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
+                  <span style={{fontSize:10,color:C.muted}}>{l}</span>
                 </div>
               ))}
             </div>
+
+            {/* 월별 아코디언 */}
+            {empRecs.length===0?(
+              <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:13,padding:"24px"}}>Keine Einträge.</div>
+            ):monthKeys.map(m=>{
+              const mRecs=byMonth[m];
+              const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+              const mDays=mRecs.filter(r=>r.aus).length;
+              const contract=emp.contractHours||0;
+              const diff=contract>0?mTotal-contract:null;
+              const isOpen=monthAccordion[m]!==false; // 기본 열림
+              return(
+                <div key={m} style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
+                  {/* 월 헤더 */}
+                  <button onClick={()=>setMonthAccordion(p=>({...p,[m]:!isOpen}))}
+                    style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{fontSize:14,fontWeight:800,color:C.text}}>{monthLabel(m)}</span>
+                      <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(1)}h</span>
+                      <span style={{fontSize:10,color:C.muted}}>{mDays}일</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      {diff!==null&&(
+                        <span style={{fontSize:11,fontWeight:700,color:diff>=0?C.mintDark:C.red}}>
+                          {diff>=0?"+":""}{diff.toFixed(1)}h
+                        </span>
+                      )}
+                      <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                    </div>
+                  </button>
+                  {/* 계획 vs 실제 요약 */}
+                  {isOpen&&(
+                    <div>
+                      {contract>0&&(
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,borderTop:`1px solid ${C.border}`,borderBottom:`1px solid ${C.border}`}}>
+                          {[{l:"Geplant",v:contract+"h"},
+                            {l:"Geleistet",v:mTotal.toFixed(1)+"h"}].map(({l,v},i)=>(
+                            <div key={l} style={{padding:"8px 14px",background:i===1?C.mintLight:"#fff"}}>
+                              <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{l}</div>
+                              <div style={{fontSize:15,fontWeight:800,color:i===1?C.mintDark:C.text}}>{v}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* 일별 리스트 */}
+                      {mRecs.sort((a,b)=>b.date.localeCompare(a.date)).map((r,i)=>(
+                        <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                          padding:"11px 14px",borderBottom:i<mRecs.length-1?`1px solid ${C.border}`:"none"}}>
+                          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                            <div style={{width:36,height:36,borderRadius:9,
+                              background:r.aus?C.mintLight:C.yellowLight,
+                              display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                              <span style={{fontSize:9,color:C.muted,fontWeight:600}}>
+                                {["So","Mo","Di","Mi","Do","Fr","Sa"][new Date(r.date).getDay()]}
+                              </span>
+                              <span style={{fontSize:11,fontWeight:800,color:r.aus?C.mintDark:C.yellow}}>
+                                {filialInit(r.filiale)}
+                              </span>
+                            </div>
+                            <div>
+                              <div style={{fontSize:13,fontWeight:700,color:C.text}}>
+                                {new Date(r.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                                <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{r.filiale}</span>
+                              </div>
+                              <div style={{fontSize:12,color:C.muted,marginTop:1}}>
+                                {r.ein} → {r.aus||<span style={{color:C.yellow,fontWeight:700}}>läuft</span>}
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{textAlign:"right"}}>
+                            <div style={{fontSize:14,fontWeight:800,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</div>
+                            {r.note&&<div style={{fontSize:9,color:C.muted,maxWidth:80,textAlign:"right"}}>{r.note}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         );
       })()}
 
       {/* ── DIENSTPLAN ── */}
       {tab==="dienstplan"&&(
-        <div>
-          {/* Admin Staff 계정: 본인 일정도 함께 표시 */}
-          {/* Admin Staff 계정(MANAGERS 배열 밖)은 본인 일정도 표시 */}
-          {!MANAGERS.includes(userKey)&&manager?.vorname&&(
-            <div style={{padding:"14px 14px 0"}}>
-              <KalenderView csvCtx={csvCtx} userName={manager.vorname} records={records} users={users}/>
-            </div>
-          )}
-          {/* manager.vorname이 아직 없으면(로딩 중) 임시 표시 */}
-          {!MANAGERS.includes(userKey)&&!manager?.vorname&&(
-            <div style={{padding:"14px",textAlign:"center",color:C.muted,fontSize:12}}>
-              Lade Benutzerdaten…
-            </div>
-          )}
-          <DienstplanUploadView records={records} users={users}/>
-        </div>
+        <AdminDienstplanView
+          records={records}
+          users={users}
+          userKey={userKey}
+          manager={manager}
+          csvCtx={csvCtx}
+          schedule={schedule}
+        />
       )}
 
-      {/* ── ARCHIV (처리 완료 = 기존 Anträge) ── */}
+      {/* ── ANTRÄGE / ARCHIV ── */}
       {tab==="antraege"&&(
-        <div style={{padding:"14px"}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:".05em"}}>📂 Bearbeitete Vorgänge</div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:14}}>Alle abgeschlossenen Anträge & Meldungen</div>
-
-          {/* Nachtrag 처리 완료 */}
-          {(()=>{
-            const done = antraege.filter(a=>a.status!=="offen");
-            if(done.length===0) return null;
-            return(
-              <div style={{marginBottom:14}}>
-                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🕐 Nachträge</div>
-                {done.map(a=>(
-                  <div key={a.id} style={{...S.card,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                    <div>
-                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{a.user} · {a.date}</div>
-                      <div style={{fontSize:10,color:C.muted}}>{a.filiale} · {a.ein}–{a.aus}</div>
-                    </div>
-                    <span style={S.pill(a.status)}>{a.status==="genehmigt"?"Genehmigt":"Abgelehnt"}</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-
-          {/* Archiv (tausch/absage/einspringen 처리 완료) */}
-          {myArchiv.length>0&&(
-            <div>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🗂 Archiv</div>
-              {myArchiv.map(([key,a])=>renderErledigtCard(key,a))}
-            </div>
-          )}
-
-          {antraege.filter(a=>a.status!=="offen").length===0&&myArchiv.length===0&&(
-            <div style={{textAlign:"center",color:C.muted,fontSize:12,padding:"30px 0"}}>Noch keine bearbeiteten Vorgänge.</div>
-          )}
-        </div>
+        <AdminAntraegeView
+          antraege={antraege}
+          setAntraege={setAntraege}
+          archiv={archiv}
+          setArchiv={setArchiv}
+          myArchiv={myArchiv}
+          renderErledigtCard={renderErledigtCard}
+          setRecords={setRecords}
+          records={records}
+          userKey={userKey}
+        />
       )}
 
       {/* ── STATISTIK ── */}
