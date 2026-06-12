@@ -2074,13 +2074,12 @@ function StatistikTab({records,users}){
 
 
 // ── ADMIN ANTRÄGE VIEW ────────────────────────────────────────────────────────
-function AdminAntraegeView({ antraege, setAntraege, archiv, myArchiv, renderErledigtCard, setRecords, records, userKey, setArchiv }) {
+function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard, setRecords, records }) {
   const [openId, setOpenId] = useState(null);
 
-  const offene  = (Array.isArray(antraege)?antraege:[]).filter(a=>a.status==="offen");
-  const done    = (Array.isArray(antraege)?antraege:[]).filter(a=>a.status!=="offen");
+  const offene = (Array.isArray(antraege)?antraege:[]).filter(a=>a.status==="offen");
+  const done   = (Array.isArray(antraege)?antraege:[]).filter(a=>a.status!=="offen");
 
-  // 날짜별 그룹화
   const byDate = {};
   done.forEach(a=>{ const d=a.date||""; if(!byDate[d]) byDate[d]=[]; byDate[d].push(a); });
   const dateKeys = Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
@@ -2088,13 +2087,10 @@ function AdminAntraegeView({ antraege, setAntraege, archiv, myArchiv, renderErle
   function reopen(id) {
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(a=>a.id===id?{...a,status:"offen"}:a));
   }
-
   function decide(a, ok) {
-    const newStatus = ok ? "genehmigt" : "abgelehnt";
+    const newStatus = ok?"genehmigt":"abgelehnt";
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:newStatus}:x));
-
     if (ok) {
-      // 승인 시: records에 자동 추가 (통계 연동)
       const exists = records.find(r=>r.user===a.user&&r.date===a.date&&r.typ==="nachtrag");
       if (!exists) {
         setRecords(prev=>[...(Array.isArray(prev)?prev:[]),{
@@ -2102,69 +2098,70 @@ function AdminAntraegeView({ antraege, setAntraege, archiv, myArchiv, renderErle
           ein:a.ein,aus:a.aus,note:a.grund||"Nachtrag genehmigt",typ:"nachtrag"
         }]);
       }
-    }
-    // 거절 시: 기존 nachtrag record 제거
-    if (!ok) {
+    } else {
       setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(
         r=>!(r.user===a.user&&r.date===a.date&&r.typ==="nachtrag")
       ));
     }
   }
 
-  function NachtragCard({a, showActions}) {
+  // NachtragCard를 인라인 렌더 함수로 (컴포넌트 아님)
+  function renderCard(a) {
     const isOpen = openId===a.id;
-    const statusColor = a.status==="genehmigt"?C.mintDark:a.status==="abgelehnt"?C.red:C.yellow;
-    const statusBg    = a.status==="genehmigt"?C.mintLight:a.status==="abgelehnt"?C.redLight:C.yellowLight;
-    const statusLabel = a.status==="genehmigt"?"✅ Genehmigt":a.status==="abgelehnt"?"❌ Abgelehnt":"⏳ Offen";
+    const sc = a.status==="genehmigt"?C.mintDark:a.status==="abgelehnt"?C.red:C.yellow;
+    const sb = a.status==="genehmigt"?C.mintLight:a.status==="abgelehnt"?C.redLight:C.yellowLight;
+    const sl = a.status==="genehmigt"?"✅ Genehmigt":a.status==="abgelehnt"?"❌ Abgelehnt":"⏳ Offen";
+    const border = a.status==="offen"?C.yellow:a.status==="genehmigt"?C.mint:C.border;
     return (
-      <div style={{...S.card,marginBottom:8,padding:0,overflow:"hidden",
-        border:`1.5px solid ${a.status==="offen"?C.yellow:a.status==="genehmigt"?C.mint:C.border}`}}>
+      <div key={a.id} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden",border:`1.5px solid ${border}`}}>
         <button onClick={()=>setOpenId(isOpen?null:a.id)}
           style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
             display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{textAlign:"left"}}>
             <div style={{fontSize:13,fontWeight:700,color:C.text}}>🕐 {a.user}</div>
             <div style={{fontSize:11,color:C.muted}}>
-              {new Date(a.date).toLocaleDateString("de-DE",{day:"numeric",month:"long"})} · {a.filiale}
+              {a.date?new Date(a.date).toLocaleDateString("de-DE",{day:"numeric",month:"long"}):""} · {a.filiale}
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:statusColor,background:statusBg}}>
-              {statusLabel}
-            </span>
+            <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:sc,background:sb}}>{sl}</span>
             <span style={{fontSize:11,color:C.muted}}>{isOpen?"▲":"▼"}</span>
           </div>
         </button>
         {isOpen&&(
           <div style={{borderTop:`1px solid ${C.border}`,padding:"12px 14px"}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-              {[["Datum",new Date(a.date).toLocaleDateString("de-DE")],
-                ["Filiale",a.filiale],
-                ["Ein",a.ein],["Aus",a.aus]].map(([l,v])=>(
+              {[["Datum",a.date?new Date(a.date).toLocaleDateString("de-DE"):"—"],
+                ["Filiale",a.filiale||"—"],
+                ["Ein",a.ein||"—"],["Aus",a.aus||"—"]].map(([l,v])=>(
                 <div key={l}>
                   <div style={{fontSize:9,color:C.muted}}>{l}</div>
                   <div style={{fontSize:13,fontWeight:700,color:C.text}}>{v}</div>
                 </div>
               ))}
             </div>
-            {a.grund&&<div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>📌 „{a.grund}"</div>}
-            {/* 액션 버튼 */}
+            {a.grund&&(
+              <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>
+                📌 „{a.grund}"
+              </div>
+            )}
             {a.status==="offen"&&(
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>decide(a,false)}
-                  style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
+                  style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                  Ablehnen
+                </button>
                 <button onClick={()=>decide(a,true)}
-                  style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>✅ Genehmigen</button>
-              </div>
-            )}
-            {/* 처리 완료 후 번복 버튼 */}
-            {a.status!=="offen"&&(
-              <div style={{display:"flex",gap:8,marginTop:4}}>
-                <button onClick={()=>reopen(a.id)}
-                  style={{flex:1,padding:"8px",borderRadius:9,border:`1px solid ${C.yellow}`,background:C.yellowLight,color:C.yellow,fontWeight:700,fontSize:10,cursor:"pointer"}}>
-                  🔄 Entscheidung ändern
+                  style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
+                  ✅ Genehmigen
                 </button>
               </div>
+            )}
+            {a.status!=="offen"&&(
+              <button onClick={()=>reopen(a.id)}
+                style={{width:"100%",padding:"8px",borderRadius:9,border:`1px solid ${C.yellow}`,background:C.yellowLight,color:"#b37400",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                🔄 Entscheidung ändern
+              </button>
             )}
           </div>
         )}
@@ -2174,8 +2171,6 @@ function AdminAntraegeView({ antraege, setAntraege, archiv, myArchiv, renderErle
 
   return (
     <div style={{padding:"14px"}}>
-
-      {/* ① 미처리 (자동 펼침) */}
       <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
         ⏳ Offene Anträge ({offene.length})
       </div>
@@ -2183,17 +2178,15 @@ function AdminAntraegeView({ antraege, setAntraege, archiv, myArchiv, renderErle
         <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"18px",marginBottom:14}}>
           Keine offenen Anträge ✅
         </div>
-      ):offene.map(a=><NachtragCard key={a.id} a={a}/>)}
+      ):offene.map(a=>renderCard(a))}
 
-      {/* ② 처리 완료 (날짜별 그룹) */}
       {done.length>0&&(
         <div style={{marginTop:16}}>
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
             📂 Bearbeitete Anträge
           </div>
-          {/* 거절 통계 */}
           {done.filter(a=>a.status==="abgelehnt").length>0&&(
-            <div style={{...S.card,marginBottom:10,display:"flex",gap:12,padding:"10px 14px",border:`1px solid ${C.redLight}`}}>
+            <div style={{...S.card,marginBottom:10,display:"flex",gap:20,padding:"10px 14px"}}>
               <div style={{textAlign:"center"}}>
                 <div style={{fontSize:18,fontWeight:800,color:C.red}}>{done.filter(a=>a.status==="abgelehnt").length}</div>
                 <div style={{fontSize:9,color:C.muted}}>Abgelehnt</div>
@@ -2207,15 +2200,14 @@ function AdminAntraegeView({ antraege, setAntraege, archiv, myArchiv, renderErle
           {dateKeys.map(d=>(
             <div key={d} style={{marginBottom:4}}>
               <div style={{fontSize:10,color:C.muted,fontWeight:600,marginBottom:4,marginTop:8}}>
-                📅 {new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"long",year:"numeric"})}
+                📅 {d?new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"long",year:"numeric"}):"—"}
               </div>
-              {byDate[d].map(a=><NachtragCard key={a.id} a={a}/>)}
+              {byDate[d].map(a=>renderCard(a))}
             </div>
           ))}
         </div>
       )}
 
-      {/* ③ Archiv (tausch/absage/einspringen) */}
       {myArchiv&&myArchiv.length>0&&(
         <div style={{marginTop:16}}>
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🗂 Archiv</div>
@@ -2225,6 +2217,7 @@ function AdminAntraegeView({ antraege, setAntraege, archiv, myArchiv, renderErle
     </div>
   );
 }
+
 
 // ── ADMIN DIENSTPLAN VIEW ────────────────────────────────────────────────────
 function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedule }) {
@@ -3075,55 +3068,123 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       </div>
 
       {/* ── ÜBERSICHT ── */}
-      {tab==="uebersicht"&&!detailKey&&(
-        <div style={{padding:"14px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
-            <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".05em"}}>Heutige Mitarbeiterinnen</div>
-          </div>
-          {/* 범례 */}
-          <div style={{...S.card,marginBottom:10,padding:"9px 12px"}}>
-            <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>Legende</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:"6px 14px"}}>
-              {[
-                {c:C.mintLight,tc:C.mintDark,l:"Aktiv – aktuell eingestempelt"},
-                {c:"#F0F0F0",tc:C.muted,l:"Feierabend – heute ausgestempelt"},
-                {c:C.redLight,tc:C.red,l:"Nicht erschienen – kein Einstempeln heute"},
-              ].map(({c,tc,l})=>(
-                <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
-                  <div style={{width:10,height:10,borderRadius:3,background:c,border:`1px solid ${tc}`,flexShrink:0}}/>
-                  <span style={{fontSize:9,color:C.muted}}>{l}</span>
-                </div>
+      {tab==="uebersicht"&&!detailKey&&(()=>{
+        const [uTab, setUTab] = React.useState("all");
+
+        // 오늘 schedule에서 근무 예정 직원 목록
+        const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
+        const todayShiftEmps = empList.filter(emp=>
+          norm(schedule[emp.vorname]||[]).some(s=>(s.date||s.d)===today())
+        );
+
+        return(
+          <div style={{padding:"14px"}}>
+            {/* 서브탭 */}
+            <div style={{display:"flex",gap:0,marginBottom:12,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
+              {[{id:"all",l:"👥 All Staffs"},{id:"today",l:"📅 Heutige Staffs"}].map(({id,l})=>(
+                <button key={id} onClick={()=>setUTab(id)}
+                  style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
+                    background:uTab===id?C.navy:"#fff",color:uTab===id?"#fff":C.muted,transition:"all .15s"}}>
+                  {l}
+                </button>
               ))}
             </div>
-            <div style={{fontSize:8,color:C.muted,marginTop:6,borderTop:`1px solid ${C.border}`,paddingTop:5}}>
-              ℹ️ „Nicht erschienen" = kein Einstempeleintrag für heute in der Datenbank. Kein Rückschluss auf Entschuldigung oder Krankmeldung.
-            </div>
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:9}}>
-            {empList.map(emp=>{
-              const st=getStatus(emp.vorname),br=getBranch(emp.vorname);
-              return(
-                <div key={emp.key} style={{...S.card,display:"flex",alignItems:"center",gap:11,padding:"12px 14px"}}>
-                  <button onClick={()=>setDetailKey(emp.key)} style={{flex:1,border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
-                    <div style={{width:40,height:40,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:emp.emoji?20:13,color:"#fff",flexShrink:0}}>{emp.emoji||emp.kuerzel}</div>
-                    <div style={{flex:1}}>
-                      <div style={{display:"flex",alignItems:"center",gap:7}}>
-                        <span style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.emoji&&<span style={{marginRight:3}}>{emp.emoji}</span>}{emp.vorname}</span>
-                        <span style={{fontSize:9,color:C.muted,background:C.border,padding:"2px 6px",borderRadius:99}}>{emp.role==="Admin"?"Admin":"Staff"}</span>
+
+            {/* ── 탭 1: All Staffs ── */}
+            {uTab==="all"&&(
+              <div>
+                {empList.map(emp=>(
+                  <div key={emp.key} style={{...S.card,display:"flex",alignItems:"center",gap:11,padding:"12px 14px",marginBottom:8}}>
+                    <button onClick={()=>setDetailKey(emp.key)}
+                      style={{flex:1,border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
+                      <div style={{width:40,height:40,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff",flexShrink:0}}>
+                        {emp.kuerzel}
                       </div>
-                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>{br?br+" · ":""}Heute</div>
-                    </div>
-                    <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:99,color:sColor(st),background:sBg(st)}}>{st}</span>
-                  </button>
-                  <button onClick={()=>setDeleteConfirm(emp.key)} style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
-                    <span style={{fontSize:13,color:C.red}}>🗑</span>
-                  </button>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}
+                          {emp.nachname&&<span style={{fontSize:11,fontWeight:400,color:C.muted}}> {emp.nachname}</span>}
+                        </div>
+                        <div style={{fontSize:10,color:C.muted,marginTop:2}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
+                      </div>
+                      <span style={{fontSize:11,color:C.muted}}>›</span>
+                    </button>
+                    <button onClick={()=>setDeleteConfirm(emp.key)}
+                      style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
+                      <span style={{fontSize:13,color:C.red}}>🗑</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── 탭 2: Heutige Staffs ── */}
+            {uTab==="today"&&(
+              <div>
+                {/* 범례 */}
+                <div style={{...S.card,marginBottom:10,padding:"9px 12px"}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>Legende</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:"6px 14px",marginBottom:6}}>
+                    {[
+                      {c:C.mintLight,tc:C.mintDark,l:"Aktiv – eingestempelt"},
+                      {c:"#F0F0F0",tc:C.muted,l:"Feierabend – ausgestempelt"},
+                      {c:C.redLight,tc:C.red,l:"Nicht erschienen – kein Eintrag"},
+                    ].map(({c,tc,l})=>(
+                      <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
+                        <div style={{width:10,height:10,borderRadius:3,background:c,border:`1px solid ${tc}`,flexShrink:0}}/>
+                        <span style={{fontSize:9,color:C.muted}}>{l}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* 이니셜 범례 - 아랫줄 */}
+                  <div style={{display:"flex",gap:10,flexWrap:"wrap",borderTop:`1px solid ${C.border}`,paddingTop:6}}>
+                    {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"Teenjoy"}].map(({init,l})=>(
+                      <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
+                        <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
+                        <span style={{fontSize:9,color:C.muted}}>{l}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{fontSize:8,color:C.muted,marginTop:6,borderTop:`1px solid ${C.border}`,paddingTop:5}}>
+                    ℹ️ „Nicht erschienen" = kein Einstempeleintrag für heute. Kein Rückschluss auf Krankmeldung o.ä.
+                  </div>
                 </div>
-              );
-            })}
+
+                {todayShiftEmps.length===0?(
+                  <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"24px"}}>
+                    Kein Dienstplan für heute eingetragen.
+                  </div>
+                ):todayShiftEmps.map(emp=>{
+                  const st=getStatus(emp.vorname);
+                  const br=getBranch(emp.vorname);
+                  // 오늘 schedule에서 지점 정보
+                  const norm2 = v => !v?[]:Array.isArray(v)?v:Object.values(v);
+                  const todayShift = norm2(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===today());
+                  const plannedFil = todayShift?(todayShift.filiale||todayShift.f):null;
+                  return(
+                    <div key={emp.key} style={{...S.card,display:"flex",alignItems:"center",gap:11,padding:"12px 14px",marginBottom:8}}>
+                      <button onClick={()=>setDetailKey(emp.key)}
+                        style={{flex:1,border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
+                        <div style={{width:40,height:40,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff",flexShrink:0}}>
+                          {emp.kuerzel}
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}</div>
+                          <div style={{fontSize:10,color:C.muted,marginTop:2}}>
+                            {plannedFil&&<span style={{fontWeight:700,color:C.navy,marginRight:5}}>{filialInit(plannedFil)}</span>}
+                            {plannedFil||"Filiale unbekannt"}
+                            {todayShift&&(todayShift.time||todayShift.t)?` · ${todayShift.time||todayShift.t}`:""}
+                          </div>
+                        </div>
+                        <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:99,color:sColor(st),background:sBg(st)}}>{st}</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {tab==="uebersicht"&&detailKey&&(()=>{
         const emp=safeUsers.find(u=>u.key===detailKey);
@@ -3311,13 +3372,10 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         <AdminAntraegeView
           antraege={antraege}
           setAntraege={setAntraege}
-          archiv={archiv}
-          setArchiv={setArchiv}
           myArchiv={myArchiv}
           renderErledigtCard={renderErledigtCard}
           setRecords={setRecords}
           records={records}
-          userKey={userKey}
         />
       )}
 
