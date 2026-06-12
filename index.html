@@ -455,18 +455,25 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
     };
     setTauschAntraege(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
     const zustaendig = antrag.initiatorFiliale === "Teenjoy" ? "teddy" : "yeaji";
-    // setNotifications는 setTauschAntraege와 분리해서 직접 호출
+    // 파트너에게 알림 (직접 Firebase 쓰기)
     if (window._fbDb && window._fbRef && window._fbSet) {
       const notifKey = `tausch_anfrage_${id}`;
-      const notifData = {
+      window._fbSet(window._fbRef(window._fbDb, `notifications/${notifKey}`), {
         type: "tausch_anfrage", targetUser: targetUser.vorname,
         initiator: userName, antragId: id,
         myDate: antrag.partnerDate, myFiliale: antrag.partnerFiliale, myTime: antrag.partnerTime,
         theirDate: antrag.initiatorDate, theirFiliale: antrag.initiatorFiliale,
         zustaendig, gelesen: false, ts: Date.now()
-      };
-      window._fbSet(window._fbRef(window._fbDb, `notifications/${notifKey}`), notifData)
-        .catch(e => console.error("notif write error:", e));
+      }).catch(e => console.error("notif write error:", e));
+
+      // 관리자 Anträge에 즉시 "im_prozess"로 등록
+      window._fbSet(window._fbRef(window._fbDb, `notifications/tausch_manager_${id}`), {
+        type: "tausch_manager", status: "im_prozess",
+        initiator: userName, partner: targetUser.vorname,
+        initiatorDate: antrag.initiatorDate, initiatorFiliale: antrag.initiatorFiliale,
+        partnerDate: antrag.partnerDate, partnerFiliale: antrag.partnerFiliale,
+        antragId: id, zustaendig, gelesen: false, ts: Date.now()
+      }).catch(e => console.error("manager notif write error:", e));
     }
     onClose();
   }
@@ -634,11 +641,10 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
     .filter(([,n]) => n.type==="tausch_anfrage" && n.targetUser===userName && !n.gelesen);
 
   function bestaetigenTausch(notifKey, antragId, ok) {
-    // 알림 읽음 처리 (직접 Firebase 쓰기)
+    // 알림 읽음 처리
     if (window._fbDb && window._fbRef && window._fbSet) {
-      window._fbSet(
-        window._fbRef(window._fbDb, `notifications/${notifKey}/gelesen`), true
-      ).catch(e => console.error(e));
+      window._fbSet(window._fbRef(window._fbDb, `notifications/${notifKey}/gelesen`), true)
+        .catch(e => console.error(e));
     }
 
     const list = Array.isArray(tauschAntraege) ? tauschAntraege : [];
@@ -652,26 +658,39 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
       return;
     }
 
-    // 수락 → 상태 업데이트
+    // 수락 → 즉시 schedule 교체 (관리자 승인 불필요)
+    if (window._fbDb && window._fbRef && window._fbSet && window._fbOnValue) {
+      window._fbOnValue(window._fbRef(window._fbDb, "schedule"), snap => {
+        const sched = snap.val() || {};
+        // initiator: 원래 날짜 제거 → 파트너 날짜 추가
+        sched[antrag.initiator] = (sched[antrag.initiator]||[])
+          .filter(s => (s.d||s.date) !== antrag.initiatorDate);
+        sched[antrag.initiator] = [...sched[antrag.initiator],
+          {d: antrag.partnerDate, f: antrag.partnerFiliale, t: antrag.partnerTime||null}];
+        // partner: 원래 날짜 제거 → initiator 날짜 추가
+        sched[antrag.partner] = (sched[antrag.partner]||[])
+          .filter(s => (s.d||s.date) !== antrag.partnerDate);
+        sched[antrag.partner] = [...sched[antrag.partner],
+          {d: antrag.initiatorDate, f: antrag.initiatorFiliale, t: antrag.initiatorTime||null}];
+        window._fbSet(window._fbRef(window._fbDb, "schedule"), sched);
+      }, {onlyOnce: true});
+    }
+
+    // 상태 → getauscht
     setTauschAntraege(prev => (Array.isArray(prev)?prev:[]).map(a =>
-      a.id===antragId ? {...a, status:"ausstehend_manager", partnerBestaetigt:true} : a
+      a.id===antragId ? {...a, status:"getauscht", partnerBestaetigt:true} : a
     ));
 
-    // 관리자 알림 직접 쓰기
+    // 관리자에게 완료 알림
     if (window._fbDb && window._fbRef && window._fbSet) {
       const zustaendig = antrag.initiatorFiliale==="Teenjoy"?"teddy":"yeaji";
-      const managerNotifKey = `tausch_manager_${antragId}`;
-      window._fbSet(
-        window._fbRef(window._fbDb, `notifications/${managerNotifKey}`),
-        {
-          type: "tausch_manager",
-          initiator: antrag.initiator,
-          partner: antrag.partner,
-          initiatorDate: antrag.initiatorDate, initiatorFiliale: antrag.initiatorFiliale,
-          partnerDate: antrag.partnerDate, partnerFiliale: antrag.partnerFiliale,
-          antragId, zustaendig, gelesen: false, ts: Date.now()
-        }
-      ).catch(e => console.error("manager notif error:", e));
+      window._fbSet(window._fbRef(window._fbDb, `notifications/tausch_manager_${antragId}`), {
+        type: "tausch_manager", status: "getauscht",
+        initiator: antrag.initiator, partner: antrag.partner,
+        initiatorDate: antrag.initiatorDate, initiatorFiliale: antrag.initiatorFiliale,
+        partnerDate: antrag.partnerDate, partnerFiliale: antrag.partnerFiliale,
+        antragId, zustaendig, gelesen: false, ts: Date.now()
+      }).catch(e => console.error(e));
     }
   }
 
@@ -860,8 +879,8 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const tauschLabel = myTausch ? ({
     ausstehend_bestaetigung: `🔄 Tausch-Anfrage an ${myTausch.partner} · Warte auf Bestätigung`,
     ausstehend_manager:      `🔄 Tausch wartet auf Manager-Genehmigung`,
+    getauscht:               `✅ Getauscht mit ${myTausch.partner}`,
     abgelehnt_partner:       `❌ Tausch von ${myTausch.partner} abgelehnt`,
-    genehmigt:               `✅ Tausch genehmigt`,
   }[myTausch.status] || null) : null;
 
   function handleAbsagen(antrag) {
@@ -1346,6 +1365,11 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
   const myAntraege=antraege.filter(a=>a.user===user.vorname);
   const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
 
+  // Dienstplan 탭 뱃지: 나에게 온 Tausch 요청 수
+  const [_notifications] = useFirebase("notifications", {});
+  const pendingTauschCount = Object.values(_notifications||{})
+    .filter(n => n.type==="tausch_anfrage" && n.targetUser===user.vorname && !n.gelesen).length;
+
   function handleEin(){setClockedIn(true);setClockInTime(new Date());setClockFiliale(selFiliale);setModal(null);}
   function handleAus(){
     const outStr=`${pad(now.getHours())}:${pad(now.getMinutes())}`;
@@ -1518,13 +1542,23 @@ function MitarbeiterView({userKey,users,records,setRecords,antraege,setAntraege,
 
       <div style={S.nav}>
         {[
-          {id:"home",      icon:"🏠", lbl:"Startseite"},
-          {id:"dienstplan",icon:"📋", lbl:"Dienstplan"},
-          {id:"einspringen",icon:"🙋",lbl:"Einspringen"},
-          {id:"nachtrag",  icon:"🕐", lbl:"Nachtrag"},
+          {id:"home",       icon:"🏠", lbl:"Startseite"},
+          {id:"dienstplan", icon:"📋", lbl:"Dienstplan", badge: pendingTauschCount},
+          {id:"einspringen",icon:"🙋", lbl:"Einspringen"},
+          {id:"nachtrag",   icon:"🕐", lbl:"Nachtrag"},
         ].map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0"}}>
-            <span style={{fontSize:19}}>{t.icon}</span>
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
+            <div style={{position:"relative",display:"inline-block"}}>
+              <span style={{fontSize:19}}>{t.icon}</span>
+              {t.badge>0&&(
+                <span style={{position:"absolute",top:-4,right:-6,minWidth:16,height:16,borderRadius:99,
+                  background:C.red,color:"#fff",fontSize:9,fontWeight:800,
+                  display:"flex",alignItems:"center",justifyContent:"center",padding:"0 3px",
+                  lineHeight:1}}>
+                  {t.badge}
+                </span>
+              )}
+            </div>
             <span style={{fontSize:9,fontWeight:600,color:tab===t.id?C.mintDark:C.muted}}>{t.lbl}</span>
             {tab===t.id&&<div style={{width:16,height:2,background:C.mint,borderRadius:99}}/>}
           </button>
@@ -2050,6 +2084,53 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
 
       {tab==="antraege"&&(
         <div style={{padding:"14px"}}>
+
+          {/* Schichttausch 현황 */}
+          {(()=>{
+            const allTausch = Object.entries(notifications||{})
+              .filter(([,n]) => n.type==="tausch_manager" &&
+                (n.zustaendig===userKey || !n.zustaendig))
+              .sort((a,b) => b[1].ts - a[1].ts);
+            if (allTausch.length === 0) return null;
+            return (
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>🔄 Schichttausch</div>
+                {allTausch.map(([key, n]) => {
+                  const isProzess = n.status === "im_prozess";
+                  return (
+                    <div key={key} style={{...S.card,marginBottom:8,
+                      border:`1.5px solid ${isProzess?C.border:C.mint}`}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>
+                            {n.initiator} · {new Date(n.initiatorDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                            <span style={{fontSize:12,color:C.muted,fontWeight:400}}> → </span>
+                            {n.partner} · {new Date(n.partnerDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                          </div>
+                          <div style={{fontSize:10,color:C.muted}}>
+                            {n.initiatorFiliale?.replace("TEEAMO ","")} ↔ {n.partnerFiliale?.replace("TEEAMO ","")}
+                          </div>
+                        </div>
+                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,marginLeft:10}}>
+                          {isProzess ? (
+                            <>
+                              <span style={{fontSize:18,animation:"spin 2s linear infinite",display:"inline-block"}}>⚙️</span>
+                              <span style={{fontSize:9,fontWeight:700,color:C.muted}}>im Prozess</span>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{fontSize:18}}>✅</span>
+                              <span style={{fontSize:9,fontWeight:700,color:C.mintDark}}>getauscht</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
           {offene.length>0&&(
             <div style={{marginBottom:12}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>Offene Anträge ({offene.length})</div>
@@ -2212,38 +2293,13 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                     </div>
                   </div>
                 </div>
-                <div style={{fontSize:9,color:C.mintDark,marginBottom:8}}>✅ Beide haben bestätigt. Bitte genehmigen.</div>
-                <div style={{display:"flex",gap:7}}>
-                  <button onClick={()=>markRead(key)}
-                    style={{flex:1,padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,
-                      background:"#fff",color:C.muted,fontWeight:700,fontSize:10,cursor:"pointer"}}>
-                    Ablehnen
-                  </button>
-                  <button onClick={()=>{
-                    // 근무표 교체
-                    if(window._fbDb&&window._fbRef&&window._fbSet) {
-                      const db=window._fbDb;
-                      const ref=window._fbRef;
-                      const fbOnValue=window._fbOnValue;
-                      fbOnValue(ref(db,"schedule"), snap => {
-                        const sched=snap.val()||{};
-                        // initiator: 원래 날짜 제거 → 파트너 날짜 추가
-                        sched[n.initiator]=(sched[n.initiator]||[]).filter(s=>(s.d||s.date)!==n.initiatorDate);
-                        sched[n.initiator]=[...(sched[n.initiator]||[]),{d:n.partnerDate,f:n.partnerFiliale,t:null}];
-                        // partner: 원래 날짜 제거 → initiator 날짜 추가
-                        sched[n.partner]=(sched[n.partner]||[]).filter(s=>(s.d||s.date)!==n.partnerDate);
-                        sched[n.partner]=[...(sched[n.partner]||[]),{d:n.initiatorDate,f:n.initiatorFiliale,t:null}];
-                        window._fbSet(ref(db,"schedule"),sched);
-                      },{onlyOnce:true});
-                    }
-                    markRead(key);
-                  }}
-                    style={{flex:2,padding:"7px",borderRadius:8,border:"none",
-                      background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
-                      color:"#fff",fontWeight:800,fontSize:10,cursor:"pointer"}}>
-                    ✅ Genehmigen & Tauschen
-                  </button>
+                <div style={{fontSize:9,color:n.status==="getauscht"?C.mintDark:C.muted,marginBottom:4}}>
+                  {n.status==="getauscht" ? "✅ Automatisch getauscht" : "⚙️ Partner bestätigt noch nicht"}
                 </div>
+                <button onClick={()=>markRead(key)}
+                  style={{fontSize:9,padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,cursor:"pointer"}}>
+                  ✓ Zur Kenntnis genommen
+                </button>
               </>}
                       {n.type==="einspringen"&&<>
                         <div style={{fontSize:12,fontWeight:800,color:C.mintDark}}>🙋 Eingesprungen: {n.user}</div>
