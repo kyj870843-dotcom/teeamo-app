@@ -2073,6 +2073,297 @@ function StatistikTab({records,users}){
 
 
 
+
+
+// ── ÜBERSICHT DETAIL TAB ─────────────────────────────────────────────────────
+function UebersichtDetailTab({ emp, records, getStatus, sColor, sBg, setDetailKey, setUsers, monthAccordion, setMonthAccordion }) {
+  if (!emp) return null;
+  const empRecs = records.filter(r=>r.user===emp.vorname);
+  const total = empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+
+  const byMonth={};
+  empRecs.forEach(r=>{ const m=r.date.slice(0,7); if(!byMonth[m]) byMonth[m]=[]; byMonth[m].push(r); });
+  const monthKeys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+  const monthLabel=m=>{
+    const [y,mo]=m.split("-");
+    const mn=["","Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+    return `${mn[parseInt(mo)]} ${y}`;
+  };
+
+  return (
+    <div style={{padding:"14px"}}>
+      <button onClick={()=>setDetailKey(null)}
+        style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:13,fontWeight:700,marginBottom:12}}>
+        ← Zurück
+      </button>
+
+      {/* 프로필 */}
+      <div style={{...S.card,display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+        <div style={{width:52,height:52,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:17,color:"#fff"}}>
+          {emp.kuerzel}
+        </div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:17,fontWeight:800,color:C.text}}>
+            {emp.vorname}{emp.nachname&&<span style={{fontSize:13,fontWeight:400,color:C.muted}}> {emp.nachname}</span>}
+          </div>
+          <div style={{fontSize:11,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
+          <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:4,display:"inline-block",
+            color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>
+            {getStatus(emp.vorname)}
+          </span>
+        </div>
+      </div>
+
+      {/* 전체 요약 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        {[{l:"Std. gesamt",v:total.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
+          <div key={l} style={S.card}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div>
+            <div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 계약 시간 */}
+      <div style={{...S.card,marginBottom:12}}>
+        <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:8}}>📋 Vertragsstunden / Monat</div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <input type="number" min="0" max="300" step="0.5"
+            defaultValue={emp.contractHours||0}
+            onBlur={e=>{
+              const h=parseFloat(e.target.value)||0;
+              setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>u.key===emp.key?{...u,contractHours:h}:u));
+            }}
+            style={{...S.input,width:90,textAlign:"center",fontSize:16,fontWeight:700}}/>
+          <div style={{fontSize:12,color:C.muted}}>Std/Monat</div>
+          {(emp.contractHours||0)>0&&(()=>{
+            const diff=total-(emp.contractHours||0);
+            return(
+              <div style={{marginLeft:"auto",textAlign:"right"}}>
+                <div style={{fontSize:13,fontWeight:800,color:diff>=0?C.mintDark:C.red}}>
+                  {diff>=0?"+":""}{diff.toFixed(1)}h
+                </div>
+                <div style={{fontSize:10,color:C.muted}}>{diff>=0?"Überstunden":"Fehlstunden"}</div>
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+
+      {/* 범례 */}
+      <div style={{display:"flex",gap:12,marginBottom:10,padding:"8px 10px",background:C.bg,borderRadius:9,flexWrap:"wrap"}}>
+        {[{c:C.mintLight,tc:C.mintDark,l:"Abgeschlossen"},{c:C.yellowLight,tc:C.yellow,l:"Läuft noch"}].map(({c,tc,l})=>(
+          <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:12,height:12,borderRadius:3,background:c,border:`1.5px solid ${tc}`}}/>
+            <span style={{fontSize:10,color:C.muted}}>{l}</span>
+          </div>
+        ))}
+        {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"Teenjoy"}].map(({init,l})=>(
+          <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
+            <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
+            <span style={{fontSize:10,color:C.muted}}>{l}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* 월별 아코디언 */}
+      {empRecs.length===0?(
+        <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:13,padding:"24px"}}>Keine Einträge.</div>
+      ):monthKeys.map(m=>{
+        const mRecs=byMonth[m];
+        const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+        const mDays=mRecs.filter(r=>r.aus).length;
+        const contract=emp.contractHours||0;
+        const diff=contract>0?mTotal-contract:null;
+        const isOpen=monthAccordion[m]!==false;
+        return(
+          <div key={m} style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
+            <button onClick={()=>setMonthAccordion(p=>({...p,[m]:!isOpen}))}
+              style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
+                display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:14,fontWeight:800,color:C.text}}>{monthLabel(m)}</span>
+                <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(1)}h</span>
+                <span style={{fontSize:10,color:C.muted}}>{mDays}일</span>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                {diff!==null&&(
+                  <span style={{fontSize:11,fontWeight:700,color:diff>=0?C.mintDark:C.red}}>
+                    {diff>=0?"+":""}{diff.toFixed(1)}h
+                  </span>
+                )}
+                <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+              </div>
+            </button>
+            {isOpen&&(
+              <div>
+                {contract>0&&(
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,
+                    borderTop:`1px solid ${C.border}`,borderBottom:`1px solid ${C.border}`}}>
+                    {[{l:"Geplant",v:contract+"h",bg:"#fff",vc:C.text},
+                      {l:"Geleistet",v:mTotal.toFixed(1)+"h",bg:C.mintLight,vc:C.mintDark}].map(({l,v,bg,vc})=>(
+                      <div key={l} style={{padding:"8px 14px",background:bg}}>
+                        <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{l}</div>
+                        <div style={{fontSize:15,fontWeight:800,color:vc}}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {mRecs.sort((a,b)=>b.date.localeCompare(a.date)).map((r,i)=>(
+                  <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                    padding:"11px 14px",borderBottom:i<mRecs.length-1?`1px solid ${C.border}`:"none"}}>
+                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                      <div style={{width:36,height:36,borderRadius:9,
+                        background:r.aus?C.mintLight:C.yellowLight,
+                        display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                        <span style={{fontSize:9,color:C.muted,fontWeight:600}}>
+                          {["So","Mo","Di","Mi","Do","Fr","Sa"][new Date(r.date).getDay()]}
+                        </span>
+                        <span style={{fontSize:11,fontWeight:800,color:r.aus?C.mintDark:C.yellow}}>
+                          {filialInit(r.filiale)}
+                        </span>
+                      </div>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700,color:C.text}}>
+                          {new Date(r.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                          <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{r.filiale}</span>
+                        </div>
+                        <div style={{fontSize:12,color:C.muted,marginTop:1}}>
+                          {r.ein} → {r.aus||"läuft"}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:14,fontWeight:800,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</div>
+                      {r.note&&<div style={{fontSize:9,color:C.muted,maxWidth:80,textAlign:"right"}}>{r.note}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── ÜBERSICHT ALL TAB ────────────────────────────────────────────────────────
+function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm }) {
+  const [uTab, setUTab] = useState("all");
+
+  const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
+  const todayStr = today();
+
+  const todayShiftEmps = empList.filter(emp=>
+    norm(schedule[emp.vorname]||[]).some(s=>(s.date||s.d)===todayStr)
+  );
+
+  return (
+    <div style={{padding:"14px"}}>
+      {/* 서브탭 */}
+      <div style={{display:"flex",gap:0,marginBottom:12,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
+        {[{id:"all",l:"👥 All Staffs"},{id:"today",l:"📅 Heutige Staffs"}].map(({id,l})=>(
+          <button key={id} onClick={()=>setUTab(id)}
+            style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
+              background:uTab===id?C.navy:"#fff",color:uTab===id?"#fff":C.muted}}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {/* ── 탭 1: All Staffs ── */}
+      {uTab==="all"&&(
+        <div>
+          {empList.map(emp=>(
+            <div key={emp.key} style={{...S.card,display:"flex",alignItems:"center",gap:11,padding:"12px 14px",marginBottom:8}}>
+              <button onClick={()=>setDetailKey(emp.key)}
+                style={{flex:1,border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
+                <div style={{width:40,height:40,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff",flexShrink:0}}>
+                  {emp.kuerzel}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>
+                    {emp.vorname}{emp.nachname&&<span style={{fontSize:11,fontWeight:400,color:C.muted}}> {emp.nachname}</span>}
+                  </div>
+                  <div style={{fontSize:10,color:C.muted,marginTop:2}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
+                </div>
+                <span style={{fontSize:14,color:C.muted}}>›</span>
+              </button>
+              <button onClick={()=>setDeleteConfirm(emp.key)}
+                style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
+                <span style={{fontSize:13,color:C.red}}>🗑</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── 탭 2: Heutige Staffs ── */}
+      {uTab==="today"&&(
+        <div>
+          {/* 범례 */}
+          <div style={{...S.card,marginBottom:10,padding:"9px 12px"}}>
+            <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>Legende</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:"6px 14px",marginBottom:6}}>
+              {[
+                {c:C.mintLight,tc:C.mintDark,l:"Aktiv"},
+                {c:"#F0F0F0",tc:C.muted,l:"Feierabend"},
+                {c:C.redLight,tc:C.red,l:"Nicht erschienen"},
+              ].map(({c,tc,l})=>(
+                <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{width:10,height:10,borderRadius:3,background:c,border:`1px solid ${tc}`,flexShrink:0}}/>
+                  <span style={{fontSize:9,color:C.muted}}>{l}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",borderTop:`1px solid ${C.border}`,paddingTop:6}}>
+              {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"Teenjoy"}].map(({init,l})=>(
+                <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
+                  <span style={{fontSize:9,color:C.muted}}>{l}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{fontSize:8,color:C.muted,marginTop:6,borderTop:`1px solid ${C.border}`,paddingTop:5}}>
+              ℹ️ Nicht erschienen = kein Einstempeleintrag für heute.
+            </div>
+          </div>
+
+          {todayShiftEmps.length===0?(
+            <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"24px"}}>
+              Kein Dienstplan für heute eingetragen.
+            </div>
+          ):todayShiftEmps.map(emp=>{
+            const st=getStatus(emp.vorname);
+            const todayShift=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===todayStr);
+            const plannedFil=todayShift?(todayShift.filiale||todayShift.f):null;
+            return(
+              <div key={emp.key} style={{...S.card,display:"flex",alignItems:"center",gap:11,padding:"12px 14px",marginBottom:8}}>
+                <button onClick={()=>setDetailKey(emp.key)}
+                  style={{flex:1,border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
+                  <div style={{width:40,height:40,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff",flexShrink:0}}>
+                    {emp.kuerzel}
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}</div>
+                    <div style={{fontSize:10,color:C.muted,marginTop:2}}>
+                      {plannedFil&&<span style={{fontWeight:700,color:C.navy,marginRight:5}}>{filialInit(plannedFil)}</span>}
+                      {plannedFil||"Filiale unbekannt"}
+                      {todayShift&&(todayShift.time||todayShift.t)?` · ${todayShift.time||todayShift.t}`:""}
+                    </div>
+                  </div>
+                  <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:99,color:sColor(st),background:sBg(st)}}>{st}</span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ADMIN ANTRÄGE VIEW ────────────────────────────────────────────────────────
 function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard, setRecords, records }) {
   const [openId, setOpenId] = useState(null);
@@ -2142,7 +2433,7 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
             </div>
             {a.grund&&(
               <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>
-                📌 „{a.grund}"
+                📌 "{a.grund}"
               </div>
             )}
             {a.status==="offen"&&(
@@ -3068,292 +3359,33 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       </div>
 
       {/* ── ÜBERSICHT ── */}
-      {tab==="uebersicht"&&!detailKey&&(()=>{
-        const [uTab, setUTab] = React.useState("all");
+      {tab==="uebersicht"&&!detailKey&&(
+        <UebersichtAllTab
+          empList={empList}
+          schedule={schedule}
+          records={records}
+          getStatus={getStatus}
+          sColor={sColor}
+          sBg={sBg}
+          setDetailKey={setDetailKey}
+          setDeleteConfirm={setDeleteConfirm}
+        />
+      )}
 
-        // 오늘 schedule에서 근무 예정 직원 목록
-        const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
-        const todayShiftEmps = empList.filter(emp=>
-          norm(schedule[emp.vorname]||[]).some(s=>(s.date||s.d)===today())
-        );
+      {tab==="uebersicht"&&detailKey&&(
+        <UebersichtDetailTab
+          emp={safeUsers.find(u=>u.key===detailKey)}
+          records={records}
+          getStatus={getStatus}
+          sColor={sColor}
+          sBg={sBg}
+          setDetailKey={setDetailKey}
+          setUsers={setUsers}
+          monthAccordion={monthAccordion}
+          setMonthAccordion={setMonthAccordion}
+        />
+      )}
 
-        return(
-          <div style={{padding:"14px"}}>
-            {/* 서브탭 */}
-            <div style={{display:"flex",gap:0,marginBottom:12,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
-              {[{id:"all",l:"👥 All Staffs"},{id:"today",l:"📅 Heutige Staffs"}].map(({id,l})=>(
-                <button key={id} onClick={()=>setUTab(id)}
-                  style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
-                    background:uTab===id?C.navy:"#fff",color:uTab===id?"#fff":C.muted,transition:"all .15s"}}>
-                  {l}
-                </button>
-              ))}
-            </div>
-
-            {/* ── 탭 1: All Staffs ── */}
-            {uTab==="all"&&(
-              <div>
-                {empList.map(emp=>(
-                  <div key={emp.key} style={{...S.card,display:"flex",alignItems:"center",gap:11,padding:"12px 14px",marginBottom:8}}>
-                    <button onClick={()=>setDetailKey(emp.key)}
-                      style={{flex:1,border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
-                      <div style={{width:40,height:40,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff",flexShrink:0}}>
-                        {emp.kuerzel}
-                      </div>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}
-                          {emp.nachname&&<span style={{fontSize:11,fontWeight:400,color:C.muted}}> {emp.nachname}</span>}
-                        </div>
-                        <div style={{fontSize:10,color:C.muted,marginTop:2}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
-                      </div>
-                      <span style={{fontSize:11,color:C.muted}}>›</span>
-                    </button>
-                    <button onClick={()=>setDeleteConfirm(emp.key)}
-                      style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
-                      <span style={{fontSize:13,color:C.red}}>🗑</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* ── 탭 2: Heutige Staffs ── */}
-            {uTab==="today"&&(
-              <div>
-                {/* 범례 */}
-                <div style={{...S.card,marginBottom:10,padding:"9px 12px"}}>
-                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>Legende</div>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:"6px 14px",marginBottom:6}}>
-                    {[
-                      {c:C.mintLight,tc:C.mintDark,l:"Aktiv – eingestempelt"},
-                      {c:"#F0F0F0",tc:C.muted,l:"Feierabend – ausgestempelt"},
-                      {c:C.redLight,tc:C.red,l:"Nicht erschienen – kein Eintrag"},
-                    ].map(({c,tc,l})=>(
-                      <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
-                        <div style={{width:10,height:10,borderRadius:3,background:c,border:`1px solid ${tc}`,flexShrink:0}}/>
-                        <span style={{fontSize:9,color:C.muted}}>{l}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {/* 이니셜 범례 - 아랫줄 */}
-                  <div style={{display:"flex",gap:10,flexWrap:"wrap",borderTop:`1px solid ${C.border}`,paddingTop:6}}>
-                    {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"Teenjoy"}].map(({init,l})=>(
-                      <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
-                        <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
-                        <span style={{fontSize:9,color:C.muted}}>{l}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{fontSize:8,color:C.muted,marginTop:6,borderTop:`1px solid ${C.border}`,paddingTop:5}}>
-                    ℹ️ „Nicht erschienen" = kein Einstempeleintrag für heute. Kein Rückschluss auf Krankmeldung o.ä.
-                  </div>
-                </div>
-
-                {todayShiftEmps.length===0?(
-                  <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"24px"}}>
-                    Kein Dienstplan für heute eingetragen.
-                  </div>
-                ):todayShiftEmps.map(emp=>{
-                  const st=getStatus(emp.vorname);
-                  const br=getBranch(emp.vorname);
-                  // 오늘 schedule에서 지점 정보
-                  const norm2 = v => !v?[]:Array.isArray(v)?v:Object.values(v);
-                  const todayShift = norm2(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===today());
-                  const plannedFil = todayShift?(todayShift.filiale||todayShift.f):null;
-                  return(
-                    <div key={emp.key} style={{...S.card,display:"flex",alignItems:"center",gap:11,padding:"12px 14px",marginBottom:8}}>
-                      <button onClick={()=>setDetailKey(emp.key)}
-                        style={{flex:1,border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
-                        <div style={{width:40,height:40,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff",flexShrink:0}}>
-                          {emp.kuerzel}
-                        </div>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}</div>
-                          <div style={{fontSize:10,color:C.muted,marginTop:2}}>
-                            {plannedFil&&<span style={{fontWeight:700,color:C.navy,marginRight:5}}>{filialInit(plannedFil)}</span>}
-                            {plannedFil||"Filiale unbekannt"}
-                            {todayShift&&(todayShift.time||todayShift.t)?` · ${todayShift.time||todayShift.t}`:""}
-                          </div>
-                        </div>
-                        <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:99,color:sColor(st),background:sBg(st)}}>{st}</span>
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {tab==="uebersicht"&&detailKey&&(()=>{
-        const emp=safeUsers.find(u=>u.key===detailKey);
-        if(!emp) return null;
-        const empRecs=records.filter(r=>r.user===emp.vorname);
-        const total=empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-
-        // 월별 그룹화
-        const byMonth={};
-        empRecs.forEach(r=>{
-          const m=r.date.slice(0,7);
-          if(!byMonth[m]) byMonth[m]=[];
-          byMonth[m].push(r);
-        });
-        const monthKeys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
-        const monthLabel=m=>{
-          const [y,mo]=m.split("-");
-          const mn=["","Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
-          return `${mn[parseInt(mo)]} ${y}`;
-        };
-
-        return(
-          <div style={{padding:"14px"}}>
-            <button onClick={()=>setDetailKey(null)} style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:13,fontWeight:700,marginBottom:12}}>← Zurück</button>
-
-            {/* 직원 프로필 */}
-            <div style={{...S.card,display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
-              <div style={{width:52,height:52,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:emp.vorname.match(/\p{Emoji}/u)?26:17,color:"#fff"}}>{emp.kuerzel}</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:17,fontWeight:800,color:C.text}}>{emp.vorname}{emp.nachname&&<span style={{fontSize:13,fontWeight:400,color:C.muted}}> {emp.nachname}</span>}</div>
-                <div style={{fontSize:11,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
-                <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:4,display:"inline-block",color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>{getStatus(emp.vorname)}</span>
-              </div>
-            </div>
-
-            {/* 전체 요약 */}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-              {[{l:"Std. gesamt",v:total.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
-                <div key={l} style={S.card}>
-                  <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div>
-                  <div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* 계약 시간 설정 */}
-            <div style={{...S.card,marginBottom:12}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:8}}>📋 Vertragsstunden / Monat</div>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <input type="number" min="0" max="300" step="0.5"
-                  defaultValue={emp.contractHours||0}
-                  onBlur={e=>{
-                    const h=parseFloat(e.target.value)||0;
-                    setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>u.key===emp.key?{...u,contractHours:h}:u));
-                  }}
-                  style={{...S.input,width:90,textAlign:"center",fontSize:16,fontWeight:700}}/>
-                <div style={{fontSize:12,color:C.muted}}>Std/Monat</div>
-                {(emp.contractHours||0)>0&&(()=>{
-                  const diff=total-(emp.contractHours||0);
-                  return(
-                    <div style={{marginLeft:"auto",textAlign:"right"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:diff>=0?C.mintDark:C.red}}>
-                        {diff>=0?`+${diff.toFixed(1)}h`:diff.toFixed(1)+"h"}
-                      </div>
-                      <div style={{fontSize:10,color:C.muted}}>{diff>=0?"Überstunden":"Fehlstunden"}</div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-
-            {/* 범례 */}
-            <div style={{display:"flex",gap:12,marginBottom:10,padding:"8px 10px",background:C.bg,borderRadius:9,flexWrap:"wrap"}}>
-              {[{c:C.mintLight,tc:C.mintDark,l:"Abgeschlossen"},{c:C.yellowLight,tc:C.yellow,l:"Läuft noch"}].map(({c,tc,l})=>(
-                <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
-                  <div style={{width:12,height:12,borderRadius:3,background:c,border:`1.5px solid ${tc}`}}/>
-                  <span style={{fontSize:10,color:C.muted}}>{l}</span>
-                </div>
-              ))}
-              {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"Teenjoy"}].map(({init,l})=>(
-                <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
-                  <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
-                  <span style={{fontSize:10,color:C.muted}}>{l}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* 월별 아코디언 */}
-            {empRecs.length===0?(
-              <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:13,padding:"24px"}}>Keine Einträge.</div>
-            ):monthKeys.map(m=>{
-              const mRecs=byMonth[m];
-              const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-              const mDays=mRecs.filter(r=>r.aus).length;
-              const contract=emp.contractHours||0;
-              const diff=contract>0?mTotal-contract:null;
-              const isOpen=monthAccordion[m]!==false; // 기본 열림
-              return(
-                <div key={m} style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
-                  {/* 월 헤더 */}
-                  <button onClick={()=>setMonthAccordion(p=>({...p,[m]:!isOpen}))}
-                    style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:10}}>
-                      <span style={{fontSize:14,fontWeight:800,color:C.text}}>{monthLabel(m)}</span>
-                      <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(1)}h</span>
-                      <span style={{fontSize:10,color:C.muted}}>{mDays}일</span>
-                    </div>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      {diff!==null&&(
-                        <span style={{fontSize:11,fontWeight:700,color:diff>=0?C.mintDark:C.red}}>
-                          {diff>=0?"+":""}{diff.toFixed(1)}h
-                        </span>
-                      )}
-                      <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
-                    </div>
-                  </button>
-                  {/* 계획 vs 실제 요약 */}
-                  {isOpen&&(
-                    <div>
-                      {contract>0&&(
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,borderTop:`1px solid ${C.border}`,borderBottom:`1px solid ${C.border}`}}>
-                          {[{l:"Geplant",v:contract+"h"},
-                            {l:"Geleistet",v:mTotal.toFixed(1)+"h"}].map(({l,v},i)=>(
-                            <div key={l} style={{padding:"8px 14px",background:i===1?C.mintLight:"#fff"}}>
-                              <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{l}</div>
-                              <div style={{fontSize:15,fontWeight:800,color:i===1?C.mintDark:C.text}}>{v}</div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {/* 일별 리스트 */}
-                      {mRecs.sort((a,b)=>b.date.localeCompare(a.date)).map((r,i)=>(
-                        <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                          padding:"11px 14px",borderBottom:i<mRecs.length-1?`1px solid ${C.border}`:"none"}}>
-                          <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                            <div style={{width:36,height:36,borderRadius:9,
-                              background:r.aus?C.mintLight:C.yellowLight,
-                              display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                              <span style={{fontSize:9,color:C.muted,fontWeight:600}}>
-                                {["So","Mo","Di","Mi","Do","Fr","Sa"][new Date(r.date).getDay()]}
-                              </span>
-                              <span style={{fontSize:11,fontWeight:800,color:r.aus?C.mintDark:C.yellow}}>
-                                {filialInit(r.filiale)}
-                              </span>
-                            </div>
-                            <div>
-                              <div style={{fontSize:13,fontWeight:700,color:C.text}}>
-                                {new Date(r.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
-                                <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{r.filiale}</span>
-                              </div>
-                              <div style={{fontSize:12,color:C.muted,marginTop:1}}>
-                                {r.ein} → {r.aus||<span style={{color:C.yellow,fontWeight:700}}>läuft</span>}
-                              </div>
-                            </div>
-                          </div>
-                          <div style={{textAlign:"right"}}>
-                            <div style={{fontSize:14,fontWeight:800,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</div>
-                            {r.note&&<div style={{fontSize:9,color:C.muted,maxWidth:80,textAlign:"right"}}>{r.note}</div>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
 
       {/* ── DIENSTPLAN ── */}
       {tab==="dienstplan"&&(
