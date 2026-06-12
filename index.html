@@ -2151,19 +2151,25 @@ function UebersichtDetailTab({ emp, records, getStatus, sColor, sBg, setDetailKe
       </div>
 
       {/* 범례 */}
-      <div style={{display:"flex",gap:12,marginBottom:10,padding:"8px 10px",background:C.bg,borderRadius:9,flexWrap:"wrap"}}>
-        {[{c:C.mintLight,tc:C.mintDark,l:"Abgeschlossen"},{c:C.yellowLight,tc:C.yellow,l:"Läuft noch"}].map(({c,tc,l})=>(
-          <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
-            <div style={{width:12,height:12,borderRadius:3,background:c,border:`1.5px solid ${tc}`}}/>
-            <span style={{fontSize:10,color:C.muted}}>{l}</span>
-          </div>
-        ))}
-        {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"Teenjoy"}].map(({init,l})=>(
-          <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
-            <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
-            <span style={{fontSize:10,color:C.muted}}>{l}</span>
-          </div>
-        ))}
+      <div style={{marginBottom:10,padding:"8px 10px",background:C.bg,borderRadius:9}}>
+        {/* 상태 색상 */}
+        <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:6}}>
+          {[{c:C.mintLight,tc:C.mintDark,l:"Abgeschlossen"},{c:C.yellowLight,tc:C.yellow,l:"Läuft noch"}].map(({c,tc,l})=>(
+            <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
+              <div style={{width:12,height:12,borderRadius:3,background:c,border:`1.5px solid ${tc}`,flexShrink:0}}/>
+              <span style={{fontSize:10,color:C.muted}}>{l}</span>
+            </div>
+          ))}
+        </div>
+        {/* 지점 이니셜 - 아래 행 */}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",borderTop:`1px solid ${C.border}`,paddingTop:6}}>
+          {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"Teenjoy"}].map(({init,l})=>(
+            <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
+              <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
+              <span style={{fontSize:10,color:C.muted}}>{l}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* 월별 아코디언 */}
@@ -2184,7 +2190,7 @@ function UebersichtDetailTab({ emp, records, getStatus, sColor, sBg, setDetailKe
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:14,fontWeight:800,color:C.text}}>{monthLabel(m)}</span>
                 <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(1)}h</span>
-                <span style={{fontSize:10,color:C.muted}}>{mDays}일</span>
+                <span style={{fontSize:10,color:C.muted}}>{mDays} Tage</span>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 {diff!==null&&(
@@ -2579,12 +2585,12 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                       fontSize:13,fontWeight:800,color:"#fff",flexShrink:0}}>
                       {emp.kuerzel}
                     </div>
-                    <div style={{textAlign:"left"}}>
-                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}</div>
-                      <div style={{fontSize:10,color:C.muted}}>{shifts.length} Schichten geplant</div>
-                    </div>
+                    <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}</div>
                   </div>
-                  <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{shifts.length} Schichten</span>
+                    <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                  </div>
                 </button>
                 {isOpen&&(
                   <div style={{borderTop:`1px solid ${C.border}`}}>
@@ -2652,13 +2658,13 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                 <button onClick={()=>setOpenDate(isOpen?null:d)}
                   style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
                     display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <div style={{fontSize:14,fontWeight:800,color:C.text}}>
-                      {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
-                    </div>
-                    <div style={{fontSize:10,color:C.muted,marginTop:2}}>{dayEmps.length}명 예정</div>
+                  <div style={{fontSize:14,fontWeight:800,color:C.text}}>
+                    {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
                   </div>
-                  <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{dayEmps.length} Personen geplant</span>
+                    <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                  </div>
                 </button>
                 {isOpen&&(
                   <div style={{borderTop:`1px solid ${C.border}`}}>
@@ -2677,7 +2683,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                           {filEmps.map((emp,i)=>{
                             const shift=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===d);
                             const rec=records.find(r=>r.user===emp.vorname&&r.date===d);
-                            const status=rec?.aus?"퇴근":rec?.ein?"근무중":"미출근";
+                            const status=rec?.aus?"Feierabend":rec?.ein?"Im Dienst":"Nicht erschienen";
                             const statusColor=rec?.aus?C.mintDark:rec?.ein?C.yellow:C.red;
                             const statusBg=rec?.aus?C.mintLight:rec?.ein?C.yellowLight:C.redLight;
                             const statusLabel=rec?.aus?"Feierabend ✓":rec?.ein?"Im Dienst ●":"Nicht erschienen";
@@ -2854,7 +2860,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       if (!isPdf && b64.length < 4000000) {
         setPlanImg(dataUrl);
       }
-      setMsg({ type: "ok", text: `✅ 분석 완료! ${Object.keys(parsed).length}명의 일정을 추출했어요.` });
+      setMsg({ type: "ok", text: `✅ Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
     } catch (err) {
       setMsg({ type: "err", text: `❌ 오류: ${err.message}` });
     }
