@@ -397,7 +397,7 @@ function KalenderView({ csvCtx, userName, records, users }) {
           display: "flex", flexDirection: "column", alignItems: "center",
           justifyContent: "center", padding: "48px 24px", gap: 12, textAlign: "center",
         }}>
-          <span style={{fontSize: 36}}>{"ὌB"}</span>
+          <span style={{fontSize: 36}}>{"📋"}</span>
           <div style={{fontSize: 13, fontWeight: 700, color: C.text}}>Kein Dienstplan vorhanden</div>
           <div style={{fontSize: 11, color: C.muted, lineHeight: 1.5}}>
             Der Manager hat noch keinen Dienstplan hochgeladen.
@@ -574,7 +574,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                 background:i+1<=step?C.mint:C.border,transition:"background .2s"}}/>
             ))}
           </div>
-          <div style={{fontSize:14,fontWeight:800,color:C.text}}>{"ὐ4 Schichttausch"}</div>
+          <div style={{fontSize:14,fontWeight:800,color:C.text}}>{"🔄 Schichttausch"}</div>
           <div style={{fontSize:11,color:C.muted,marginTop:2}}>
             {step===1&&"Welche Schicht möchtest du tauschen?"}
             {step===2&&"Mit wem möchtest du tauschen?"}
@@ -1077,7 +1077,7 @@ function EinspringenView({ userName }) {
   return (
     <div style={{padding:"14px"}}>
       <div style={{...S.card,marginBottom:12,background:`linear-gradient(135deg,${C.mintLight},#f0f7fa)`,border:`1.5px solid ${C.mint}`}}>
-        <div style={{fontSize:14,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"ὤB Freie Schichten"}</div>
+        <div style={{fontSize:14,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"🙋 Freie Schichten"}</div>
         <div style={{fontSize:11,color:C.muted}}>{"Hier kannst du offene Schichten übernehmen."}</div>
       </div>
 
@@ -1090,7 +1090,7 @@ function EinspringenView({ userName }) {
 
       {offene.length === 0 ? (
         <div style={{...S.card,textAlign:"center",padding:"32px 16px"}}>
-          <div style={{fontSize:28,marginBottom:8}}>{"Ἰ9"}</div>
+          <div style={{fontSize:28,marginBottom:8}}>{"🎉"}</div>
           <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Keine offenen Schichten</div>
           <div style={{fontSize:11,color:C.muted}}>Aktuell sind alle Schichten besetzt.</div>
         </div>
@@ -1224,7 +1224,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
               Vorname <span style={{color:C.red}}>*</span>
             </div>
             <div style={{fontSize:9,color:C.muted,marginBottom:5}}>
-              Tipp: Emoji erlaubt! z.B. <strong>{"Lena ἵ3"}</strong> oder <strong>{"Alex ὃB"}</strong>
+              Tipp: Emoji erlaubt! z.B. <strong>{"Lena 🍓"}</strong> oder <strong>{"Alex 🐻"}</strong>
             </div>
             <input value={regV} onChange={e=>setRegV(e.target.value)}
               placeholder="z.B. Lena 🍓"
@@ -1285,7 +1285,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           <div style={{fontSize:13,fontWeight:700,color:C.text}}>{displayLabel}</div>
           <div style={{fontSize:10,color:C.muted,marginTop:1}}>{u.role==="Admin"?"Admin":"Staff"}</div>
         </div>
-        <span style={{fontSize:14,color:C.muted}}>{"ὑ2"}</span>
+        <span style={{fontSize:14,color:C.muted}}>{"🔒"}</span>
       </button>
     );
   };
@@ -1513,7 +1513,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         <div style={{...S.card,marginBottom:12}}>
           <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"✏️ Name ändern"}</div>
           <div style={{fontSize:9,color:C.muted,marginBottom:6}}>
-            Tipp: Emoji erlaubt! z.B. <strong>{"Lena ἵ3"}</strong> oder <strong>{"Alex ὃB"}</strong>
+            Tipp: Emoji erlaubt! z.B. <strong>{"Lena 🍓"}</strong> oder <strong>{"Alex 🐻"}</strong>
           </div>
           <input value={vorname} onChange={e=>setVorname(e.target.value)}
             placeholder="Vorname (mit Emoji)"
@@ -1533,7 +1533,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
         {/*     */}
         <div style={{...S.card,marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"Ὦ1️ Bescheinigung von Infektionsschutzgesetz"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"🛡️ Bescheinigung von Infektionsschutzgesetz"}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:12}}>
             Wird bei Hygienekontrollen direkt auf dem Handy vorgezeigt.
           </div>
@@ -1545,7 +1545,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
                 style={{width:"100%",padding:"18px",borderRadius:12,border:`2px solid ${C.mint}`,
                   background:C.mintLight,cursor:"pointer",display:"flex",flexDirection:"column",
                   alignItems:"center",gap:6,marginBottom:10}}>
-                <span style={{fontSize:32}}>{"Ὦ1️"}</span>
+                <span style={{fontSize:32}}>{"🛡️"}</span>
                 <span style={{fontSize:13,fontWeight:800,color:C.mintDark}}>Bescheinigung anzeigen</span>
                 <span style={{fontSize:10,color:C.muted}}>{"Tippen zum Vergrößern · "}{isPdf?"PDF":"Bild"}</span>
               </button>
@@ -1584,7 +1584,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
         {/*    */}
         <div style={{...S.card,marginBottom:12,border:`1px solid ${C.redLight}`}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"Ὕ1 Konto löschen"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"🗑 Konto löschen"}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:10}}>
             Diese Aktion kann nicht rückgängig gemacht werden.
           </div>
@@ -2072,7 +2072,7 @@ function StatistikTab({records,users}){
         })}
       </div>
       <div style={{background:C.navy,borderRadius:14,padding:"16px",marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>{"὎5 Daten exportieren"}</div>
+        <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>{"📥 Daten exportieren"}</div>
         <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV – öffnet direkt in Excel"}</div>
         {[
           {title:"Stundennachweis (Details)",sub:"Jeder Tag · Name · Datum · Filiale · Ein/Aus · Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
@@ -3082,7 +3082,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       {/* API   */}
       {showKeyInput && (
         <div style={{...S.card, marginBottom:12, border:`1.5px solid ${C.yellow}`}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>{"ὑ1 Anthropic API-Schlüssel"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>{"🔑 Anthropic API-Schlüssel"}</div>
           <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
             placeholder="sk-ant-..."
             style={{...S.input, width:"100%", fontSize:11, marginBottom:8}}/>
@@ -3095,7 +3095,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
 
       {/*   */}
       <div style={{...S.card, marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"ὌB Dienstplan hochladen"}</div>
+        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"📋 Dienstplan hochladen"}</div>
         <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{"Bild hochladen → KI analysiert automatisch die Schichten"}</div>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" onChange={handleFile} style={{display:"none"}}/>
         <button onClick={()=>fileRef.current.click()} disabled={analyzing}
@@ -3431,7 +3431,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
 
         {/* Schichttausch */}
         {isTausch && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:6}}>{"ὐ4 Schichttausch · Partner bestätigt"}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:6}}>{"🔄 Schichttausch · Partner bestätigt"}</div>
           <div style={{display:"flex",gap:6,marginBottom:8}}>
             <div style={{flex:1,padding:"7px 9px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
               <div style={{fontSize:9,color:C.muted}}>{n.initiator}</div>
@@ -3808,7 +3808,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         return(
           <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:"24px"}}>
             <div style={{background:C.card,borderRadius:18,padding:"24px 22px",width:"100%",maxWidth:340,boxShadow:"0 8px 32px rgba(0,0,0,.18)"}}>
-              <div style={{width:48,height:48,borderRadius:"50%",background:C.redLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 14px"}}>{"Ὕ1"}</div>
+              <div style={{width:48,height:48,borderRadius:"50%",background:C.redLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 14px"}}>{"🗑"}</div>
               <div style={{fontSize:16,fontWeight:800,color:C.text,textAlign:"center",marginBottom:6}}>{"Konto löschen?"}</div>
               <div style={{fontSize:12,color:C.muted,textAlign:"center",marginBottom:20}}>
                 Das Konto von <strong style={{color:C.text}}>{empToDel?.vorname}</strong>{" wird dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden."}
