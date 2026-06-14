@@ -2278,7 +2278,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                   </div>
                   <div style={{fontSize:10,color:C.muted,marginTop:2}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
                 </div>
-                <span style={{fontSize:14,color:C.muted}}> &gt; </span>
+                <span style={{fontSize:14,color:C.muted}}>{">"}</span>
               </button>
               <button onClick={()=>setDeleteConfirm(emp.key)}
                 style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
