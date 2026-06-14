@@ -184,7 +184,7 @@ function useFirebase(path, fallback) {
       if (attach()) { clearInterval(iv); return; }
       if (tries > 30) {
         clearInterval(iv);
-        console.error("Firebase 연결 실패:", path);
+        console.error("Firebase \uC5F0\uACB0 \uC2E4\uD328:", path);
         setData(fallback);
         setReady(true);
       }
@@ -247,7 +247,7 @@ function stunden(ein, aus) {
   const [ah, am] = aus.split(":").map(Number);
   return (ah * 60 + am - eh * 60 - em) / 60;
 }
-function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "–" : h.toFixed(1) + "h"; }
+function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "\u2013" : h.toFixed(1) + "h"; }
 function today() {
   //    (CET=UTC+1, CEST=UTC+2  )
   return new Date().toLocaleDateString("sv-SE", {timeZone:"Europe/Berlin"});
@@ -397,7 +397,7 @@ function KalenderView({ csvCtx, userName, records, users }) {
           display: "flex", flexDirection: "column", alignItems: "center",
           justifyContent: "center", padding: "48px 24px", gap: 12, textAlign: "center",
         }}>
-          <span style={{fontSize: 36}}>{"📋"}</span>
+          <span style={{fontSize: 36}}>{"\uD83D\uDCCB"}</span>
           <div style={{fontSize: 13, fontWeight: 700, color: C.text}}>Kein Dienstplan vorhanden</div>
           <div style={{fontSize: 11, color: C.muted, lineHeight: 1.5}}>
             Der Manager hat noch keinen Dienstplan hochgeladen.
@@ -435,7 +435,7 @@ function KalenderView({ csvCtx, userName, records, users }) {
       {userName && myShifts.length === 0 && (
         <div style={{padding:"14px",textAlign:"center"}}>
           <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>
-            📋 Für <strong>{userName}</strong> sind noch keine Schichten im Dienstplan eingetragen.
+            \uD83D\uDCCB F\u00FCr <strong>{userName}</strong> sind noch keine Schichten im Dienstplan eingetragen.
             <div style={{fontSize:9,marginTop:4,opacity:.6}}>Der Manager muss den Plan hochladen und analysieren.</div>
           </div>
         </div>
@@ -463,7 +463,7 @@ function getShiftStatus(shift, actualRec) {
   const planned = calcShiftMinutes(shift.time || shift.t);
   const actual = calcShiftMinutes(`${actualRec.ein}-${actualRec.aus}`);
   if (planned == null || actual == null) return "gearbeitet";
-  return actual >= planned ? "gearbeitet" : "prüfen";
+  return actual >= planned ? "gearbeitet" : "pr\u00FCfen";
 }
 
 //  SCHICHTTAUSCH MODAL 
@@ -574,10 +574,10 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                 background:i+1<=step?C.mint:C.border,transition:"background .2s"}}/>
             ))}
           </div>
-          <div style={{fontSize:14,fontWeight:800,color:C.text}}>{"🔄 Schichttausch"}</div>
+          <div style={{fontSize:14,fontWeight:800,color:C.text}}>{"\uD83D\uDD04 Schichttausch"}</div>
           <div style={{fontSize:11,color:C.muted,marginTop:2}}>
-            {step===1&&"Welche Schicht möchtest du tauschen?"}
-            {step===2&&"Mit wem möchtest du tauschen?"}
+            {step===1&&"Welche Schicht m\u00F6chtest du tauschen?"}
+            {step===2&&"Mit wem m\u00F6chtest du tauschen?"}
             {step===3&&`Welche Schicht von ${targetUser?.vorname}?`}
             {step===4&&"Zusammenfassung & Grund"}
           </div>
@@ -639,7 +639,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
           {step===4&&(
             <div>
               <div style={{...S.card,background:C.mintLight,border:`1px solid ${C.mint}`,marginBottom:12}}>
-                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>{"TAUSCH ÜBERSICHT"}</div>
+                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>{"TAUSCH \u00DCBERSICHT"}</div>
                 <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
                   <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
                     <div style={{fontSize:9,color:C.muted}}>{userName} gibt ab:</div>
@@ -648,7 +648,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                     </div>
                     <div style={{fontSize:10,color:C.muted}}>{(myShift?.f||myShift?.filiale)?.replace("TEEAMO ","")}</div>
                   </div>
-                  <div style={{fontSize:18}}>{"⇄"}</div>
+                  <div style={{fontSize:18}}>{"\u21C4"}</div>
                   <div style={{flex:1,padding:"8px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
                     <div style={{fontSize:9,color:C.muted}}>{targetUser?.vorname} gibt ab:</div>
                     <div style={{fontSize:11,fontWeight:700,color:C.text}}>
@@ -658,16 +658,16 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                   </div>
                 </div>
                 <div style={{fontSize:10,color:C.mintDark,textAlign:"center"}}>
-                  ⏳ {targetUser?.vorname} muss zuerst bestätigen.
+                  \u23F3 {targetUser?.vorname} muss zuerst best\u00E4tigen.
                 </div>
               </div>
               <div style={{marginBottom:12}}>
                 <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund</div>
                 <textarea value={grund} onChange={e=>{setGrund(e.target.value);setErr("");}}
-                  placeholder="Grund für den Tausch..."
+                  placeholder="Grund f\u00FCr den Tausch..."
                   style={{...S.input,width:"100%",minHeight:70,resize:"none",fontFamily:"inherit"}}/>
               </div>
-              {err&&<div style={{fontSize:11,color:C.red,marginBottom:8,fontWeight:600}}>{"⚠ "}{err}</div>}
+              {err&&<div style={{fontSize:11,color:C.red,marginBottom:8,fontWeight:600}}>{"\u26A0 "}{err}</div>}
             </div>
           )}
         </div>
@@ -678,7 +678,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
           <button onClick={()=>step===1?onClose():setStep(s=>s-1)}
             style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,
               background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
-            {step===1?"✕":"← Zurück"}
+            {step===1?"\u2715":"\u2190 Zur\u00FCck"}
           </button>
           <button
             disabled={!!(step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift)}
@@ -687,7 +687,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
               background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
               color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",
               opacity:(step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift)?0.4:1}}>
-            {step<4?"Weiter →":"Anfrage senden"}
+            {step<4?"Weiter \u2192":"Anfrage senden"}
           </button>
         </div>
       </div>
@@ -740,7 +740,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
         sched[antrag.partner] = [...sched[antrag.partner],
           {d: antrag.initiatorDate, f: antrag.initiatorFiliale, t: antrag.initiatorTime||null}];
         window._fbSet(window._fbRef(window._fbDb, "schedule"), sched)
-          .then(() => console.log("✅ Schedule getauscht:", antrag.initiator, "↔", antrag.partner))
+          .then(() => console.log("\u2705 Schedule getauscht:", antrag.initiator, "\u2194", antrag.partner))
           .catch(e => console.error("Schedule swap error:", e));
       }, {onlyOnce: true});
     }
@@ -778,12 +778,12 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
     <div style={{padding:"14px", borderTop:`1px solid ${C.border}`}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
         <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".05em"}}>
-          Meine Schichten & Anträge
+          Meine Schichten & Antr\u00E4ge
         </div>
         <button onClick={()=>setShowTausch(true)}
           style={{fontSize:10,fontWeight:700,padding:"5px 10px",borderRadius:8,
             border:`1.5px solid ${C.mint}`,background:C.mintLight,color:C.mintDark,cursor:"pointer"}}>
-          🔄 Schichttausch
+          \uD83D\uDD04 Schichttausch
         </button>
       </div>
 
@@ -791,13 +791,13 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
       {pendingTausch.map(([key, n]) => (
         <div key={key} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.mint}`,background:C.mintLight}}>
           <div style={{fontSize:12,fontWeight:800,color:C.mintDark,marginBottom:4}}>
-            🔄 Tausch-Anfrage von {n.initiator}
+            \uD83D\uDD04 Tausch-Anfrage von {n.initiator}
           </div>
           <div style={{fontSize:10,color:C.text,marginBottom:2}}>
-            Du gibst ab: <strong>{new Date(n.myDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} · {n.myFiliale}</strong>
+            Du gibst ab: <strong>{new Date(n.myDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} \u00B7 {n.myFiliale}</strong>
           </div>
           <div style={{fontSize:10,color:C.text,marginBottom:10}}>
-            Du bekommst: <strong>{new Date(n.theirDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} · {n.theirFiliale}</strong>
+            Du bekommst: <strong>{new Date(n.theirDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} \u00B7 {n.theirFiliale}</strong>
           </div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>bestaetigenTausch(key, n.antragId, false)}
@@ -809,7 +809,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
               style={{flex:2,padding:"8px",borderRadius:8,border:"none",
                 background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
                 color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
-              ✅ Bestätigen
+              \u2705 Best\u00E4tigen
             </button>
           </div>
         </div>
@@ -838,7 +838,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
               <div style={{padding:"9px 12px",borderRadius:10,marginBottom:5,
                 background:C.mintLight,border:`1px solid ${C.mint}`,
                 display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{fontSize:11,fontWeight:600,color:C.text}}>{rec.filiale} · {rec.ein} – {rec.aus||"läuft"}</div>
+                <div style={{fontSize:11,fontWeight:600,color:C.text}}>{rec.filiale} \u00B7 {rec.ein} \u2013 {rec.aus||"l\u00E4uft"}</div>
                 <span style={{fontSize:11,fontWeight:700,color:C.mintDark}}>{stdLabel(rec.ein,rec.aus)}</span>
               </div>
             )}
@@ -849,10 +849,10 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                   padding:"7px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
                   <div>
-                    <div style={{fontSize:10,fontWeight:700,color:C.text}}>{"📌 Nachtrag · "}{a.filiale}</div>
-                    <div style={{fontSize:9,color:C.muted}}>{a.ein} – {a.aus}</div>
+                    <div style={{fontSize:10,fontWeight:700,color:C.text}}>{"\uD83D\uDCCC Nachtrag \u00B7 "}{a.filiale}</div>
+                    <div style={{fontSize:9,color:C.muted}}>{a.ein} \u2013 {a.aus}</div>
                   </div>
-                  <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"✅":"❌"}</span>
+                  <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"\u2705":"\u274C"}</span>
                 </div>
               </div>
             ))}
@@ -900,12 +900,12 @@ function AbsagenModal({ shift, userName, onClose, onSubmit }) {
         <div style={{marginBottom:14}}>
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund <span style={{color:C.red}}>*</span></div>
           <textarea value={grund} onChange={e=>{setGrund(e.target.value);setErr("");}}
-            placeholder="z. B. Ich bin krank und kann nicht kommen…"
+            placeholder="z. B. Ich bin krank und kann nicht kommen\u2026"
             style={{...S.input,width:"100%",minHeight:80,resize:"none",fontFamily:"inherit"}}/>
         </div>
-        {err&&<div style={{fontSize:11,color:C.red,marginBottom:10,fontWeight:600}}>{"⚠ "}{err}</div>}
+        {err&&<div style={{fontSize:11,color:C.red,marginBottom:10,fontWeight:600}}>{"\u26A0 "}{err}</div>}
         <div style={{fontSize:10,color:C.muted,marginBottom:14}}>
-          ℹ️ Der Manager wird benachrichtigt. Nach Genehmigung wird deine Schicht als freie Schicht veröffentlicht.
+          \u2139\uFE0F Der Manager wird benachrichtigt. Nach Genehmigung wird deine Schicht als freie Schicht ver\u00F6ffentlicht.
         </div>
         <div style={{display:"flex",gap:9}}>
           <button onClick={onClose} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
@@ -928,13 +928,13 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const [, setNotif] = useFirebase("notifications", {});
 
   useEffect(() => {
-    if (status === "prüfen" && actualRec) {
+    if (status === "pr\u00FCfen" && actualRec) {
       const zustaendig = f === "Teenjoy" ? "teddy" : "yeaji";
       const notifKey = `prüfen_${userName}_${d}`;
       setNotifications(prev => {
         if (prev && prev[notifKey]) return prev;
         return { ...(prev||{}), [notifKey]: {
-          type: "prüfen", user: userName, date: d, filiale: f,
+          type: "pr\u00FCfen", user: userName, date: d, filiale: f,
           plannedTime: t, actualEin: actualRec.ein, actualAus: actualRec.aus,
           zustaendig, gelesen: false, ts: Date.now()
         }};
@@ -982,7 +982,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   //   
   const badge = {
     gearbeitet: { color: C.mintDark, bg: C.mintLight, label: "Gearbeitet" },
-    prüfen:     { color: C.yellow,   bg: C.yellowLight,label: "Prüfen"    },
+    pr\u00FCfen:     { color: C.yellow,   bg: C.yellowLight,label: "Pr\u00FCfen"    },
     aktiv:      { color: C.yellow,   bg: "#FFF9E6",    label: "Im Dienst" },
     ausstehend: { color: C.muted,    bg: C.bg,         label: "Ausstehend"},
   }[alreadyAbgesagt ? "ausstehend" : status] || { color: C.muted, bg: C.bg, label: "Ausstehend" };
@@ -1000,7 +1000,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
             cursor:status==="ausstehend"&&!alreadyAbgesagt?"pointer":"default"}}>
           <div style={{fontSize:12,fontWeight:600,color:alreadyAbgesagt?C.red:C.text}}>
             {f}{t ? ` · ${t}` : ""}
-            {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>{"🚫 Absage "}{alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
+            {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>{"\uD83D\uDEAB Absage "}{alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
           {tauschLabel && <div style={{fontSize:9,color:C.mintDark,marginTop:3,fontWeight:600}}>{tauschLabel}</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -1011,7 +1011,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
               color:alreadyAbgesagt?C.red:badge.color,
               background:alreadyAbgesagt?"#fff":badge.bg,
               border:`1px solid ${alreadyAbgesagt?C.red:badge.color}`}}>
-              {alreadyAbgesagt?"🚫 Abgesagt":badge.label}
+              {alreadyAbgesagt?"\uD83D\uDEAB Abgesagt":badge.label}
             </span>
           </div>
         </div>
@@ -1020,13 +1020,13 @@ function ShiftRow({ s, userName, records, setNotifications }) {
         {actualRec && (
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
             padding:"8px 12px",
-            background:status==="gearbeitet"?C.mintLight:status==="prüfen"?C.yellowLight:"#FFF9E6",
+            background:status==="gearbeitet"?C.mintLight:status==="pr\u00FCfen"?C.yellowLight:"#FFF9E6",
             borderTop:`1px dashed ${status==="gearbeitet"?C.mint:C.yellow}`}}>
             <div style={{fontSize:11,color:status==="gearbeitet"?C.mintDark:C.yellow,fontWeight:600}}>
-              {f} · {actualRec.ein}–{actualRec.aus||"läuft"}
+              {f} \u00B7 {actualRec.ein}\u2013{actualRec.aus||"l\u00E4uft"}
             </div>
             <span style={{fontSize:11,fontWeight:700,color:status==="gearbeitet"?C.mintDark:C.yellow}}>
-              {actualRec.aus ? stdLabel(actualRec.ein, actualRec.aus) : "🟡"}
+              {actualRec.aus ? stdLabel(actualRec.ein, actualRec.aus) : "\uD83D\uDFE1"}
             </span>
           </div>
         )}
@@ -1077,8 +1077,8 @@ function EinspringenView({ userName }) {
   return (
     <div style={{padding:"14px"}}>
       <div style={{...S.card,marginBottom:12,background:`linear-gradient(135deg,${C.mintLight},#f0f7fa)`,border:`1.5px solid ${C.mint}`}}>
-        <div style={{fontSize:14,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"🙋 Freie Schichten"}</div>
-        <div style={{fontSize:11,color:C.muted}}>{"Hier kannst du offene Schichten übernehmen."}</div>
+        <div style={{fontSize:14,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"\uD83D\uDE4B Freie Schichten"}</div>
+        <div style={{fontSize:11,color:C.muted}}>{"Hier kannst du offene Schichten \u00FCbernehmen."}</div>
       </div>
 
       {msg && (
@@ -1102,19 +1102,19 @@ function EinspringenView({ userName }) {
                   {new Date(s.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
                 </div>
                 <div style={{fontSize:11,color:C.muted,marginTop:2}}>{s.filiale}</div>
-                {s.time&&<div style={{fontSize:11,fontWeight:600,color:C.mintDark,marginTop:2}}>{"🕐 "}{s.time}</div>}
-                {s.note&&<div style={{fontSize:10,color:C.muted,marginTop:4}}>{"📌 "}{s.note}</div>}
+                {s.time&&<div style={{fontSize:11,fontWeight:600,color:C.mintDark,marginTop:2}}>{"\uD83D\uDD50 "}{s.time}</div>}
+                {s.note&&<div style={{fontSize:10,color:C.muted,marginTop:4}}>{"\uD83D\uDCCC "}{s.note}</div>}
               </div>
               <div style={{width:40,height:40,borderRadius:10,background:C.mintLight,
                 display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>
-                {s.filiale==="Teenjoy"?"🧋":"☕"}
+                {s.filiale==="Teenjoy"?"\uD83E\uDDCB":"\u2615"}
               </div>
             </div>
             <button onClick={()=>einspringen(s)}
               style={{width:"100%",padding:"11px",borderRadius:10,border:"none",
                 background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
                 color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
-              🙋 Ich springe ein!
+              \uD83D\uDE4B Ich springe ein!
             </button>
           </div>
         ))
@@ -1158,7 +1158,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
     if(!regV.trim()){setRegErr("Vorname ist Pflichtfeld.");return;}
     if(regP.length!==4){setRegErr("PIN muss genau 4 Ziffern sein.");return;}
     if(!/^[0-9]{4}$/.test(regP)){setRegErr("PIN nur Ziffern (0-9).");return;}
-    if(regP!==regP2){setRegErr("PINs stimmen nicht überein.");return;}
+    if(regP!==regP2){setRegErr("PINs stimmen nicht \u00FCberein.");return;}
     const vn=regV.trim();
     const nn=regN.trim();
     // Firebase-safe key: nur a-z, 0-9, _
@@ -1178,9 +1178,9 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   if(page==="kalender")return(
     <div style={{background:C.bg,minHeight:"100vh"}}>
       <div style={S.hdr}>
-        <button onClick={()=>setPage("list")} style={S.backBtn}>{"← Zurück"}</button>
+        <button onClick={()=>setPage("list")} style={S.backBtn}>{"\u2190 Zur\u00FCck"}</button>
         <div style={{fontSize:18,fontWeight:800}}>Dienstplan</div>
-        <div style={{fontSize:11,opacity:.45,marginTop:2}}>{"Leseansicht – ohne Anmeldung"}</div>
+        <div style={{fontSize:11,opacity:.45,marginTop:2}}>{"Leseansicht \u2013 ohne Anmeldung"}</div>
       </div>
       <div style={{padding:"14px"}}><KalenderView csvCtx={csvCtx} records={[]}/></div>
     </div>
@@ -1192,7 +1192,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
     return(
       <div style={{background:C.bg,minHeight:"100vh"}}>
         <div style={S.hdr}>
-          <button onClick={back} style={S.backBtn}>{"← Zurück"}</button>
+          <button onClick={back} style={S.backBtn}>{"\u2190 Zur\u00FCck"}</button>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             <div style={{width:46,height:46,borderRadius:"50%",background:isMgr?C.yellow:C.mint,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:15,color:C.navy}}>{selUser.kuerzel}</div>
             <div><div style={{fontSize:18,fontWeight:800}}>{selUser.vorname}</div><div style={{fontSize:11,opacity:.45}}>{selUser.role==="Admin"?"Admin":"Staff"}</div></div>
@@ -1205,10 +1205,10 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           </div>
           <div style={{minHeight:28,marginBottom:8,fontSize:12,color:C.red,fontWeight:600}}>{err}</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,maxWidth:260,margin:"0 auto"}}>
-            {["1","2","3","4","5","6","7","8","9","","0","⌫"].map((k,i)=>(
+            {["1","2","3","4","5","6","7","8","9","","0","\u232B"].map((k,i)=>(
               k===""?<div key={i}/>:
-              <button key={i} onClick={()=>k==="⌫"?setPin(p=>p.slice(0,-1)):pinKey(k)}
-                style={{height:56,borderRadius:14,border:`1px solid ${C.border}`,background:C.card,fontSize:k==="⌫"?20:22,fontWeight:600,color:C.text,cursor:"pointer"}}
+              <button key={i} onClick={()=>k==="\u232B"?setPin(p=>p.slice(0,-1)):pinKey(k)}
+                style={{height:56,borderRadius:14,border:`1px solid ${C.border}`,background:C.card,fontSize:k==="\u232B"?20:22,fontWeight:600,color:C.text,cursor:"pointer"}}
                 onTouchStart={e=>e.currentTarget.style.background="#eee"} onTouchEnd={e=>e.currentTarget.style.background=C.card}>{k}</button>
             ))}
           </div>
@@ -1220,7 +1220,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   if(page==="register")return(
     <div style={{background:C.bg,minHeight:"100vh"}}>
       <div style={S.hdr}>
-        <button onClick={()=>setPage("list")} style={S.backBtn}>{"← Zurück"}</button>
+        <button onClick={()=>setPage("list")} style={S.backBtn}>{"\u2190 Zur\u00FCck"}</button>
         <div style={{fontSize:18,fontWeight:800}}>Registrieren</div>
         <div style={{fontSize:11,opacity:.45,marginTop:2}}>Neues Konto erstellen</div>
       </div>
@@ -1232,10 +1232,10 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
               Vorname <span style={{color:C.red}}>*</span>
             </div>
             <div style={{fontSize:9,color:C.muted,marginBottom:5}}>
-              Tipp: Emoji erlaubt! z.B. <strong>{"Lena 🍓"}</strong> oder <strong>{"Alex 🐻"}</strong>
+              Tipp: Emoji erlaubt! z.B. <strong>{"Lena \uD83C\uDF53"}</strong> oder <strong>{"Alex \uD83D\uDC3B"}</strong>
             </div>
             <input value={regV} onChange={e=>setRegV(e.target.value)}
-              placeholder="z.B. Lena 🍓"
+              placeholder="z.B. Lena \uD83C\uDF53"
               style={{...S.input,fontSize:15}}/>
             {regV&&(
               <div style={{marginTop:6,padding:"8px 11px",borderRadius:9,background:C.mintLight,border:`1px solid ${C.mint}`,fontSize:12,color:C.mintDark,fontWeight:700}}>
@@ -1245,12 +1245,12 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           </div>
           {/* Nachname */}
           <div style={{marginBottom:12}}>
-            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>Nachname <span style={{fontSize:10,fontWeight:400,color:C.muted}}>{"(nur für Admin sichtbar)"}</span></div>
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>Nachname <span style={{fontSize:10,fontWeight:400,color:C.muted}}>{"(nur f\u00FCr Admin sichtbar)"}</span></div>
             <input value={regN} onChange={e=>setRegN(e.target.value)} placeholder="Kim" style={S.input}/>
           </div>
           {/*    */}
           <div style={{fontSize:10,color:C.muted,marginBottom:12,padding:"7px 10px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
-            ℹ️ Der Name kann nach der Registrierung jederzeit in den Einstellungen geändert werden.
+            \u2139\uFE0F Der Name kann nach der Registrierung jederzeit in den Einstellungen ge\u00E4ndert werden.
           </div>
           {isAdminName&&(
             <div style={{marginBottom:12}}>
@@ -1258,7 +1258,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
               <div style={{display:"flex",gap:9}}>
                 {["Staff","Admin"].map(r=>(
                   <button key={r} onClick={()=>setRegRole(r)} style={{flex:1,padding:"10px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",border:`2px solid ${regRole===r?C.mint:C.border}`,background:regRole===r?C.mintLight:"#fff",color:regRole===r?C.mintDark:C.muted}}>
-                    {r==="Admin"?"👑 Admin":"👤 Staff"}
+                    {r==="Admin"?"\uD83D\uDC51 Admin":"\uD83D\uDC64 Staff"}
                   </button>
                 ))}
               </div>
@@ -1268,7 +1268,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
             {[["PIN (4 Ziffern) *",regP,setRegP],["PIN wiederholen *",regP2,setRegP2]].map(([lbl,val,set])=>(
               <div key={lbl}>
                 <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>{lbl}</div>
-                <input type="password" inputMode="numeric" maxLength={4} value={val} onChange={e=>set(e.target.value.replace(/\D/g,""))} placeholder="••••" style={{...S.input,letterSpacing:"0.3em",fontSize:18}}/>
+                <input type="password" inputMode="numeric" maxLength={4} value={val} onChange={e=>set(e.target.value.replace(/\D/g,""))} placeholder="\u2022\u2022\u2022\u2022" style={{...S.input,letterSpacing:"0.3em",fontSize:18}}/>
               </div>
             ))}
           </div>
@@ -1293,7 +1293,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           <div style={{fontSize:13,fontWeight:700,color:C.text}}>{displayLabel}</div>
           <div style={{fontSize:10,color:C.muted,marginTop:1}}>{u.role==="Admin"?"Admin":"Staff"}</div>
         </div>
-        <span style={{fontSize:14,color:C.muted}}>{"🔒"}</span>
+        <span style={{fontSize:14,color:C.muted}}>{"\uD83D\uDD12"}</span>
       </button>
     );
   };
@@ -1305,7 +1305,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           <div>
             <div style={{fontSize:11,opacity:.4,marginBottom:3,letterSpacing:".08em",textTransform:"uppercase"}}>Willkommen</div>
             <div style={{fontSize:28,fontWeight:800,lineHeight:1.1}}>teeamo</div>
-            <div style={{fontSize:11,opacity:.4,marginTop:3}}>{"Münster · Stempeluhr"}</div>
+            <div style={{fontSize:11,opacity:.4,marginTop:3}}>{"M\u00FCnster \u00B7 Stempeluhr"}</div>
           </div>
           <div style={{textAlign:"right"}}>
             <div style={{fontSize:24,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{pad(now.getHours())}:{pad(now.getMinutes())}</div>
@@ -1316,9 +1316,9 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
       <div style={{padding:"16px 16px 40px"}}>
         <button onClick={()=>setPage("kalender")} style={{width:"100%",padding:"14px 16px",borderRadius:14,border:`1.5px solid ${C.mint}`,background:C.mintLight,color:C.mintDark,fontSize:14,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:6}}
           onTouchStart={e=>{e.currentTarget.style.background=C.mint;e.currentTarget.style.color="#fff";}} onTouchEnd={e=>{e.currentTarget.style.background=C.mintLight;e.currentTarget.style.color=C.mintDark;}}>
-          📋 Dienstplan anzeigen
+          \uD83D\uDCCB Dienstplan anzeigen
         </button>
-        <div style={{textAlign:"center",fontSize:10,color:C.muted,marginBottom:18}}>{"Ohne Anmeldung – nur Leseansicht"}</div>
+        <div style={{textAlign:"center",fontSize:10,color:C.muted,marginBottom:18}}>{"Ohne Anmeldung \u2013 nur Leseansicht"}</div>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
           <div style={{flex:1,height:1,background:C.border}}/><span style={{fontSize:10,color:C.muted,fontWeight:600}}>ODER ANMELDEN</span><div style={{flex:1,height:1,background:C.border}}/>
         </div>
@@ -1365,7 +1365,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
       <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))"}}>
         <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 20px"}}/>
         <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>
-          {isEin?"Einstempeln bestätigen":"Ausstempeln bestätigen"}
+          {isEin?"Einstempeln best\u00E4tigen":"Ausstempeln best\u00E4tigen"}
         </div>
         <div style={{fontSize:12,color:C.muted,marginBottom:14}}>
           Filiale: <strong style={{color:C.text}}>{isEin?selFiliale:clockFiliale}</strong>
@@ -1378,20 +1378,20 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 border:`2px solid ${!manualMode?C.mint:C.border}`,
                 background:!manualMode?C.mintLight:"#fff",
                 color:!manualMode?C.mintDark:C.muted}}>
-              🕐 Jetzt ({nowStr})
+              \uD83D\uDD50 Jetzt ({nowStr})
             </button>
             <button onClick={()=>setManualMode(true)}
               style={{flex:1,padding:"9px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",
                 border:`2px solid ${manualMode?C.yellow:C.border}`,
                 background:manualMode?C.yellowLight:"#fff",
                 color:manualMode?C.yellow:C.muted}}>
-              ✏️ Zeit eingeben
+              \u270F\uFE0F Zeit eingeben
             </button>
           </div>
           {manualMode&&(
             <div style={{background:C.yellowLight,borderRadius:10,padding:"12px 14px",border:`1.5px solid ${ausInvalid?C.red:C.yellow}`}}>
               <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:6}}>
-                {isEin?"Tatsächliche Einstempelzeit":"Tatsächliche Ausstempelzeit"}
+                {isEin?"Tats\u00E4chliche Einstempelzeit":"Tats\u00E4chliche Ausstempelzeit"}
               </div>
               <input type="time" value={manualTime} onChange={e=>setManualTime(e.target.value)}
                 style={{...S.input,width:"80%",display:"block",margin:"0 auto",fontSize:20,fontWeight:700,textAlign:"center",borderColor:ausInvalid?C.red:C.yellow}}/>
@@ -1400,12 +1400,12 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 const diff=(ah*60+am)-(clockInTime.getHours()*60+clockInTime.getMinutes());
                 if(diff<=0) return(
                   <div style={{fontSize:11,color:C.red,fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    ⚠ Die Zeit liegt vor der Einstempelzeit ({pad(clockInTime.getHours())}:{pad(clockInTime.getMinutes())} Uhr)
+                    \u26A0 Die Zeit liegt vor der Einstempelzeit ({pad(clockInTime.getHours())}:{pad(clockInTime.getMinutes())} Uhr)
                   </div>
                 );
                 return(
                   <div style={{fontSize:11,color:"#3a7a55",fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    ⏱ {Math.floor(diff/60)}h {diff%60}min Arbeitszeit
+                    \u23F1 {Math.floor(diff/60)}h {diff%60}min Arbeitszeit
                   </div>
                 );
               })()}
@@ -1415,7 +1415,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 if(diff<=0) return null;
                 return(
                   <div style={{fontSize:11,color:C.yellow,fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    ⏱ {Math.floor(diff/60)}h {diff%60}min bereits vergangen
+                    \u23F1 {Math.floor(diff/60)}h {diff%60}min bereits vergangen
                   </div>
                 );
               })()}
@@ -1456,11 +1456,11 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
   function changePIN() {
     const current = getPin(userKey);
-    if (oldPin !== current) { setPinMsg("❌ Aktuelle PIN falsch."); return; }
-    if (!/^\d{4}$/.test(newPin1)) { setPinMsg("❌ PIN muss 4 Ziffern sein."); return; }
-    if (newPin1 !== newPin2) { setPinMsg("❌ PINs stimmen nicht überein."); return; }
+    if (oldPin !== current) { setPinMsg("\u274C Aktuelle PIN falsch."); return; }
+    if (!/^\d{4}$/.test(newPin1)) { setPinMsg("\u274C PIN muss 4 Ziffern sein."); return; }
+    if (newPin1 !== newPin2) { setPinMsg("\u274C PINs stimmen nicht \u00FCberein."); return; }
     setPinStore(userKey, newPin1);
-    setPinMsg("✅ PIN geändert!");
+    setPinMsg("\u2705 PIN ge\u00E4ndert!");
     setOldPin(""); setNewPin1(""); setNewPin2("");
     setTimeout(() => { setPinMsg(""); setShowPinChange(false); }, 2000);
   }
@@ -1470,7 +1470,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
     setUsers(prev => (Array.isArray(prev)?prev:[]).map(u =>
       u.key === userKey ? { ...u, vorname: vorname.trim() } : u
     ));
-    setSaveMsg("✅ Gespeichert!");
+    setSaveMsg("\u2705 Gespeichert!");
     setTimeout(() => setSaveMsg(""), 2000);
   }
 
@@ -1478,7 +1478,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) {
-      setSaveMsg("❌ Datei zu groß (max. 10MB)");
+      setSaveMsg("\u274C Datei zu gro\u00DF (max. 10MB)");
       return;
     }
     const b64 = await new Promise(res => {
@@ -1490,7 +1490,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
     setUsers(prev => (Array.isArray(prev)?prev:[]).map(u =>
       u.key === userKey ? { ...u, infektionsschutz: b64 } : u
     ));
-    setSaveMsg("✅ Bescheinigung hochgeladen!");
+    setSaveMsg("\u2705 Bescheinigung hochgeladen!");
     setTimeout(() => setSaveMsg(""), 2500);
   }
 
@@ -1508,7 +1508,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:600,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
           <button onClick={()=>setImpfViewer(false)}
             style={{position:"absolute",top:20,right:20,background:"rgba(255,255,255,.15)",border:"none",borderRadius:10,padding:"8px 14px",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>
-            ✕ Schließen
+            \u2715 Schlie\u00DFen
           </button>
           {isPdf ? (
             <iframe src={impfDoc} style={{width:"92vw",height:"82vh",borderRadius:12,border:"none"}}/>
@@ -1523,7 +1523,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <button onClick={onClose}
             style={{background:"rgba(255,255,255,.12)",border:"none",borderRadius:10,padding:"7px 12px",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-            ← Zurück
+            \u2190 Zur\u00FCck
           </button>
           <div>
             <div style={{fontSize:18,fontWeight:800}}>Einstellungen</div>
@@ -1536,16 +1536,16 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
         {/*    */}
         <div style={{...S.card,marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"✏️ Name ändern"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"\u270F\uFE0F Name \u00E4ndern"}</div>
           <div style={{fontSize:9,color:C.muted,marginBottom:6}}>
-            Tipp: Emoji erlaubt! z.B. <strong>{"Lena 🍓"}</strong> oder <strong>{"Alex 🐻"}</strong>
+            Tipp: Emoji erlaubt! z.B. <strong>{"Lena \uD83C\uDF53"}</strong> oder <strong>{"Alex \uD83D\uDC3B"}</strong>
           </div>
           <input value={vorname} onChange={e=>setVorname(e.target.value)}
             placeholder="Vorname (mit Emoji)"
             style={{...S.input,fontSize:15,marginBottom:10}}/>
           {vorname&&<div style={{fontSize:11,color:C.mintDark,marginBottom:10}}>Vorschau: Hallo, {vorname}!</div>}
           <div style={{fontSize:9,color:C.muted,marginBottom:10}}>
-            ℹ️ Der Name kann jederzeit hier geändert werden.
+            \u2139\uFE0F Der Name kann jederzeit hier ge\u00E4ndert werden.
           </div>
           <button onClick={saveName}
             style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
@@ -1558,23 +1558,23 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
         {/* PIN */}
         <div style={{...S.card,marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>{"🔑 PIN ändern"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>{"\uD83D\uDD11 PIN \u00E4ndern"}</div>
           {!showPinChange ? (
             <button onClick={()=>setShowPinChange(true)}
               style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.text,fontWeight:700,fontSize:12,cursor:"pointer"}}>
-              PIN ändern
+              PIN \u00E4ndern
             </button>
           ) : (
             <div>
               {[
                 {label:"Aktuelle PIN",val:oldPin,set:setOldPin},
                 {label:"Neue PIN",val:newPin1,set:setNewPin1},
-                {label:"Neue PIN bestätigen",val:newPin2,set:setNewPin2},
+                {label:"Neue PIN best\u00E4tigen",val:newPin2,set:setNewPin2},
               ].map(({label,val,set})=>(
                 <div key={label} style={{marginBottom:8}}>
                   <div style={{fontSize:10,color:C.muted,marginBottom:3}}>{label}</div>
                   <input type="password" maxLength={4} value={val} onChange={e=>set(e.target.value)}
-                    placeholder="••••"
+                    placeholder="\u2022\u2022\u2022\u2022"
                     style={{...S.input,textAlign:"center",fontSize:18,letterSpacing:6}}/>
                 </div>
               ))}
@@ -1588,14 +1588,14 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
                   PIN speichern
                 </button>
               </div>
-              {pinMsg&&<div style={{fontSize:11,color:pinMsg.startsWith("✅")?C.mintDark:C.red,marginTop:8,textAlign:"center",fontWeight:600}}>{pinMsg}</div>}
+              {pinMsg&&<div style={{fontSize:11,color:pinMsg.startsWith("\u2705")?C.mintDark:C.red,marginTop:8,textAlign:"center",fontWeight:600}}>{pinMsg}</div>}
             </div>
           )}
         </div>
 
         {/*     */}
         <div style={{...S.card,marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"🛡️ Bescheinigung von Infektionsschutzgesetz"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"\uD83D\uDEE1\uFE0F Bescheinigung von Infektionsschutzgesetz"}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:12}}>
             Wird bei Hygienekontrollen direkt auf dem Handy vorgezeigt.
           </div>
@@ -1607,9 +1607,9 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
                 style={{width:"100%",padding:"18px",borderRadius:12,border:`2px solid ${C.mint}`,
                   background:C.mintLight,cursor:"pointer",display:"flex",flexDirection:"column",
                   alignItems:"center",gap:6,marginBottom:10}}>
-                <span style={{fontSize:32}}>{"🛡️"}</span>
+                <span style={{fontSize:32}}>{"\uD83D\uDEE1\uFE0F"}</span>
                 <span style={{fontSize:13,fontWeight:800,color:C.mintDark}}>Bescheinigung anzeigen</span>
-                <span style={{fontSize:10,color:C.muted}}>{"Tippen zum Vergrößern · "}{isPdf?"PDF":"Bild"}</span>
+                <span style={{fontSize:10,color:C.muted}}>{"Tippen zum Vergr\u00F6\u00DFern \u00B7 "}{isPdf?"PDF":"Bild"}</span>
               </button>
               <input type="file" accept="image/*,application/pdf" ref={fileRef}
                 style={{display:"none"}} onChange={handleImpfUpload}/>
@@ -1624,7 +1624,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
               {/*     */}
               <div style={{padding:"16px",borderRadius:10,border:`2px dashed ${C.red}`,background:C.redLight,
                 textAlign:"center",marginBottom:10}}>
-                <div style={{fontSize:24,marginBottom:4}}>{"⚠️"}</div>
+                <div style={{fontSize:24,marginBottom:4}}>{"\u26A0\uFE0F"}</div>
                 <div style={{fontSize:11,fontWeight:700,color:C.red,marginBottom:2}}>
                   Noch nicht hochgeladen
                 </div>
@@ -1646,20 +1646,20 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
         {/*    */}
         <div style={{...S.card,marginBottom:12,border:`1px solid ${C.redLight}`}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"🗑 Konto löschen"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"\uD83D\uDDD1 Konto l\u00F6schen"}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:10}}>
-            Diese Aktion kann nicht rückgängig gemacht werden.
+            Diese Aktion kann nicht r\u00FCckg\u00E4ngig gemacht werden.
           </div>
           {!deleteConfirm ? (
             <button onClick={()=>setDeleteConfirm(true)}
               style={{width:"100%",padding:"10px",borderRadius:9,border:`1.5px solid ${C.red}`,
                 background:C.redLight,color:C.red,fontWeight:800,fontSize:12,cursor:"pointer"}}>
-              Konto löschen
+              Konto l\u00F6schen
             </button>
           ) : (
             <div>
               <div style={{fontSize:11,color:C.red,fontWeight:700,marginBottom:10,textAlign:"center"}}>
-                Wirklich löschen? Diese Aktion ist endgültig.
+                Wirklich l\u00F6schen? Diese Aktion ist endg\u00FCltig.
               </div>
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>setDeleteConfirm(false)}
@@ -1671,7 +1671,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
                   style={{flex:1,padding:"10px",borderRadius:9,border:"none",
                     background:`linear-gradient(135deg,${C.red},#A8432E)`,
                     color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
-                  Ja, löschen
+                  Ja, l\u00F6schen
                 </button>
               </div>
             </div>
@@ -1686,7 +1686,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             Abmelden
           </button>
           <div style={{fontSize:9,color:C.muted,textAlign:"center",lineHeight:1.5}}>
-            ℹ️ Aktive Schichten bleiben bis zum Ausstempeln gespeichert.
+            \u2139\uFE0F Aktive Schichten bleiben bis zum Ausstempeln gespeichert.
           </div>
         </div>
 
@@ -1802,7 +1802,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
         }).catch(e => console.error(e));
       });
     }
-    setNMsg("Antrag eingereicht! Wird von Yeaji oder Teddy geprüft.");setNGrund("");
+    setNMsg("Antrag eingereicht! Wird von Yeaji oder Teddy gepr\u00FCft.");setNGrund("");
   }
 
   const elStr=`${pad(Math.floor(elapsed/3600))}:${pad(Math.floor((elapsed%3600)/60))}:${pad(elapsed%60)}`;
@@ -1825,19 +1825,19 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
       <div style={S.hdr}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <div style={{fontSize:11,opacity:.45,marginBottom:3,letterSpacing:".06em",textTransform:"uppercase"}}>{"teeamo Münster"}</div>
+            <div style={{fontSize:11,opacity:.45,marginBottom:3,letterSpacing:".06em",textTransform:"uppercase"}}>{"teeamo M\u00FCnster"}</div>
             <div style={{fontSize:20,fontWeight:800}}>Hallo, {displayName}!</div>
             <div style={{fontSize:11,opacity:.5,marginTop:1}}>{user.role}</div>
             {!user.infektionsschutz&&(
               <div style={{fontSize:10,color:"#ffb347",fontWeight:700,marginTop:4}}>
-                ⚠️ Bitte Bescheinigung von Infektionsschutzgesetz hochladen
+                \u26A0\uFE0F Bitte Bescheinigung von Infektionsschutzgesetz hochladen
               </div>
             )}
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
             <button onClick={()=>setShowSettings(true)}
               style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
-              ⚙️
+              \u2699\uFE0F
             </button>
             <button onClick={onLogout}
               style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
@@ -1862,9 +1862,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:9,height:9,borderRadius:"50%",background:"#3a9e68",boxShadow:"0 0 0 3px rgba(58,158,104,.25)",animation:"pulse 1.4s infinite"}}/>
             <div>
-              <div style={{fontSize:12,fontWeight:800,color:"#1a5c38"}}>{"Im Dienst · "}{clockFiliale}</div>
+              <div style={{fontSize:12,fontWeight:800,color:"#1a5c38"}}>{"Im Dienst \u00B7 "}{clockFiliale}</div>
               <div style={{fontSize:10,color:"#3a7a55"}}>
-                {clockInTime?`seit ${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())} Uhr`:""} · {elStr}
+                {clockInTime?`seit ${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())} Uhr`:""} \u00B7 {elStr}
               </div>
             </div>
           </div>
@@ -1888,12 +1888,12 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               {clockedIn&&<span style={{fontSize:11,opacity:.85,fontVariantNumeric:"tabular-nums"}}>{elStr}</span>}
             </button>
             <div style={{marginTop:9,fontSize:12,color:C.muted}}>
-              {clockedIn?<span>Eingecheckt: <span style={{color:C.mintDark,fontWeight:700}}>{clockFiliale}</span></span>:"Filiale wählen & einstempeln"}
+              {clockedIn?<span>Eingecheckt: <span style={{color:C.mintDark,fontWeight:700}}>{clockFiliale}</span></span>:"Filiale w\u00E4hlen & einstempeln"}
             </div>
           </div>
           {!clockedIn&&(
             <div style={{...S.card,marginBottom:12}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:7}}>{"Filiale auswählen"}</div>
+              <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:7}}>{"Filiale ausw\u00E4hlen"}</div>
               <div style={{display:"flex",gap:7}}>
                 {FILIALEN.map(f=>(
                   <button key={f} onClick={()=>setSelFiliale(f)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${selFiliale===f?C.mint:C.border}`,background:selFiliale===f?C.mintLight:"#fff",color:selFiliale===f?C.mintDark:C.muted}}>{f}</button>
@@ -1903,11 +1903,11 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           )}
           <div style={{...S.card,marginBottom:12}}>
             <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:5}}>Grund <span style={{fontWeight:400,color:C.muted}}>(optional)</span></div>
-            <textarea value={grund} onChange={e=>setGrund(e.target.value)} placeholder="z. B. früher erschienen wegen Lieferung…" style={{width:"100%",height:58,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
+            <textarea value={grund} onChange={e=>setGrund(e.target.value)} placeholder="z. B. fr\u00FCher erschienen wegen Lieferung\u2026" style={{width:"100%",height:58,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
           </div>
           <div style={S.card}>
-            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,letterSpacing:".05em",textTransform:"uppercase"}}>{"Monatsübersicht"}</div>
-            {monthSummary.length===0?<div style={{fontSize:12,color:C.muted}}>{"Noch keine Einträge."}</div>:monthSummary.map(({f,h})=>(
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,letterSpacing:".05em",textTransform:"uppercase"}}>{"Monats\u00FCbersicht"}</div>
+            {monthSummary.length===0?<div style={{fontSize:12,color:C.muted}}>{"Noch keine Eintr\u00E4ge."}</div>:monthSummary.map(({f,h})=>(
               <div key={f} style={{display:"flex",justifyContent:"space-between",paddingBottom:7,marginBottom:7,borderBottom:`1px solid ${C.border}`}}>
                 <span style={{fontSize:12,color:C.text}}>{f}</span>
                 <span style={{fontSize:12,fontWeight:700,color:C.mintDark}}>{h.toFixed(1)} Std.</span>
@@ -1927,7 +1927,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
       {tab==="nachtrag"&&(
         <div style={{padding:"14px"}}>
           <div style={{...S.card,padding:"16px",marginBottom:12}}>
-            <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:12}}>{"Nachträgliche Zeiterfassung"}</div>
+            <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:12}}>{"Nachtr\u00E4gliche Zeiterfassung"}</div>
             <div style={{marginBottom:10}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Datum</div>
               <div style={{display:"flex"}}>
@@ -1952,7 +1952,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             </div>
             <div style={{marginBottom:12}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Grund <span style={{color:C.red}}>*</span></div>
-              <textarea value={nGrund} onChange={e=>{setNGrund(e.target.value);setNMsg("");}} placeholder="z. B. Vergessen einzustempeln…" style={{width:"100%",height:66,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
+              <textarea value={nGrund} onChange={e=>{setNGrund(e.target.value);setNMsg("");}} placeholder="z. B. Vergessen einzustempeln\u2026" style={{width:"100%",height:66,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
             </div>
             {nMsg&&<div style={{fontSize:11,color:nMsg.startsWith("Bitte")?C.red:C.mintDark,marginBottom:9,fontWeight:600}}>{nMsg}</div>}
             <button onClick={submitNachtrag} style={{width:"100%",padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer"}}>Antrag einreichen</button>
@@ -1961,14 +1961,14 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           {/* Meine Antrge - Nachtrag    */}
           {myAntraege.length>0&&(
             <div style={S.card}>
-              <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>{"Meine Anträge"}</div>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>{"Meine Antr\u00E4ge"}</div>
               {myAntraege.map((a,i)=>(
                 <div key={a.id} style={{paddingBottom:i<myAntraege.length-1?9:0,marginBottom:i<myAntraege.length-1?9:0,borderBottom:i<myAntraege.length-1?`1px solid ${C.border}`:"none"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div>
-                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{a.date} · {a.filiale}</div>
-                      <div style={{fontSize:10,color:C.muted}}>{a.ein} – {a.aus}</div>
-                      {a.grund&&<div style={{fontSize:9,color:C.muted,marginTop:2}}>{"📌 "}{a.grund}</div>}
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{a.date} \u00B7 {a.filiale}</div>
+                      <div style={{fontSize:10,color:C.muted}}>{a.ein} \u2013 {a.aus}</div>
+                      {a.grund&&<div style={{fontSize:9,color:C.muted,marginTop:2}}>{"\uD83D\uDCCC "}{a.grund}</div>}
                     </div>
                     <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"Genehmigt":"Abgelehnt"}</span>
                   </div>
@@ -1985,10 +1985,10 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
       <div style={S.nav}>
         {[
-          {id:"home",       icon:"🏠", lbl:"Startseite"},
-          {id:"dienstplan", icon:"📋", lbl:"Dienstplan", badge: pendingTauschCount},
-          {id:"einspringen",icon:"🙋", lbl:"Einspringen"},
-          {id:"nachtrag",   icon:"🕐", lbl:"Nachtrag"},
+          {id:"home",       icon:"\uD83C\uDFE0", lbl:"Startseite"},
+          {id:"dienstplan", icon:"\uD83D\uDCCB", lbl:"Dienstplan", badge: pendingTauschCount},
+          {id:"einspringen",icon:"\uD83D\uDE4B", lbl:"Einspringen"},
+          {id:"nachtrag",   icon:"\uD83D\uDD50", lbl:"Nachtrag"},
         ].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
             <div style={{position:"relative",display:"inline-block"}}>
@@ -2038,7 +2038,7 @@ function StatistikTab({records,users}){
   const monthRecs=records.filter(r=>r.date.startsWith(selMonth)&&r.aus);
 
   function downloadCSV(rows,filename){
-    const bom="﻿";
+    const bom="\uFEFF";
     const csv=bom+rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(";")).join("\r\n");
     const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
     const url=URL.createObjectURL(blob);
@@ -2069,21 +2069,21 @@ function StatistikTab({records,users}){
     else downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
   }
   function exportSummary(fmt="xlsx"){
-    const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","Teenjoy (Std)","Ø Std/Tag"];
+    const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","Teenjoy (Std)","\u00D8 Std/Tag"];
     const rows=[hdr,...empList.map(emp=>{
       const er=monthRecs.filter(r=>r.user===emp.vorname);
       const total=er.reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
       return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["Teenjoy"].toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
     })];
-    if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monatsübersicht");
+    if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monats\u00FCbersicht");
     else downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
   }
 
   return(
     <div style={{padding:"14px"}}>
       <div style={{marginBottom:12}}>
-        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:7,letterSpacing:".06em",textTransform:"uppercase"}}>{"Monat auswählen"}</div>
+        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:7,letterSpacing:".06em",textTransform:"uppercase"}}>{"Monat ausw\u00E4hlen"}</div>
         <div style={{display:"flex",gap:7}}>
           {MONTHS.map(m=>(
             <button key={m} onClick={()=>setSelMonth(m)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${selMonth===m?C.mint:C.border}`,background:selMonth===m?C.mintLight:"#fff",color:selMonth===m?C.mintDark:C.muted}}>
@@ -2092,7 +2092,7 @@ function StatistikTab({records,users}){
           ))}
         </div>
       </div>
-      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,letterSpacing:".06em",textTransform:"uppercase"}}>{"Übersicht – "}{MONTH_LABELS[selMonth]}</div>
+      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,letterSpacing:".06em",textTransform:"uppercase"}}>{"\u00DCbersicht \u2013 "}{MONTH_LABELS[selMonth]}</div>
       <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:14}}>
         {empList.map(emp=>{
           const er=monthRecs.filter(r=>r.user===emp.vorname);
@@ -2134,17 +2134,17 @@ function StatistikTab({records,users}){
         })}
       </div>
       <div style={{background:C.navy,borderRadius:14,padding:"16px",marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>{"📥 Daten exportieren"}</div>
-        <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV – öffnet direkt in Excel"}</div>
+        <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>{"\uD83D\uDCE5 Daten exportieren"}</div>
+        <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV \u2013 \u00F6ffnet direkt in Excel"}</div>
         {[
-          {title:"Stundennachweis (Details)",sub:"Jeder Tag · Name · Datum · Filiale · Ein/Aus · Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
-          {title:"Monatsübersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin · Gesamtstunden · je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`Übersicht_${selMonth}`},
+          {title:"Stundennachweis (Details)",sub:"Jeder Tag \u00B7 Name \u00B7 Datum \u00B7 Filiale \u00B7 Ein/Aus \u00B7 Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
+          {title:"Monats\u00FCbersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin \u00B7 Gesamtstunden \u00B7 je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`Übersicht_${selMonth}`},
         ].map(({title,sub,fnXlsx,fnCsv,file})=>(
           <div key={file} style={{background:"rgba(255,255,255,.07)",borderRadius:10,padding:"12px",marginBottom:8}}>
             <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{title}</div>
             <div style={{fontSize:9,color:"rgba(255,255,255,.4)",marginBottom:10}}>{sub}</div>
             <div style={{display:"flex",gap:7}}>
-              <button onClick={fnXlsx} style={{flex:2,padding:"10px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"⬇ Excel (.xlsx)"}</button>
+              <button onClick={fnXlsx} style={{flex:2,padding:"10px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"\u2B07 Excel (.xlsx)"}</button>
               <button onClick={fnCsv} style={{flex:1,padding:"10px",borderRadius:8,border:`1px solid rgba(255,255,255,.2)`,background:"transparent",color:"rgba(255,255,255,.6)",fontWeight:700,fontSize:10,cursor:"pointer"}}>CSV</button>
             </div>
           </div>
@@ -2152,7 +2152,7 @@ function StatistikTab({records,users}){
       </div>
       {exported&&(
         <div style={{...S.card,display:"flex",alignItems:"center",gap:9,border:`1.5px solid ${C.mint}`,background:C.mintLight}}>
-          <span style={{fontSize:18}}>{"✅"}</span>
+          <span style={{fontSize:18}}>{"\u2705"}</span>
           <div>
             <div style={{fontSize:12,fontWeight:700,color:C.mintDark}}>Datei gespeichert!</div>
             <div style={{fontSize:10,color:C.mintDark,opacity:.8}}>{exported}</div>
@@ -2190,8 +2190,8 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
       {delRecordConfirm&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
           <div style={{background:"#fff",borderRadius:18,padding:"24px 20px",width:"100%",maxWidth:320}}>
-            <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:8,textAlign:"center"}}>{"Eintrag löschen?"}</div>
-            <div style={{fontSize:12,color:C.muted,marginBottom:20,textAlign:"center"}}>{"Dieser Eintrag wird dauerhaft gelöscht."}</div>
+            <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:8,textAlign:"center"}}>{"Eintrag l\u00F6schen?"}</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:20,textAlign:"center"}}>{"Dieser Eintrag wird dauerhaft gel\u00F6scht."}</div>
             <div style={{display:"flex",gap:10}}>
               <button onClick={()=>setDelRecordConfirm(null)}
                 style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
@@ -2199,7 +2199,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
               </button>
               <button onClick={()=>{setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>r.id!==delRecordConfirm));setDelRecordConfirm(null);}}
                 style={{flex:1,padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,"+C.red+",#A8432E)",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
-                {"Löschen"}
+                {"L\u00F6schen"}
               </button>
             </div>
           </div>
@@ -2207,7 +2207,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
       )}
       <button onClick={()=>setDetailKey(null)}
         style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:13,fontWeight:700,marginBottom:12}}>
-        {"< Zurück"}
+        {"< Zur\u00FCck"}
       </button>
       <div style={{...S.card,display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
         <div style={{width:52,height:52,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:17,color:"#fff"}}>{emp.kuerzel}</div>
@@ -2257,7 +2257,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 {mDiff!==null&&<span style={{fontSize:11,fontWeight:700,color:mDiff>=0?C.mintDark:C.red}}>{(mDiff>=0?"+":"")+mDiff.toFixed(1)+"h"}</span>}
-                <span style={{fontSize:11,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                <span style={{fontSize:11,color:C.muted}}>{isOpen?"\u25B2":"\u25BC"}</span>
               </div>
             </button>
             {isOpen&&(
@@ -2380,13 +2380,13 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
               ))}
             </div>
             <div style={{fontSize:8,color:C.muted,marginTop:6,borderTop:`1px solid ${C.border}`,paddingTop:5}}>
-              Hinweis: Nicht erschienen = kein Einstempeleintrag für heute.
+              Hinweis: Nicht erschienen = kein Einstempeleintrag f\u00FCr heute.
             </div>
           </div>
 
           {todayShiftEmps.length===0?(
             <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"24px"}}>
-              Kein Dienstplan für heute eingetragen.
+              Kein Dienstplan f\u00FCr heute eingetragen.
             </div>
           ):(()=>{
             //  : Arkaden  Aegidiimarkt  Teenjoy
@@ -2503,7 +2503,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
                 <div style={{fontSize:10,fontWeight:700,color:C.muted}}>Bearbeitet</div>
                 {userKey==="yeaji"&&<button onClick={()=>setAntraege([])}
                   style={{fontSize:9,padding:"3px 8px",borderRadius:6,border:"1px solid "+C.red,background:C.redLight,color:C.red,cursor:"pointer",fontWeight:700}}>
-                  Alle löschen
+                  Alle l\u00F6schen
                 </button>}
               </div>
               {nList.filter(a=>a.status!=="offen").map(a=>(
@@ -2528,7 +2528,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
           {tList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Schichttausch-Antraege</div>}
           {userKey==="yeaji"&&tList.length>0&&<button onClick={()=>setTauschAntraege([])}
             style={{fontSize:9,padding:"3px 8px",borderRadius:6,border:"1px solid "+C.red,background:C.redLight,color:C.red,cursor:"pointer",fontWeight:700,marginBottom:8,display:"block"}}>
-            Alle Tausch-Anträge löschen
+            Alle Tausch-Antr\u00E4ge l\u00F6schen
           </button>}
           {tList.map(a=>{
             const isOpen=openAId==="t_"+a.id;
@@ -2546,7 +2546,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:sc,background:sb}}>{sl}</span>
-                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"\u25B2":"\u25BC"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -2569,7 +2569,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
           {abList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Absagen</div>}
           {userKey==="yeaji"&&abList.length>0&&<button onClick={()=>setAbsagenList([])}
             style={{fontSize:9,padding:"3px 8px",borderRadius:6,border:"1px solid "+C.red,background:C.redLight,color:C.red,cursor:"pointer",fontWeight:700,marginBottom:8,display:"block"}}>
-            Alle Absagen löschen
+            Alle Absagen l\u00F6schen
           </button>}
           {abList.filter(a=>a.status==="offen").map(a=>{
             const isOpen=openAId==="ab_"+a.id;
@@ -2583,7 +2583,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:C.red,background:C.redLight}}>Offen</span>
-                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"\u25B2":"\u25BC"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -2637,7 +2637,7 @@ function NachtragCard({ a, isOpen, onToggle, onDecide, onReopen }) {
         </div>
         <div style={{display:"flex", alignItems:"center", gap:8}}>
           <span style={{fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:99, color:sc, background:sb}}>{sl}</span>
-          <span style={{fontSize:11, color:C.muted}}>{isOpen ? "▲" : "▼"}</span>
+          <span style={{fontSize:11, color:C.muted}}>{isOpen ? "\u25B2" : "\u25BC"}</span>
         </div>
       </button>
       {isOpen && (
@@ -2683,7 +2683,7 @@ function NachtragCard({ a, isOpen, onToggle, onDecide, onReopen }) {
               style={{width:"100%", padding:"8px", borderRadius:9,
                 border:"1px solid "+C.yellow, background:C.yellowLight,
                 color:"#b37400", fontWeight:700, fontSize:11, cursor:"pointer"}}>
-              Entscheidung ändern
+              Entscheidung \u00E4ndern
             </button>
           )}
         </div>
@@ -2833,9 +2833,9 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
     <div style={{paddingBottom:20}}>
       {/*   */}
       <div style={{display:"flex",gap:0,margin:"14px 14px 0",borderRadius:12,overflow:"hidden",border:`1px solid ${C.border}`}}>
-        {[{id:"plan",l:"📋 Plan"},
-          {id:"by_emp",l:"👤 Nach Mitarbeiter"},
-          {id:"by_date",l:"📅 Nach Datum"}].map(({id,l})=>(
+        {[{id:"plan",l:"\uD83D\uDCCB Plan"},
+          {id:"by_emp",l:"\uD83D\uDC64 Nach Mitarbeiter"},
+          {id:"by_date",l:"\uD83D\uDCC5 Nach Datum"}].map(({id,l})=>(
           <button key={id} onClick={()=>setViewMode(id)}
             style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",fontSize:10,fontWeight:700,
               background:viewMode===id?C.navy:"#fff",
@@ -2880,7 +2880,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{shifts.length} Schichten</span>
-                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "▲" : "▼"}</span>
+                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "\u25B2" : "\u25BC"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -2911,12 +2911,12 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                             {rec?(
                               <div>
                                 <div style={{fontSize:11,fontWeight:700,color:rec.aus?C.mintDark:C.yellow}}>
-                                  {rec.ein}{rec.aus?` – ${rec.aus}`:" (läuft)"}
+                                  {rec.ein}{rec.aus?` – ${rec.aus}`:" (l\u00E4uft)"}
                                 </div>
                                 <div style={{fontSize:9,color:C.muted}}>{stdLabel(rec.ein,rec.aus)}</div>
                               </div>
                             ):(
-                              <span style={{fontSize:10,color:C.muted}}>{"—"}</span>
+                              <span style={{fontSize:10,color:C.muted}}>{"\u2014"}</span>
                             )}
                           </div>
                         </div>
@@ -2954,7 +2954,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{dayEmps.length} Personen geplant</span>
-                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "▲" : "▼"}</span>
+                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "\u25B2" : "\u25BC"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -2969,7 +2969,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                       return(
                         <div key={fil}>
                           <div style={{padding:"7px 14px",background:C.bg,fontSize:10,fontWeight:700,color:C.muted}}>
-                            {filialInit(fil)} · {fil}
+                            {filialInit(fil)} \u00B7 {fil}
                           </div>
                           {filEmps.map((emp,i)=>{
                             const shift=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===d);
@@ -2977,7 +2977,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                             const status=rec?.aus?"Feierabend":rec?.ein?"Im Dienst":"Nicht erschienen";
                             const statusColor=rec?.aus?C.mintDark:rec?.ein?C.yellow:C.red;
                             const statusBg=rec?.aus?C.mintLight:rec?.ein?C.yellowLight:C.redLight;
-                            const statusLabel=rec?.aus?"Feierabend ✓":rec?.ein?"Im Dienst ●":"Nicht erschienen";
+                            const statusLabel=rec?.aus?"Feierabend \u2713":rec?.ein?"Im Dienst \u25CF":"Nicht erschienen";
                             return(
                               <div key={emp.key} style={{display:"flex",justifyContent:"space-between",
                                 alignItems:"center",padding:"10px 14px",
@@ -3041,7 +3041,7 @@ function DienstplanUploadView({ records, users }) {
 
     // HEIC/HEIF 
     if (file.type === "image/heic" || file.type === "image/heif" || file.name.toLowerCase().endsWith(".heic")) {
-      setMsg({ type: "err", text: "❌ HEIC 형식은 지원되지 않아요. JPEG로 변환 후 업로드해주세요." });
+      setMsg({ type: "err", text: "\u274C HEIC \uD615\uC2DD\uC740 \uC9C0\uC6D0\uB418\uC9C0 \uC54A\uC544\uC694. JPEG\uB85C \uBCC0\uD658 \uD6C4 \uC5C5\uB85C\uB4DC\uD574\uC8FC\uC138\uC694." });
       return;
     }
 
@@ -3055,7 +3055,7 @@ function DienstplanUploadView({ records, users }) {
     }
 
     setAnalyzing(true);
-    setMsg({ type: "info", text: "⏳ Analysiere… (kann 20–40 Sek. dauern)" });
+    setMsg({ type: "info", text: "\u23F3 Analysiere\u2026 (kann 20\u201340 Sek. dauern)" });
 
     const b64 = await new Promise(res => {
       const r = new FileReader();
@@ -3143,7 +3143,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       }
       if (window._fbDb && window._fbRef && window._fbSet) {
         window._fbSet(window._fbRef(window._fbDb, "schedule"), parsedForFb)
-          .then(()=>console.log("✅ schedule saved:", Object.keys(parsedForFb)))
+          .then(()=>console.log("\u2705 schedule saved:", Object.keys(parsedForFb)))
           .catch(e=>console.error("schedule save error:", e));
       }
       setSchedule(parsed);
@@ -3166,7 +3166,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       {/* API   */}
       {showKeyInput && (
         <div style={{...S.card, marginBottom:12, border:`1.5px solid ${C.yellow}`}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>{"🔑 Anthropic API-Schlüssel"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>{"\uD83D\uDD11 Anthropic API-Schl\u00FCssel"}</div>
           <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
             placeholder="sk-ant-..."
             style={{...S.input, width:"100%", fontSize:11, marginBottom:8}}/>
@@ -3179,25 +3179,25 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
 
       {/*   */}
       <div style={{...S.card, marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"📋 Dienstplan hochladen"}</div>
-        <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{"Bild hochladen → KI analysiert automatisch die Schichten"}</div>
+        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"\uD83D\uDCCB Dienstplan hochladen"}</div>
+        <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{"Bild hochladen \u2192 KI analysiert automatisch die Schichten"}</div>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" onChange={handleFile} style={{display:"none"}}/>
         <button onClick={()=>fileRef.current.click()} disabled={analyzing}
           style={{width:"100%",padding:"12px",borderRadius:11,border:`2px dashed ${C.mint}`,
             background:C.mintLight,color:C.mintDark,fontWeight:800,fontSize:13,cursor:"pointer",
             opacity:analyzing?0.6:1}}>
-          {analyzing ? "⏳ KI analysiert…" : "📷 Bild oder PDF auswählen & analysieren"}
+          {analyzing ? "\u23F3 KI analysiert\u2026" : "\uD83D\uDCF7 Bild oder PDF ausw\u00E4hlen & analysieren"}
         </button>
         {!apiKey&&(
           <button onClick={()=>setShowKeyInput(true)}
             style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
-            🔑 API-Schlüssel eingeben
+            \uD83D\uDD11 API-Schl\u00FCssel eingeben
           </button>
         )}
         {apiKey&&(
           <button onClick={()=>setShowKeyInput(v=>!v)}
             style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
-            🔑 API-Schlüssel ändern
+            \uD83D\uDD11 API-Schl\u00FCssel \u00E4ndern
           </button>
         )}
         {msg&&(
@@ -3244,7 +3244,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
                       <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
                         color:status==="erledigt"?C.mintDark:status==="aktiv"?C.yellow:C.muted,
                         background:status==="erledigt"?C.mintLight:status==="aktiv"?C.yellowLight:C.border}}>
-                        {status==="erledigt"?"✅ Gearbeitet":status==="aktiv"?"🟡 Aktiv":"⏳ Ausstehend"}
+                        {status==="erledigt"?"\u2705 Gearbeitet":status==="aktiv"?"\uD83D\uDFE1 Aktiv":"\u23F3 Ausstehend"}
                       </span>
                     </div>
                   );
@@ -3490,7 +3490,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
     const isTausch    = n.type==="tausch_manager"||n.kategorie==="Schichttausch";
     const isEinspring = n.type==="einspringen"||n.kategorie==="Einspringen";
     const isNachtrag  = n.type==="nachtrag"||n.kategorie==="Nachtrag";
-    const isPrufen    = n.type==="prüfen";
+    const isPrufen    = n.type==="pr\u00FCfen";
 
     const borderColor = isAbsagen?C.red:isTausch?C.mint:isEinspring?C.mint:isNachtrag?C.yellow:C.yellow;
 
@@ -3498,24 +3498,24 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       <div key={key} style={{...S.card,marginBottom:10,border:`1.5px solid ${borderColor}`}}>
         {/* Schichtabsage */}
         {isAbsagen && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.red,marginBottom:4}}>{"🚫 Schichtabsage · "}{n.user||n.userName}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.red,marginBottom:4}}>{"\uD83D\uDEAB Schichtabsage \u00B7 "}{n.user||n.userName}</div>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
           <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
-          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"📌 "}{n.grund}</div>
-          <div style={{fontSize:9,color:C.muted,marginBottom:8}}>{"ℹ️ Bei Genehmigung wird die Schicht als freie Schicht veröffentlicht."}</div>
+          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC "}{n.grund}</div>
+          <div style={{fontSize:9,color:C.muted,marginBottom:8}}>{"\u2139\uFE0F Bei Genehmigung wird die Schicht als freie Schicht ver\u00F6ffentlicht."}</div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>handleAbsagenNotif(key,n,false)}
               style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
             <button onClick={()=>handleAbsagenNotif(key,n,true)}
-              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"✅ Genehmigen & Freigeben"}</button>
+              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"\u2705 Genehmigen & Freigeben"}</button>
           </div>
         </>}
 
         {/* Schichttausch */}
         {isTausch && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:6}}>{"🔄 Schichttausch · Partner bestätigt"}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:6}}>{"\uD83D\uDD04 Schichttausch \u00B7 Partner best\u00E4tigt"}</div>
           <div style={{display:"flex",gap:6,marginBottom:8}}>
             <div style={{flex:1,padding:"7px 9px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
               <div style={{fontSize:9,color:C.muted}}>{n.initiator}</div>
@@ -3524,7 +3524,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
               </div>
               <div style={{fontSize:9,color:C.muted}}>{n.initiatorFiliale?.replace("TEEAMO ","")}</div>
             </div>
-            <div style={{display:"flex",alignItems:"center",fontSize:16}}>{"⇄"}</div>
+            <div style={{display:"flex",alignItems:"center",fontSize:16}}>{"\u21C4"}</div>
             <div style={{flex:1,padding:"7px 9px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
               <div style={{fontSize:9,color:C.muted}}>{n.partner}</div>
               <div style={{fontSize:11,fontWeight:700,color:C.text}}>
@@ -3533,49 +3533,49 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
               <div style={{fontSize:9,color:C.muted}}>{n.partnerFiliale?.replace("TEEAMO ","")}</div>
             </div>
           </div>
-          <div style={{fontSize:9,color:C.mintDark,marginBottom:8}}>{"✅ Beide Mitarbeiter haben bestätigt."}</div>
+          <div style={{fontSize:9,color:C.mintDark,marginBottom:8}}>{"\u2705 Beide Mitarbeiter haben best\u00E4tigt."}</div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>handleTausch(key,n,false)}
               style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
             <button onClick={()=>handleTausch(key,n,true)}
-              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"✅ Genehmigen"}</button>
+              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"\u2705 Genehmigen"}</button>
           </div>
         </>}
 
         {/* Einspringen */}
         {isEinspring && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"🙋 Einspringen · "}{n.user}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"\uD83D\uDE4B Einspringen \u00B7 "}{n.user}</div>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
           <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
           <button onClick={()=>handleEinspringen(key,n)}
-            style={{width:"100%",padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"✓ Zur Kenntnis genommen"}</button>
+            style={{width:"100%",padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"\u2713 Zur Kenntnis genommen"}</button>
         </>}
 
         {/* Nachtrag (via notification) */}
         {isNachtrag && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"🕐 Nachtrag · "}{n.user}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"\uD83D\uDD50 Nachtrag \u00B7 "}{n.user}</div>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{n.filiale} · {n.ein} – {n.aus}</div>
-          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"📌 "}{n.grund}</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{n.filiale} \u00B7 {n.ein} \u2013 {n.aus}</div>
+          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC "}{n.grund}</div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>handleNachtragNotif(key,n,false)}
               style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
             <button onClick={()=>handleNachtragNotif(key,n,true)}
-              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"✅ Genehmigen"}</button>
+              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"\u2705 Genehmigen"}</button>
           </div>
         </>}
 
         {/* Prfen */}
         {isPrufen && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"⚠️ Stempelzeit prüfen · "}{n.user}</div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}</div>
-          <div style={{fontSize:10,color:C.yellow,marginBottom:10}}>Geplant: {n.plannedTime} · Gearbeitet: {n.actualEin}–{n.actualAus}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"\u26A0\uFE0F Stempelzeit pr\u00FCfen \u00B7 "}{n.user}</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{new Date(n.date).toLocaleDateString("de-DE")} \u00B7 {n.filiale}</div>
+          <div style={{fontSize:10,color:C.yellow,marginBottom:10}}>Geplant: {n.plannedTime} \u00B7 Gearbeitet: {n.actualEin}\u2013{n.actualAus}</div>
           <button onClick={()=>markRead(key)}
-            style={{width:"100%",padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>{"✓ Zur Kenntnis"}</button>
+            style={{width:"100%",padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>{"\u2713 Zur Kenntnis"}</button>
         </>}
       </div>
     );
@@ -3585,10 +3585,10 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   function renderErledigtCard(key, a) {
     const isOpen = erledigtExpanded[key];
     const label = a.kategorie || a.type || "Sonstige";
-    const emojiMap = {Schichtabsage:"🚫",Schichttausch:"🔄",Einspringen:"🙋",Nachtrag:"🕐"};
-    const emoji = emojiMap[label] || "📌";
+    const emojiMap = {Schichtabsage:"\uD83D\uDEAB",Schichttausch:"\uD83D\uDD04",Einspringen:"\uD83D\uDE4B",Nachtrag:"\uD83D\uDD50"};
+    const emoji = emojiMap[label] || "\uD83D\uDCCC";
     const eColor = a.entscheidung==="genehmigt"?C.mintDark:a.entscheidung==="abgelehnt"?C.red:C.muted;
-    const eLabel = a.entscheidung==="genehmigt"?"✅ Genehmigt":a.entscheidung==="abgelehnt"?"❌ Abgelehnt":"✓ Bestätigt";
+    const eLabel = a.entscheidung==="genehmigt"?"\u2705 Genehmigt":a.entscheidung==="abgelehnt"?"\u274C Abgelehnt":"\u2713 Best\u00E4tigt";
     return (
       <div key={key} style={{...S.card,marginBottom:6,border:`1px solid ${C.border}`}}>
         <button onClick={()=>setErledigtExpanded(p=>({...p,[key]:!p[key]}))}
@@ -3596,13 +3596,13 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:14}}>{emoji}</span>
             <div style={{textAlign:"left"}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.text}}>{label} · {a.user||a.initiator}</div>
+              <div style={{fontSize:11,fontWeight:700,color:C.text}}>{label} \u00B7 {a.user||a.initiator}</div>
               <div style={{fontSize:9,color:C.muted}}>{a.date?new Date(a.date).toLocaleDateString("de-DE"):(a.initiatorDate?new Date(a.initiatorDate).toLocaleDateString("de-DE"):"")}</div>
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:7}}>
             <span style={{fontSize:9,fontWeight:700,color:eColor}}>{eLabel}</span>
-            <span style={{fontSize:10,color:C.muted}}>{isOpen ? "▲" : "▼"}</span>
+            <span style={{fontSize:10,color:C.muted}}>{isOpen ? "\u25B2" : "\u25BC"}</span>
           </div>
         </button>
         {isOpen && (
@@ -3613,11 +3613,11 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             </>}
             {a.kategorie==="Schichttausch"&&<>
               <div style={{fontSize:10,color:C.muted,marginBottom:2}}>
-                {a.initiator} ({new Date(a.initiatorDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}) ⇄ {a.partner} ({new Date(a.partnerDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})})
+                {a.initiator} ({new Date(a.initiatorDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}) \u21C4 {a.partner} ({new Date(a.partnerDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})})
               </div>
             </>}
             {a.kategorie==="Nachtrag"&&<>
-              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} · {a.ein} – {a.aus}</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} \u00B7 {a.ein} \u2013 {a.aus}</div>
               <div style={{fontSize:10,color:C.text,marginBottom:2}}>Grund: {a.grund}</div>
             </>}
             {a.kategorie==="Einspringen"&&<>
@@ -3627,7 +3627,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
               <button onClick={()=>deleteArchiv(key)}
                 style={{fontSize:9,color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:"3px 8px",background:C.redLight,cursor:"pointer"}}>
-                🗑 Löschen
+                \uD83D\uDDD1 L\u00F6schen
               </button>
             </div>
           </div>
@@ -3652,14 +3652,14 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       <div style={S.hdr}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <div style={{fontSize:11,opacity:.45,marginBottom:3,letterSpacing:".06em",textTransform:"uppercase"}}>{"teeamo · Admin"}</div>
+            <div style={{fontSize:11,opacity:.45,marginBottom:3,letterSpacing:".06em",textTransform:"uppercase"}}>{"teeamo \u00B7 Admin"}</div>
             <div style={{fontSize:20,fontWeight:800}}>Hallo, {manager?.vorname||"Manager"}!</div>
             <div style={{fontSize:11,opacity:.5,marginTop:1}}>Admin</div>
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
             <button onClick={()=>setShowMgrSettings(true)}
               style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
-              ⚙️
+              \u2699\uFE0F
             </button>
             <button onClick={onLogout}
               style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
@@ -3670,7 +3670,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
         {/* Admin   */}
         {!manager?.infektionsschutz&&(
           <div style={{fontSize:10,color:"#ffb347",fontWeight:700,marginTop:8}}>
-            ⚠️ Bitte Bescheinigung von Infektionsschutzgesetz hochladen
+            \u26A0\uFE0F Bitte Bescheinigung von Infektionsschutzgesetz hochladen
           </div>
         )}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginTop:14}}>
@@ -3762,7 +3762,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
           {/*  Freie Schicht eintragen     */}
           <div style={{...S.card,marginBottom:14}}>
-            <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"➕ Freie Schicht eintragen"}</div>
+            <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"\u2795 Freie Schicht eintragen"}</div>
             <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
               <div>
                 <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Datum</div>
@@ -3795,14 +3795,14 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
               style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
                 background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
                 color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
-              Schicht veröffentlichen
+              Schicht ver\u00F6ffentlichen
             </button>
           </div>
 
           {/*     */}
           {(Array.isArray(freieSchichten)?freieSchichten:[]).length>0&&(
             <div style={{marginBottom:14}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>{"Veröffentlichte Schichten"}</div>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>{"Ver\u00F6ffentlichte Schichten"}</div>
               {(Array.isArray(freieSchichten)?freieSchichten:[]).map(s=>(
                 <div key={s.id} style={{...S.card,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
@@ -3812,7 +3812,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
                   </div>
                   <button onClick={()=>setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==s.id))}
                     style={{fontSize:10,color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:"3px 8px",background:C.redLight,cursor:"pointer"}}>
-                    Löschen
+                    L\u00F6schen
                   </button>
                 </div>
               ))}
@@ -3823,23 +3823,23 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           {(pendingNotifs.length>0||offeneNachtraege.length>0) ? (
             <div style={{marginBottom:14}}>
               <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>
-                🔔 Offene Vorgänge ({pendingNotifs.length+offeneNachtraege.length})
+                \uD83D\uDD14 Offene Vorg\u00E4nge ({pendingNotifs.length+offeneNachtraege.length})
               </div>
 
               {/* Nachtrag (antraege ) */}
               {offeneNachtraege.map(a=>(
                 <div key={a.id} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.yellow}`}}>
-                  <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"🕐 Nachtrag · "}{a.user}</div>
+                  <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"\uD83D\uDD50 Nachtrag \u00B7 "}{a.user}</div>
                   <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
                     {new Date(a.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
                   </div>
-                  <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} · {a.ein} – {a.aus}</div>
-                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"📌 "}{a.grund}"</div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} \u00B7 {a.ein} \u2013 {a.aus}</div>
+                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC "}{a.grund}"</div>
                   <div style={{display:"flex",gap:8}}>
                     <button onClick={()=>approveNachtrag(a.id,false)}
                       style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
                     <button onClick={()=>approveNachtrag(a.id,true)}
-                      style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"✅ Genehmigen"}</button>
+                      style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"\u2705 Genehmigen"}</button>
                   </div>
                 </div>
               ))}
@@ -3850,7 +3850,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           ) : (
             <div style={{...S.card,textAlign:"center",padding:"24px 16px",marginBottom:14}}>
               <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Alles erledigt!</div>
-              <div style={{fontSize:11,color:C.muted}}>{"Keine offenen Vorgänge."}</div>
+              <div style={{fontSize:11,color:C.muted}}>{"Keine offenen Vorg\u00E4nge."}</div>
             </div>
           )}
 
@@ -3858,7 +3858,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           {myArchiv.length>0&&(
             <div style={{marginBottom:14}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
-                ✅ Erledigt ({myArchiv.length})
+                \u2705 Erledigt ({myArchiv.length})
               </div>
               {myArchiv.map(([key,a])=>renderErledigtCard(key,a))}
             </div>
@@ -3868,11 +3868,11 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
       {/*  NAVIGATION  */}
       <div style={S.nav}>
-        {[{id:"uebersicht",icon:"👥",lbl:"Übersicht"},
-          {id:"dienstplan",icon:"📋",lbl:"Dienstplan"},
-          {id:"antraege",icon:"📂",lbl:"Anträge"},
-          {id:"benachrichtigungen",icon:"🔔",lbl:`Alarm${alarmCount>0?" ("+alarmCount+")":""}` },
-          {id:"statistik",icon:"📊",lbl:"Statistik"}].map(t=>(
+        {[{id:"uebersicht",icon:"\uD83D\uDC65",lbl:"\u00DCbersicht"},
+          {id:"dienstplan",icon:"\uD83D\uDCCB",lbl:"Dienstplan"},
+          {id:"antraege",icon:"\uD83D\uDCC2",lbl:"Antr\u00E4ge"},
+          {id:"benachrichtigungen",icon:"\uD83D\uDD14",lbl:`Alarm${alarmCount>0?" ("+alarmCount+")":""}` },
+          {id:"statistik",icon:"\uD83D\uDCCA",lbl:"Statistik"}].map(t=>(
           <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
             <div style={{position:"relative",display:"inline-block"}}>
               <span style={{fontSize:19}}>{t.icon}</span>
@@ -3895,15 +3895,15 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
         return(
           <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:"24px"}}>
             <div style={{background:C.card,borderRadius:18,padding:"24px 22px",width:"100%",maxWidth:340,boxShadow:"0 8px 32px rgba(0,0,0,.18)"}}>
-              <div style={{width:48,height:48,borderRadius:"50%",background:C.redLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 14px"}}>{"🗑"}</div>
-              <div style={{fontSize:16,fontWeight:800,color:C.text,textAlign:"center",marginBottom:6}}>{"Konto löschen?"}</div>
+              <div style={{width:48,height:48,borderRadius:"50%",background:C.redLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 14px"}}>{"\uD83D\uDDD1"}</div>
+              <div style={{fontSize:16,fontWeight:800,color:C.text,textAlign:"center",marginBottom:6}}>{"Konto l\u00F6schen?"}</div>
               <div style={{fontSize:12,color:C.muted,textAlign:"center",marginBottom:20}}>
-                Das Konto von <strong style={{color:C.text}}>{empToDel?.vorname}</strong>{" wird dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden."}
+                Das Konto von <strong style={{color:C.text}}>{empToDel?.vorname}</strong>{" wird dauerhaft gel\u00F6scht. Diese Aktion kann nicht r\u00FCckg\u00E4ngig gemacht werden."}
               </div>
               <div style={{display:"flex",gap:9}}>
                 <button onClick={()=>setDeleteConfirm(null)} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
                 <button onClick={()=>{setUsers(prev=>(Array.isArray(prev)?prev:[]).filter(u=>u.key!==deleteConfirm));setDeleteConfirm(null);setDetailKey(null);}}
-                  style={{flex:1,padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>{"Löschen"}</button>
+                  style={{flex:1,padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>{"L\u00F6schen"}</button>
               </div>
             </div>
           </div>
@@ -4011,7 +4011,7 @@ function App(){
           color:"#1a1a1a",
           letterSpacing:".01em",
           marginBottom:8
-        }}>{"Münster"}</div>
+        }}>{"M\u00FCnster"}</div>
 
         {/* teeamo   */}
         <div style={{
