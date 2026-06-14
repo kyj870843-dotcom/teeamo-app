@@ -921,7 +921,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const f = s.f || s.filiale;
   const t = s.t || s.time;
   const actualRec = (Array.isArray(records)?records:[]).find(r => r.user === userName && r.date === d);
-  const status = getShiftStatus({ time: t }, actualRec);
+  const status = getShiftStatus({ time: t }, actualRec) || "ausstehend";
   const [showAbsagen, setShowAbsagen] = useState(false);
   const [absagenList, setAbsagenList] = useFirebase("absagen", []);
   const [tauschAntraege] = useFirebase("schichttausch", []);
@@ -1437,7 +1437,24 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [impfDoc, setImpfDoc] = useState(user.infektionsschutz || null);
   const [impfViewer, setImpfViewer] = useState(false);
+  const [showPinChange, setShowPinChange] = useState(false);
+  const [oldPin, setOldPin] = useState("");
+  const [newPin1, setNewPin1] = useState("");
+  const [newPin2, setNewPin2] = useState("");
+  const [pinMsg, setPinMsg] = useState("");
   const fileRef = useRef(null);
+  const { getPin, setPin: setPinStore } = usePinStore();
+
+  function changePIN() {
+    const current = getPin(userKey);
+    if (oldPin !== current) { setPinMsg("❌ Aktuelle PIN falsch."); return; }
+    if (!/^\d{4}$/.test(newPin1)) { setPinMsg("❌ PIN muss 4 Ziffern sein."); return; }
+    if (newPin1 !== newPin2) { setPinMsg("❌ PINs stimmen nicht überein."); return; }
+    setPinStore(userKey, newPin1);
+    setPinMsg("✅ PIN geändert!");
+    setOldPin(""); setNewPin1(""); setNewPin2("");
+    setTimeout(() => { setPinMsg(""); setShowPinChange(false); }, 2000);
+  }
 
   function saveName() {
     if (!vorname.trim()) return;
@@ -1528,6 +1545,43 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             Speichern
           </button>
           {saveMsg&&<div style={{fontSize:11,color:C.mintDark,marginTop:8,fontWeight:600,textAlign:"center"}}>{saveMsg}</div>}
+        </div>
+
+        {/* PIN */}
+        <div style={{...S.card,marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>{"🔑 PIN ändern"}</div>
+          {!showPinChange ? (
+            <button onClick={()=>setShowPinChange(true)}
+              style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.text,fontWeight:700,fontSize:12,cursor:"pointer"}}>
+              PIN ändern
+            </button>
+          ) : (
+            <div>
+              {[
+                {label:"Aktuelle PIN",val:oldPin,set:setOldPin},
+                {label:"Neue PIN",val:newPin1,set:setNewPin1},
+                {label:"Neue PIN bestätigen",val:newPin2,set:setNewPin2},
+              ].map(({label,val,set})=>(
+                <div key={label} style={{marginBottom:8}}>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:3}}>{label}</div>
+                  <input type="password" maxLength={4} value={val} onChange={e=>set(e.target.value)}
+                    placeholder="••••"
+                    style={{...S.input,textAlign:"center",fontSize:18,letterSpacing:6}}/>
+                </div>
+              ))}
+              <div style={{display:"flex",gap:8,marginTop:4}}>
+                <button onClick={()=>{setShowPinChange(false);setOldPin("");setNewPin1("");setNewPin2("");setPinMsg("");}}
+                  style={{flex:1,padding:"9px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                  Abbrechen
+                </button>
+                <button onClick={changePIN}
+                  style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
+                  PIN speichern
+                </button>
+              </div>
+              {pinMsg&&<div style={{fontSize:11,color:pinMsg.startsWith("✅")?C.mintDark:C.red,marginTop:8,textAlign:"center",fontWeight:600}}>{pinMsg}</div>}
+            </div>
+          )}
         </div>
 
         {/*     */}
@@ -2239,7 +2293,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
   );
 }
 
-function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab }) {
+function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab, userKey, safeUsers }) {
 
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
   const todayStr = today();
@@ -2279,10 +2333,12 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                 </div>
                 
               </button>
-              <button onClick={()=>setDeleteConfirm(emp.key)}
-                style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
-                <span style={{fontSize:13,color:C.red,fontWeight:700}}>del</span>
-              </button>
+              {(emp.role!=="Admin" || userKey==="yeaji") && (
+                <button onClick={()=>setDeleteConfirm(emp.key)}
+                  style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
+                  <span style={{fontSize:13,color:C.red,fontWeight:700}}>del</span>
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -2377,7 +2433,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
 
 //  ADMIN ANTRGE VIEW 
 //  ANTRGE CARD ( ) 
-function AntraegeTab({ antraege, setAntraege, tauschAntraege, absagenList, setAbsagenList, records, setRecords, aTab, setATab, openAId, setOpenAId }) {
+function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege, absagenList, setAbsagenList, records, setRecords, aTab, setATab, openAId, setOpenAId, userKey }) {
   const nList = Array.isArray(antraege) ? antraege : [];
   const tList = Array.isArray(tauschAntraege) ? tauschAntraege : [];
   const abList = Array.isArray(absagenList) ? absagenList : [];
@@ -2434,12 +2490,24 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, absagenList, setAb
           ))}
           {nList.filter(a=>a.status!=="offen").length>0&&(
             <div style={{marginTop:12}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>Bearbeitet</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{fontSize:10,fontWeight:700,color:C.muted}}>Bearbeitet</div>
+                {userKey==="yeaji"&&<button onClick={()=>setAntraege([])}
+                  style={{fontSize:9,padding:"3px 8px",borderRadius:6,border:"1px solid "+C.red,background:C.redLight,color:C.red,cursor:"pointer",fontWeight:700}}>
+                  Alle löschen
+                </button>}
+              </div>
               {nList.filter(a=>a.status!=="offen").map(a=>(
-                <NachtragCard key={a.id} a={a} isOpen={openAId===a.id}
-                  onToggle={()=>setOpenAId(openAId===a.id?null:a.id)}
-                  onDecide={(ok)=>decideNachtrag(a,ok)}
-                  onReopen={()=>reopenNachtrag(a.id)}/>
+                <div key={a.id} style={{position:"relative"}}>
+                  <NachtragCard a={a} isOpen={openAId===a.id}
+                    onToggle={()=>setOpenAId(openAId===a.id?null:a.id)}
+                    onDecide={(ok)=>decideNachtrag(a,ok)}
+                    onReopen={()=>reopenNachtrag(a.id)}/>
+                  {userKey==="yeaji"&&<button onClick={()=>setAntraege(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==a.id))}
+                    style={{position:"absolute",top:8,right:8,fontSize:10,padding:"2px 7px",borderRadius:6,border:"1px solid "+C.border,background:C.redLight,color:C.red,cursor:"pointer"}}>
+                    del
+                  </button>}
+                </div>
               ))}
             </div>
           )}
@@ -2449,6 +2517,10 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, absagenList, setAb
       {aTab==="tausch"&&(
         <div>
           {tList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Schichttausch-Antraege</div>}
+          {userKey==="yeaji"&&tList.length>0&&<button onClick={()=>setTauschAntraege([])}
+            style={{fontSize:9,padding:"3px 8px",borderRadius:6,border:"1px solid "+C.red,background:C.redLight,color:C.red,cursor:"pointer",fontWeight:700,marginBottom:8,display:"block"}}>
+            Alle Tausch-Anträge löschen
+          </button>}
           {tList.map(a=>{
             const isOpen=openAId==="t_"+a.id;
             const offen=a.status==="ausstehend_manager"||a.status==="partner_ok";
@@ -2486,6 +2558,10 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, absagenList, setAb
       {aTab==="absage"&&(
         <div>
           {abList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Absagen</div>}
+          {userKey==="yeaji"&&abList.length>0&&<button onClick={()=>setAbsagenList([])}
+            style={{fontSize:9,padding:"3px 8px",borderRadius:6,border:"1px solid "+C.red,background:C.redLight,color:C.red,cursor:"pointer",fontWeight:700,marginBottom:8,display:"block"}}>
+            Alle Absagen löschen
+          </button>}
           {abList.filter(a=>a.status==="offen").map(a=>{
             const isOpen=openAId==="ab_"+a.id;
             return(
@@ -3613,6 +3689,8 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           setDeleteConfirm={setDeleteConfirm}
           uTab={uTab}
           setUTab={setUTab}
+          userKey={userKey}
+          safeUsers={safeUsers}
         />
       )}
 
@@ -3653,6 +3731,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           antraege={antraege}
           setAntraege={setAntraege}
           tauschAntraege={tauschAntraege}
+          setTauschAntraege={setTauschAntraege}
           absagenList={absagenList}
           setAbsagenList={setAbsagenList}
           records={records}
@@ -3661,6 +3740,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           setATab={setATab}
           openAId={openAId}
           setOpenAId={setOpenAId}
+          userKey={userKey}
         />
       )}
 
