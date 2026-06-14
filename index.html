@@ -1090,7 +1090,6 @@ function EinspringenView({ userName }) {
 
       {offene.length === 0 ? (
         <div style={{...S.card,textAlign:"center",padding:"32px 16px"}}>
-          <div style={{fontSize:28,marginBottom:8}}>{"🎉"}</div>
           <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Keine offenen Schichten</div>
           <div style={{fontSize:11,color:C.muted}}>Aktuell sind alle Schichten besetzt.</div>
         </div>
@@ -2195,7 +2194,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 {mDiff!==null&&<span style={{fontSize:11,fontWeight:700,color:mDiff>=0?C.mintDark:C.red}}>{(mDiff>=0?"+":"")+mDiff.toFixed(1)+"h"}</span>}
-                <span style={{fontSize:11,color:C.muted}}>{isOpen?"[-]":"[+]"}</span>
+                <span style={{fontSize:11,color:C.muted}}>{isOpen?"▲":"▼"}</span>
               </div>
             </button>
             {isOpen&&(
@@ -2278,7 +2277,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                   </div>
                   <div style={{fontSize:10,color:C.muted,marginTop:2}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
                 </div>
-                <span style={{fontSize:14,color:C.muted}}>{">"}</span>
+                
               </button>
               <button onClick={()=>setDeleteConfirm(emp.key)}
                 style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
@@ -2466,7 +2465,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, absagenList, setAb
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:sc,background:sb}}>{sl}</span>
-                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"[-]":"[+]"}</span>
+                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"▲":"▼"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -2499,7 +2498,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, absagenList, setAb
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:C.red,background:C.redLight}}>Offen</span>
-                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"[-]":"[+]"}</span>
+                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"▲":"▼"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -2796,7 +2795,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{shifts.length} Schichten</span>
-                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "A" : "V"}</span>
+                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "▲" : "▼"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -2870,7 +2869,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{dayEmps.length} Personen geplant</span>
-                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "A" : "V"}</span>
+                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "▲" : "▼"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -3518,7 +3517,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           </div>
           <div style={{display:"flex",alignItems:"center",gap:7}}>
             <span style={{fontSize:9,fontWeight:700,color:eColor}}>{eLabel}</span>
-            <span style={{fontSize:10,color:C.muted}}>{isOpen ? "A" : "V"}</span>
+            <span style={{fontSize:10,color:C.muted}}>{isOpen ? "▲" : "▼"}</span>
           </div>
         </button>
         {isOpen && (
@@ -3761,7 +3760,6 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             </div>
           ) : (
             <div style={{...S.card,textAlign:"center",padding:"24px 16px",marginBottom:14}}>
-              <div style={{fontSize:24,marginBottom:6}}>{"✅"}</div>
               <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Alles erledigt!</div>
               <div style={{fontSize:11,color:C.muted}}>{"Keine offenen Vorgänge."}</div>
             </div>
