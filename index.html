@@ -2106,208 +2106,6 @@ function StatistikTab({records,users}){
 
 
 // ── ÜBERSICHT DETAIL TAB ─────────────────────────────────────────────────────
-function UebersichtDetailTab({ emp, records, setRecords, getStatus, sColor, sBg, setDetailKey, setUsers, monthAccordion, setMonthAccordion }) {
-  if (!emp) return null;
-  const [delConfirm, setDelConfirm] = useState(null);
-
-  const empRecs = records.filter(r => r.user === emp.vorname);
-  const total = empRecs.filter(r => r.aus).reduce((a, r) => a + (stunden(r.ein, r.aus) || 0), 0);
-
-  const byMonth = {};
-  empRecs.forEach(r => {
-    const m = r.date.slice(0, 7);
-    if (!byMonth[m]) byMonth[m] = [];
-    byMonth[m].push(r);
-  });
-  const monthKeys = Object.keys(byMonth).sort((a, b) => b.localeCompare(a));
-  const monthLabel = m => {
-    const [y, mo] = m.split("-");
-    const mn = ["","Jan","Feb","Mar","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
-    return mn[parseInt(mo)] + " " + y;
-  };
-  const DAY = ["So","Mo","Di","Mi","Do","Fr","Sa"];
-
-  return (
-    <div style={{padding:"14px"}}>
-      {/* Delete confirm modal */}
-      {delConfirm && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-          <div style={{background:"#fff",borderRadius:18,padding:"24px 20px",width:"100%",maxWidth:320}}>
-            <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:8,textAlign:"center"}}>{"Eintrag löschen?"}</div>
-            <div style={{fontSize:12,color:C.muted,marginBottom:20,textAlign:"center"}}>{"Dieser Arbeitsnachweis wird dauerhaft gelöscht."}</div>
-            <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>setDelConfirm(null)}
-                style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
-                Abbrechen
-              </button>
-              <button onClick={()=>{setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>r.id!==delConfirm));setDelConfirm(null);}}
-                style={{flex:1,padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,"+C.red+",#A8432E)",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
-                Loeschen
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <button onClick={()=>setDetailKey(null)}
-        style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:13,fontWeight:700,marginBottom:12}}>
-        {"← Zurück"}
-      </button>
-
-      {/* Profile */}
-      <div style={{...S.card,display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
-        <div style={{width:52,height:52,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:17,color:"#fff"}}>
-          {emp.kuerzel}
-        </div>
-        <div style={{flex:1}}>
-          <div style={{fontSize:17,fontWeight:800,color:C.text}}>
-            {emp.vorname}{emp.nachname && <span style={{fontSize:13,fontWeight:400,color:C.muted}}> {emp.nachname}</span>}
-          </div>
-          <div style={{fontSize:11,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
-          <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:4,display:"inline-block",
-            color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>
-            {getStatus(emp.vorname)}
-          </span>
-        </div>
-      </div>
-
-      {/* Summary */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-        {[{l:"Std. gesamt",v:total.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
-          <div key={l} style={S.card}>
-            <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div>
-            <div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Contract hours */}
-      <div style={{...S.card,marginBottom:12}}>
-        <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:8}}>Vertragsstunden / Monat</div>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <input type="number" min="0" max="300" step="0.5"
-            defaultValue={emp.contractHours||0}
-            onBlur={e=>{
-              const h=parseFloat(e.target.value)||0;
-              setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>u.key===emp.key?{...u,contractHours:h}:u));
-            }}
-            style={{...S.input,width:90,textAlign:"center",fontSize:16,fontWeight:700}}/>
-          <div style={{fontSize:12,color:C.muted}}>Std/Monat</div>
-          {(emp.contractHours||0)>0&&(()=>{
-            const diff=total-(emp.contractHours||0);
-            return(
-              <div style={{marginLeft:"auto",textAlign:"right"}}>
-                <div style={{fontSize:13,fontWeight:800,color:diff>=0?C.mintDark:C.red}}>
-                  {diff>=0?"+":""}{diff.toFixed(1)}h
-                </div>
-                <div style={{fontSize:10,color:C.muted}}>{diff>=0?"Überstunden":"Fehlstunden"}</div>
-              </div>
-            );
-          })()}
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div style={{marginBottom:10,padding:"8px 10px",background:C.bg,borderRadius:9}}>
-        <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:6}}>
-          {[{c:C.mintLight,tc:C.mintDark,l:"Abgeschlossen"},{c:C.yellowLight,tc:C.yellow,l:"Läuft noch"}].map(({c,tc,l})=>(
-            <div key={l} style={{display:"flex",alignItems:"center",gap:5}}>
-              <div style={{width:12,height:12,borderRadius:3,background:c,border:"1.5px solid "+tc,flexShrink:0}}/>
-              <span style={{fontSize:10,color:C.muted}}>{l}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{display:"flex",gap:10,flexWrap:"wrap",borderTop:"1px solid "+C.border,paddingTop:6}}>
-          {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"Teenjoy"}].map(({init,l})=>(
-            <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
-              <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
-              <span style={{fontSize:10,color:C.muted}}>{l}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Monthly accordion */}
-      {empRecs.length===0?(
-        <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:13,padding:"24px"}}>Keine Eintraege.</div>
-      ):monthKeys.map(m=>{
-        const mRecs=byMonth[m];
-        const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-        const mDays=mRecs.filter(r=>r.aus).length;
-        const contract=emp.contractHours||0;
-        const diff=contract>0?mTotal-contract:null;
-        const isOpen=monthAccordion[m]!==false;
-        return(
-          <div key={m} style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
-            <button onClick={()=>setMonthAccordion(p=>({...p,[m]:!isOpen}))}
-              style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
-                display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:14,fontWeight:800,color:C.text}}>{monthLabel(m)}</span>
-                <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(1)}h</span>
-                <span style={{fontSize:10,color:C.muted}}>{mDays} Tage</span>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                {diff!==null&&(
-                  <span style={{fontSize:11,fontWeight:700,color:diff>=0?C.mintDark:C.red}}>
-                    {diff>=0?"+":""}{diff.toFixed(1)}h
-                  </span>
-                )}
-                <span style={{fontSize:12,color:C.muted}}>{isOpen ? "A" : "V"}</span>
-              </div>
-            </button>
-            {isOpen&&(
-              <div>
-                {contract>0&&(
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,
-                    borderTop:"1px solid "+C.border,borderBottom:"1px solid "+C.border}}>
-                    {[{l:"Geplant",v:contract+"h",bg:"#fff",vc:C.text},
-                      {l:"Geleistet",v:mTotal.toFixed(1)+"h",bg:C.mintLight,vc:C.mintDark}].map(({l,v,bg,vc})=>(
-                      <div key={l} style={{padding:"8px 14px",background:bg}}>
-                        <div style={{fontSize:9,color:C.muted,marginBottom:2}}>{l}</div>
-                        <div style={{fontSize:15,fontWeight:800,color:vc}}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {mRecs.sort((a,b)=>b.date.localeCompare(a.date)).map((r,i)=>(
-                  <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                    padding:"11px 14px",borderBottom:i<mRecs.length-1?"1px solid "+C.border:"none"}}>
-                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                      <div style={{width:36,height:36,borderRadius:9,
-                        background:r.aus?C.mintLight:C.yellowLight,
-                        display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                        <span style={{fontSize:9,color:C.muted,fontWeight:600}}>{DAY[new Date(r.date).getDay()]}</span>
-                        <span style={{fontSize:11,fontWeight:800,color:r.aus?C.mintDark:C.yellow}}>{filialInit(r.filiale)}</span>
-                      </div>
-                      <div>
-                        <div style={{fontSize:13,fontWeight:700,color:C.text}}>
-                          {new Date(r.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
-                          <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{r.filiale}</span>
-                        </div>
-                        <div style={{fontSize:12,color:C.muted,marginTop:1}}>
-                          {r.ein} - {r.aus||"läuft"}
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <div style={{fontSize:14,fontWeight:800,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</div>
-                      <button onClick={()=>setDelConfirm(r.id)}
-                        style={{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,
-                          background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                        <span style={{fontSize:13,color:C.red}}>{String.fromCodePoint(0x1F5D1)}</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 
 // ── ÜBERSICHT ALL TAB ────────────────────────────────────────────────────────
@@ -3094,6 +2892,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   const [deleteConfirm,setDeleteConfirm]=useState(null);
   const [erledigtExpanded,setErledigtExpanded]=useState({});
   const [monthAccordion,setMonthAccordion]=useState({});
+  const [delRecordConfirm,setDelRecordConfirm]=useState(null);
   const [showMgrSettings, setShowMgrSettings] = useState(false);
   const [aTab, setATab] = useState("nachtrag");
   const [openAId, setOpenAId] = useState(null);
@@ -3532,18 +3331,134 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       )}
 
       {tab==="uebersicht"&&detailKey&&(
-        <UebersichtDetailTab
-          emp={safeUsers.find(u=>u.key===detailKey)}
-          records={records}
-          setRecords={setRecords}
-          getStatus={getStatus}
-          sColor={sColor}
-          sBg={sBg}
-          setDetailKey={setDetailKey}
-          setUsers={setUsers}
-          monthAccordion={monthAccordion}
-          setMonthAccordion={setMonthAccordion}
-        />
+        {(()=>{
+          const emp = safeUsers.find(u=>u.key===detailKey);
+          if(!emp) return null;
+          const empRecs = records.filter(r=>r.user===emp.vorname);
+          const total = empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+          const byMonth={};
+          empRecs.forEach(r=>{const m=r.date.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(r);});
+          const monthKeys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+          const mn=["","Jan","Feb","Mar","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+          const DAY=["So","Mo","Di","Mi","Do","Fr","Sa"];
+          const contract=emp.contractHours||0;
+          const totalDiff=contract>0?total-contract:null;
+          return(
+            <div style={{padding:"14px"}}>
+              {delRecordConfirm&&(
+                <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+                  <div style={{background:"#fff",borderRadius:18,padding:"24px 20px",width:"100%",maxWidth:320}}>
+                    <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:8,textAlign:"center"}}>{"Eintrag löschen?"}</div>
+                    <div style={{fontSize:12,color:C.muted,marginBottom:20,textAlign:"center"}}>{"Dieser Eintrag wird dauerhaft gelöscht."}</div>
+                    <div style={{display:"flex",gap:10}}>
+                      <button onClick={()=>setDelRecordConfirm(null)}
+                        style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                        Abbrechen
+                      </button>
+                      <button onClick={()=>{setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>r.id!==delRecordConfirm));setDelRecordConfirm(null);}}
+                        style={{flex:1,padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,"+C.red+",#A8432E)",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
+                        {"Löschen"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <button onClick={()=>setDetailKey(null)}
+                style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:13,fontWeight:700,marginBottom:12}}>
+                {"< Zurück"}
+              </button>
+              <div style={{...S.card,display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+                <div style={{width:52,height:52,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:17,color:"#fff"}}>{emp.kuerzel}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:17,fontWeight:800,color:C.text}}>{emp.vorname}{emp.nachname&&<span style={{fontSize:13,fontWeight:400,color:C.muted}}>{" "+emp.nachname}</span>}</div>
+                  <div style={{fontSize:11,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
+                  <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:4,display:"inline-block",color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>{getStatus(emp.vorname)}</span>
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                {[{l:"Std. gesamt",v:total.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
+                  <div key={l} style={S.card}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div><div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div></div>
+                ))}
+              </div>
+              <div style={{...S.card,marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:8}}>{"Vertragsstunden / Monat"}</div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <input type="number" min="0" max="300" step="0.5" defaultValue={contract}
+                    onBlur={e=>{const h=parseFloat(e.target.value)||0;setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>u.key===emp.key?{...u,contractHours:h}:u));}}
+                    style={{...S.input,width:90,textAlign:"center",fontSize:16,fontWeight:700}}/>
+                  <div style={{fontSize:12,color:C.muted}}>Std/Monat</div>
+                  {totalDiff!==null&&(
+                    <div style={{marginLeft:"auto",textAlign:"right"}}>
+                      <div style={{fontSize:13,fontWeight:800,color:totalDiff>=0?C.mintDark:C.red}}>{(totalDiff>=0?"+":"")+totalDiff.toFixed(1)+"h"}</div>
+                      <div style={{fontSize:10,color:C.muted}}>{totalDiff>=0?"Mehrst.":"Fehlst."}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {empRecs.length===0?(
+                <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:13,padding:"24px"}}>Keine Eintraege.</div>
+              ):monthKeys.map(m=>{
+                const mRecs=byMonth[m];
+                const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+                const mDays=mRecs.filter(r=>r.aus).length;
+                const mDiff=contract>0?mTotal-contract:null;
+                const isOpen=monthAccordion[m]!==false;
+                const [y,mo]=m.split("-");
+                return(
+                  <div key={m} style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
+                    <button onClick={()=>setMonthAccordion(p=>({...p,[m]:!isOpen}))}
+                      style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:14,fontWeight:800,color:C.text}}>{mn[parseInt(mo)]+" "+y}</span>
+                        <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(1)+"h"}</span>
+                        <span style={{fontSize:10,color:C.muted}}>{mDays+" Tage"}</span>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        {mDiff!==null&&<span style={{fontSize:11,fontWeight:700,color:mDiff>=0?C.mintDark:C.red}}>{(mDiff>=0?"+":"")+mDiff.toFixed(1)+"h"}</span>}
+                        <span style={{fontSize:11,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                      </div>
+                    </button>
+                    {isOpen&&(
+                      <div>
+                        {contract>0&&(
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,borderTop:"1px solid "+C.border,borderBottom:"1px solid "+C.border}}>
+                            {[{l:"Geplant",v:contract+"h",bg:"#fff",vc:C.text},{l:"Geleistet",v:mTotal.toFixed(1)+"h",bg:C.mintLight,vc:C.mintDark}].map(({l,v,bg,vc})=>(
+                              <div key={l} style={{padding:"8px 14px",background:bg}}><div style={{fontSize:9,color:C.muted,marginBottom:2}}>{l}</div><div style={{fontSize:15,fontWeight:800,color:vc}}>{v}</div></div>
+                            ))}
+                          </div>
+                        )}
+                        {mRecs.sort((a,b)=>b.date.localeCompare(a.date)).map((r,i)=>(
+                          <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 14px",borderBottom:i<mRecs.length-1?"1px solid "+C.border:"none"}}>
+                            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                              <div style={{width:36,height:36,borderRadius:9,background:r.aus?C.mintLight:C.yellowLight,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                                <span style={{fontSize:9,color:C.muted,fontWeight:600}}>{DAY[new Date(r.date).getDay()]}</span>
+                                <span style={{fontSize:11,fontWeight:800,color:r.aus?C.mintDark:C.yellow}}>{filialInit(r.filiale)}</span>
+                              </div>
+                              <div>
+                                <div style={{fontSize:13,fontWeight:700,color:C.text}}>
+                                  {new Date(r.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                                  <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{r.filiale}</span>
+                                </div>
+                                <div style={{fontSize:12,color:C.muted,marginTop:1}}>{r.ein+" - "+(r.aus||"aktiv")}</div>
+                              </div>
+                            </div>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <div style={{fontSize:14,fontWeight:800,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</div>
+                              <button onClick={()=>setDelRecordConfirm(r.id)}
+                                style={{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,color:C.red,fontSize:13,fontWeight:700}}>
+                                del
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       )}
 
 
