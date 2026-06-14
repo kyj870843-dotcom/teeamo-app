@@ -2109,6 +2109,137 @@ function StatistikTab({records,users}){
 
 
 //  BERSICHT ALL TAB 
+function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sColor, sBg, setDetailKey, setUsers, monthAccordion, setMonthAccordion, delRecordConfirm, setDelRecordConfirm }) {
+  const emp = safeUsers.find(u=>u.key===empKey);
+  if (!emp) return null;
+
+  const empRecs = records.filter(r=>r.user===emp.vorname);
+  const total = empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+  const byMonth={};
+  empRecs.forEach(r=>{const m=r.date.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(r);});
+  const monthKeys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+  const mn=["","Jan","Feb","Mar","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
+  const DAY=["So","Mo","Di","Mi","Do","Fr","Sa"];
+  const contract=emp.contractHours||0;
+  const totalDiff=contract>0?total-contract:null;
+
+  return (
+    <div style={{padding:"14px"}}>
+      {delRecordConfirm&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+          <div style={{background:"#fff",borderRadius:18,padding:"24px 20px",width:"100%",maxWidth:320}}>
+            <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:8,textAlign:"center"}}>{"Eintrag l\u00F6schen?"}</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:20,textAlign:"center"}}>{"Dieser Eintrag wird dauerhaft gel\u00F6scht."}</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setDelRecordConfirm(null)}
+                style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                Abbrechen
+              </button>
+              <button onClick={()=>{setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>r.id!==delRecordConfirm));setDelRecordConfirm(null);}}
+                style={{flex:1,padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,"+C.red+",#A8432E)",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
+                {"L\u00F6schen"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <button onClick={()=>setDetailKey(null)}
+        style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:13,fontWeight:700,marginBottom:12}}>
+        {"< Zur\u00FCck"}
+      </button>
+      <div style={{...S.card,display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+        <div style={{width:52,height:52,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:17,color:"#fff"}}>{emp.kuerzel}</div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:17,fontWeight:800,color:C.text}}>{emp.vorname}{emp.nachname&&<span style={{fontSize:13,fontWeight:400,color:C.muted}}>{" "+emp.nachname}</span>}</div>
+          <div style={{fontSize:11,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
+          <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:4,display:"inline-block",color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>{getStatus(emp.vorname)}</span>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        {[{l:"Std. gesamt",v:total.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
+          <div key={l} style={S.card}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div><div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div></div>
+        ))}
+      </div>
+      <div style={{...S.card,marginBottom:12}}>
+        <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:8}}>Vertragsstunden / Monat</div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <input type="number" min="0" max="300" step="0.5" defaultValue={contract}
+            onBlur={e=>{const h=parseFloat(e.target.value)||0;setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>u.key===emp.key?{...u,contractHours:h}:u));}}
+            style={{...S.input,width:90,textAlign:"center",fontSize:16,fontWeight:700}}/>
+          <div style={{fontSize:12,color:C.muted}}>Std/Monat</div>
+          {totalDiff!==null&&(
+            <div style={{marginLeft:"auto",textAlign:"right"}}>
+              <div style={{fontSize:13,fontWeight:800,color:totalDiff>=0?C.mintDark:C.red}}>{(totalDiff>=0?"+":"")+totalDiff.toFixed(1)+"h"}</div>
+              <div style={{fontSize:10,color:C.muted}}>{totalDiff>=0?"Mehrst.":"Fehlst."}</div>
+            </div>
+          )}
+        </div>
+      </div>
+      {empRecs.length===0?(
+        <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:13,padding:"24px"}}>Keine Eintraege.</div>
+      ):monthKeys.map(m=>{
+        const mRecs=byMonth[m];
+        const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+        const mDays=mRecs.filter(r=>r.aus).length;
+        const mDiff=contract>0?mTotal-contract:null;
+        const isOpen=monthAccordion[m]!==false;
+        const [y,mo]=m.split("-");
+        return(
+          <div key={m} style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
+            <button onClick={()=>setMonthAccordion(p=>({...p,[m]:!isOpen}))}
+              style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:14,fontWeight:800,color:C.text}}>{mn[parseInt(mo)]+" "+y}</span>
+                <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(1)+"h"}</span>
+                <span style={{fontSize:10,color:C.muted}}>{mDays+" Tage"}</span>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                {mDiff!==null&&<span style={{fontSize:11,fontWeight:700,color:mDiff>=0?C.mintDark:C.red}}>{(mDiff>=0?"+":"")+mDiff.toFixed(1)+"h"}</span>}
+                <span style={{fontSize:11,color:C.muted}}>{isOpen?"[-]":"[+]"}</span>
+              </div>
+            </button>
+            {isOpen&&(
+              <div>
+                {contract>0&&(
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,borderTop:"1px solid "+C.border,borderBottom:"1px solid "+C.border}}>
+                    {[{l:"Geplant",v:contract+"h",bg:"#fff",vc:C.text},{l:"Geleistet",v:mTotal.toFixed(1)+"h",bg:C.mintLight,vc:C.mintDark}].map(({l,v,bg,vc})=>(
+                      <div key={l} style={{padding:"8px 14px",background:bg}}><div style={{fontSize:9,color:C.muted,marginBottom:2}}>{l}</div><div style={{fontSize:15,fontWeight:800,color:vc}}>{v}</div></div>
+                    ))}
+                  </div>
+                )}
+                {[...mRecs].sort((a,b)=>b.date.localeCompare(a.date)).map((r,i)=>(
+                  <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 14px",borderBottom:i<mRecs.length-1?"1px solid "+C.border:"none"}}>
+                    <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                      <div style={{width:36,height:36,borderRadius:9,background:r.aus?C.mintLight:C.yellowLight,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                        <span style={{fontSize:9,color:C.muted,fontWeight:600}}>{DAY[new Date(r.date).getDay()]}</span>
+                        <span style={{fontSize:11,fontWeight:800,color:r.aus?C.mintDark:C.yellow}}>{filialInit(r.filiale)}</span>
+                      </div>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700,color:C.text}}>
+                          {new Date(r.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
+                          <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{r.filiale}</span>
+                        </div>
+                        <div style={{fontSize:12,color:C.muted,marginTop:1}}>{r.ein+" - "+(r.aus||"aktiv")}</div>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{fontSize:14,fontWeight:800,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</div>
+                      <button onClick={()=>setDelRecordConfirm(r.id)}
+                        style={{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,color:C.red,fontSize:11,fontWeight:700}}>
+                        del
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab }) {
 
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
@@ -2247,6 +2378,162 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
 
 //  ADMIN ANTRGE VIEW 
 //  ANTRGE CARD ( ) 
+function AntraegeTab({ antraege, setAntraege, tauschAntraege, absagenList, setAbsagenList, records, setRecords, aTab, setATab, openAId, setOpenAId }) {
+  const nList = Array.isArray(antraege) ? antraege : [];
+  const tList = Array.isArray(tauschAntraege) ? tauschAntraege : [];
+  const abList = Array.isArray(absagenList) ? absagenList : [];
+  const nOffene = nList.filter(a=>a.status==="offen").length;
+  const tOffene = tList.filter(a=>a.status==="ausstehend_manager"||a.status==="partner_ok").length;
+  const abOffene = abList.filter(a=>a.status==="offen").length;
+
+  function decideNachtrag(a, ok) {
+    setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:ok?"genehmigt":"abgelehnt"}:x));
+    if (ok && !records.find(r=>r.user===a.user&&r.date===a.date&&r.typ==="nachtrag")) {
+      setRecords(prev=>[...(Array.isArray(prev)?prev:[]),{id:Date.now(),user:a.user,date:a.date,filiale:a.filiale,ein:a.ein,aus:a.aus,note:a.grund||"",typ:"nachtrag"}]);
+    }
+    if (!ok) {
+      setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>!(r.user===a.user&&r.date===a.date&&r.typ==="nachtrag")));
+    }
+    setOpenAId(null);
+  }
+  function reopenNachtrag(id) {
+    setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(a=>a.id===id?{...a,status:"offen"}:a));
+    setOpenAId(null);
+  }
+  function decideAbsage(a, ok) {
+    setAbsagenList(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:ok?"genehmigt":"abgelehnt"}:x));
+    setOpenAId(null);
+  }
+
+  const tabs = [
+    {id:"nachtrag", l:"Nachtrag", n:nOffene},
+    {id:"tausch", l:"Schichttausch", n:tOffene},
+    {id:"absage", l:"Absage", n:abOffene},
+  ];
+
+  return (
+    <div style={{padding:"14px"}}>
+      <div style={{display:"flex",gap:0,marginBottom:14,borderRadius:10,overflow:"hidden",border:"1px solid "+C.border}}>
+        {tabs.map(({id,l,n})=>(
+          <button key={id} onClick={()=>setATab(id)}
+            style={{flex:1,padding:"10px 2px",border:"none",cursor:"pointer",fontSize:10,fontWeight:700,
+              background:aTab===id?C.navy:"#fff",color:aTab===id?"#fff":C.muted,position:"relative"}}>
+            {l}
+            {n>0&&<span style={{position:"absolute",top:4,right:4,minWidth:14,height:14,borderRadius:99,background:C.red,color:"#fff",fontSize:8,fontWeight:800,display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{n}</span>}
+          </button>
+        ))}
+      </div>
+
+      {aTab==="nachtrag"&&(
+        <div>
+          {nList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Nachtraege</div>}
+          {nList.filter(a=>a.status==="offen").map(a=>(
+            <NachtragCard key={a.id} a={a} isOpen={openAId===a.id}
+              onToggle={()=>setOpenAId(openAId===a.id?null:a.id)}
+              onDecide={(ok)=>decideNachtrag(a,ok)}
+              onReopen={()=>reopenNachtrag(a.id)}/>
+          ))}
+          {nList.filter(a=>a.status!=="offen").length>0&&(
+            <div style={{marginTop:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>Bearbeitet</div>
+              {nList.filter(a=>a.status!=="offen").map(a=>(
+                <NachtragCard key={a.id} a={a} isOpen={openAId===a.id}
+                  onToggle={()=>setOpenAId(openAId===a.id?null:a.id)}
+                  onDecide={(ok)=>decideNachtrag(a,ok)}
+                  onReopen={()=>reopenNachtrag(a.id)}/>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {aTab==="tausch"&&(
+        <div>
+          {tList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Schichttausch-Antraege</div>}
+          {tList.map(a=>{
+            const isOpen=openAId==="t_"+a.id;
+            const offen=a.status==="ausstehend_manager"||a.status==="partner_ok";
+            const sc=a.status==="getauscht"?C.mintDark:a.status==="abgelehnt_manager"?C.red:C.yellow;
+            const sb=a.status==="getauscht"?C.mintLight:a.status==="abgelehnt_manager"?C.redLight:C.yellowLight;
+            const sl=a.status==="getauscht"?"Getauscht":a.status==="abgelehnt_manager"?"Abgelehnt":"Wartet";
+            return(
+              <div key={"t"+a.id} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden",border:"1.5px solid "+(offen?C.yellow:a.status==="getauscht"?C.mint:C.border)}}>
+                <button onClick={()=>setOpenAId(isOpen?null:"t_"+a.id)}
+                  style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{textAlign:"left"}}>
+                    <div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.initiator+" + "+a.partner}</div>
+                    <div style={{fontSize:11,color:C.muted}}>{a.initiatorDate+" mit "+a.partnerDate}</div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:sc,background:sb}}>{sl}</span>
+                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"[-]":"[+]"}</span>
+                  </div>
+                </button>
+                {isOpen&&(
+                  <div style={{borderTop:"1px solid "+C.border,padding:"12px 14px"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+                      <div><div style={{fontSize:9,color:C.muted}}>{a.initiator}</div><div style={{fontSize:12,fontWeight:700,color:C.text}}>{a.initiatorDate}</div><div style={{fontSize:10,color:C.muted}}>{a.initiatorFiliale}</div></div>
+                      <div><div style={{fontSize:9,color:C.muted}}>{a.partner}</div><div style={{fontSize:12,fontWeight:700,color:C.text}}>{a.partnerDate}</div><div style={{fontSize:10,color:C.muted}}>{a.partnerFiliale}</div></div>
+                    </div>
+                    {a.grund&&<div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px"}}>{a.grund}</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {aTab==="absage"&&(
+        <div>
+          {abList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Absagen</div>}
+          {abList.filter(a=>a.status==="offen").map(a=>{
+            const isOpen=openAId==="ab_"+a.id;
+            return(
+              <div key={"ab"+a.id} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden",border:"1.5px solid "+C.red}}>
+                <button onClick={()=>setOpenAId(isOpen?null:"ab_"+a.id)}
+                  style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{textAlign:"left"}}>
+                    <div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.userName||a.user}</div>
+                    <div style={{fontSize:11,color:C.muted}}>{a.date?new Date(a.date).toLocaleDateString("de-DE"):""}{a.filiale?" - "+a.filiale:""}</div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:C.red,background:C.redLight}}>Offen</span>
+                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"[-]":"[+]"}</span>
+                  </div>
+                </button>
+                {isOpen&&(
+                  <div style={{borderTop:"1px solid "+C.border,padding:"12px 14px"}}>
+                    {a.grund&&<div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>{a.grund}</div>}
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>decideAbsage(a,false)} style={{flex:1,padding:"9px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
+                      <button onClick={()=>decideAbsage(a,true)} style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:"linear-gradient(135deg,"+C.red+",#A8432E)",color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>Genehmigen</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {abList.filter(a=>a.status!=="offen").length>0&&(
+            <div style={{marginTop:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>Bearbeitet</div>
+              {abList.filter(a=>a.status!=="offen").map(a=>(
+                <div key={"abd"+a.id} style={{...S.card,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:700,color:C.text}}>{a.userName||a.user}</div>
+                    <div style={{fontSize:10,color:C.muted}}>{a.date?new Date(a.date).toLocaleDateString("de-DE"):""}</div>
+                  </div>
+                  <span style={{fontSize:10,fontWeight:700,color:a.status==="genehmigt"?C.mintDark:C.red}}>{a.status==="genehmigt"?"OK":"X"}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NachtragCard({ a, isOpen, onToggle, onDecide, onReopen }) {
   var sc = a.status==="genehmigt" ? C.mintDark : a.status==="abgelehnt" ? C.red : C.yellow;
   var sb = a.status==="genehmigt" ? C.mintLight : a.status==="abgelehnt" ? C.redLight : C.yellowLight;
@@ -3331,134 +3618,21 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       )}
 
       {tab==="uebersicht"&&detailKey&&(
-        {(()=>{
-          const emp = safeUsers.find(u=>u.key===detailKey);
-          if(!emp) return null;
-          const empRecs = records.filter(r=>r.user===emp.vorname);
-          const total = empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-          const byMonth={};
-          empRecs.forEach(r=>{const m=r.date.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(r);});
-          const monthKeys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
-          const mn=["","Jan","Feb","Mar","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
-          const DAY=["So","Mo","Di","Mi","Do","Fr","Sa"];
-          const contract=emp.contractHours||0;
-          const totalDiff=contract>0?total-contract:null;
-          return(
-            <div style={{padding:"14px"}}>
-              {delRecordConfirm&&(
-                <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-                  <div style={{background:"#fff",borderRadius:18,padding:"24px 20px",width:"100%",maxWidth:320}}>
-                    <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:8,textAlign:"center"}}>{"Eintrag l\u00F6schen?"}</div>
-                    <div style={{fontSize:12,color:C.muted,marginBottom:20,textAlign:"center"}}>{"Dieser Eintrag wird dauerhaft gel\u00F6scht."}</div>
-                    <div style={{display:"flex",gap:10}}>
-                      <button onClick={()=>setDelRecordConfirm(null)}
-                        style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
-                        Abbrechen
-                      </button>
-                      <button onClick={()=>{setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>r.id!==delRecordConfirm));setDelRecordConfirm(null);}}
-                        style={{flex:1,padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,"+C.red+",#A8432E)",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
-                        {"L\u00F6schen"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <button onClick={()=>setDetailKey(null)}
-                style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:13,fontWeight:700,marginBottom:12}}>
-                {"< Zur\u00FCck"}
-              </button>
-              <div style={{...S.card,display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
-                <div style={{width:52,height:52,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:17,color:"#fff"}}>{emp.kuerzel}</div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:17,fontWeight:800,color:C.text}}>{emp.vorname}{emp.nachname&&<span style={{fontSize:13,fontWeight:400,color:C.muted}}>{" "+emp.nachname}</span>}</div>
-                  <div style={{fontSize:11,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
-                  <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:4,display:"inline-block",color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>{getStatus(emp.vorname)}</span>
-                </div>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                {[{l:"Std. gesamt",v:total.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
-                  <div key={l} style={S.card}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div><div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div></div>
-                ))}
-              </div>
-              <div style={{...S.card,marginBottom:12}}>
-                <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:8}}>{"Vertragsstunden / Monat"}</div>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <input type="number" min="0" max="300" step="0.5" defaultValue={contract}
-                    onBlur={e=>{const h=parseFloat(e.target.value)||0;setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>u.key===emp.key?{...u,contractHours:h}:u));}}
-                    style={{...S.input,width:90,textAlign:"center",fontSize:16,fontWeight:700}}/>
-                  <div style={{fontSize:12,color:C.muted}}>Std/Monat</div>
-                  {totalDiff!==null&&(
-                    <div style={{marginLeft:"auto",textAlign:"right"}}>
-                      <div style={{fontSize:13,fontWeight:800,color:totalDiff>=0?C.mintDark:C.red}}>{(totalDiff>=0?"+":"")+totalDiff.toFixed(1)+"h"}</div>
-                      <div style={{fontSize:10,color:C.muted}}>{totalDiff>=0?"Mehrst.":"Fehlst."}</div>
-                    </div>
-                  )}
-                </div>
-              </div>
-              {empRecs.length===0?(
-                <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:13,padding:"24px"}}>Keine Eintraege.</div>
-              ):monthKeys.map(m=>{
-                const mRecs=byMonth[m];
-                const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-                const mDays=mRecs.filter(r=>r.aus).length;
-                const mDiff=contract>0?mTotal-contract:null;
-                const isOpen=monthAccordion[m]!==false;
-                const [y,mo]=m.split("-");
-                return(
-                  <div key={m} style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
-                    <button onClick={()=>setMonthAccordion(p=>({...p,[m]:!isOpen}))}
-                      style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        <span style={{fontSize:14,fontWeight:800,color:C.text}}>{mn[parseInt(mo)]+" "+y}</span>
-                        <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(1)+"h"}</span>
-                        <span style={{fontSize:10,color:C.muted}}>{mDays+" Tage"}</span>
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        {mDiff!==null&&<span style={{fontSize:11,fontWeight:700,color:mDiff>=0?C.mintDark:C.red}}>{(mDiff>=0?"+":"")+mDiff.toFixed(1)+"h"}</span>}
-                        <span style={{fontSize:11,color:C.muted}}>{isOpen?"\u25B2":"\u25BC"}</span>
-                      </div>
-                    </button>
-                    {isOpen&&(
-                      <div>
-                        {contract>0&&(
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,borderTop:"1px solid "+C.border,borderBottom:"1px solid "+C.border}}>
-                            {[{l:"Geplant",v:contract+"h",bg:"#fff",vc:C.text},{l:"Geleistet",v:mTotal.toFixed(1)+"h",bg:C.mintLight,vc:C.mintDark}].map(({l,v,bg,vc})=>(
-                              <div key={l} style={{padding:"8px 14px",background:bg}}><div style={{fontSize:9,color:C.muted,marginBottom:2}}>{l}</div><div style={{fontSize:15,fontWeight:800,color:vc}}>{v}</div></div>
-                            ))}
-                          </div>
-                        )}
-                        {mRecs.sort((a,b)=>b.date.localeCompare(a.date)).map((r,i)=>(
-                          <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 14px",borderBottom:i<mRecs.length-1?"1px solid "+C.border:"none"}}>
-                            <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                              <div style={{width:36,height:36,borderRadius:9,background:r.aus?C.mintLight:C.yellowLight,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                                <span style={{fontSize:9,color:C.muted,fontWeight:600}}>{DAY[new Date(r.date).getDay()]}</span>
-                                <span style={{fontSize:11,fontWeight:800,color:r.aus?C.mintDark:C.yellow}}>{filialInit(r.filiale)}</span>
-                              </div>
-                              <div>
-                                <div style={{fontSize:13,fontWeight:700,color:C.text}}>
-                                  {new Date(r.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
-                                  <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{r.filiale}</span>
-                                </div>
-                                <div style={{fontSize:12,color:C.muted,marginTop:1}}>{r.ein+" - "+(r.aus||"aktiv")}</div>
-                              </div>
-                            </div>
-                            <div style={{display:"flex",alignItems:"center",gap:8}}>
-                              <div style={{fontSize:14,fontWeight:800,color:r.aus?C.text:C.yellow}}>{stdLabel(r.ein,r.aus)}</div>
-                              <button onClick={()=>setDelRecordConfirm(r.id)}
-                                style={{width:28,height:28,borderRadius:7,border:"1px solid "+C.border,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,color:C.red,fontSize:13,fontWeight:700}}>
-                                del
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()}
+        <EmpDetailView
+          empKey={detailKey}
+          safeUsers={safeUsers}
+          records={records}
+          setRecords={setRecords}
+          getStatus={getStatus}
+          sColor={sColor}
+          sBg={sBg}
+          setDetailKey={setDetailKey}
+          setUsers={setUsers}
+          monthAccordion={monthAccordion}
+          setMonthAccordion={setMonthAccordion}
+          delRecordConfirm={delRecordConfirm}
+          setDelRecordConfirm={setDelRecordConfirm}
+        />}
       )}
 
 
@@ -3475,185 +3649,21 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       )}
 
       {/*  ANTRGE / ARCHIV  */}
-      {tab==="antraege"&&(()=>{
-        const nList=Array.isArray(antraege)?antraege:[];
-        const tList=Array.isArray(tauschAntraege)?tauschAntraege:[];
-        const abList=Array.isArray(absagenList)?absagenList:[];
-        const nOffene=nList.filter(a=>a.status==="offen").length;
-        const tOffene=tList.filter(a=>a.status==="ausstehend_manager"||a.status==="partner_ok").length;
-        const abOffene=abList.filter(a=>a.status==="offen").length;
-        function badge(n){return n>0?<span style={{position:"absolute",top:-4,right:-6,minWidth:16,height:16,borderRadius:99,background:C.red,color:"#fff",fontSize:9,fontWeight:800,display:"inline-flex",alignItems:"center",justifyContent:"center",padding:"0 3px"}}>{n}</span>:null;}
-        function renderNachtragCard(a){
-          const isOpen=openAId===a.id;
-          const done=a.status!=="offen";
-          const sc=a.status==="genehmigt"?C.mintDark:a.status==="abgelehnt"?C.red:C.yellow;
-          const sb=a.status==="genehmigt"?C.mintLight:a.status==="abgelehnt"?C.redLight:C.yellowLight;
-          const sl=a.status==="genehmigt"?"Genehmigt":a.status==="abgelehnt"?"Abgelehnt":"Offen";
-          return(
-            <div key={a.id} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden",border:"1.5px solid "+(a.status==="offen"?C.yellow:a.status==="genehmigt"?C.mint:C.border)}}>
-              <button onClick={()=>setOpenAId(isOpen?null:a.id)}
-                style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{textAlign:"left"}}>
-                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.user}</div>
-                  <div style={{fontSize:11,color:C.muted}}>{a.date?new Date(a.date).toLocaleDateString("de-DE"):""}{a.filiale?" - "+a.filiale:""}</div>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:sc,background:sb}}>{sl}</span>
-                  <span style={{fontSize:10,color:C.muted}}>{isOpen ? "A" : "V"}</span>
-                </div>
-              </button>
-              {isOpen&&(
-                <div style={{borderTop:"1px solid "+C.border,padding:"12px 14px"}}>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-                    <div><div style={{fontSize:9,color:C.muted}}>Datum</div><div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.date?new Date(a.date).toLocaleDateString("de-DE"):"-"}</div></div>
-                    <div><div style={{fontSize:9,color:C.muted}}>Filiale</div><div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.filiale||"-"}</div></div>
-                    <div><div style={{fontSize:9,color:C.muted}}>Einstempeln</div><div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.ein||"-"}</div></div>
-                    <div><div style={{fontSize:9,color:C.muted}}>Ausstempeln</div><div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.aus||"-"}</div></div>
-                  </div>
-                  {a.grund&&<div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>{a.grund}</div>}
-                  {!done?(
-                    <div style={{display:"flex",gap:8}}>
-                      <button onClick={()=>{setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"abgelehnt"}:x));setOpenAId(null);}}
-                        style={{flex:1,padding:"9px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
-                      <button onClick={()=>{setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"genehmigt"}:x));if(!records.find(r=>r.user===a.user&&r.date===a.date&&r.typ==="nachtrag")){setRecords(prev=>[...(Array.isArray(prev)?prev:[]),{id:Date.now(),user:a.user,date:a.date,filiale:a.filiale,ein:a.ein,aus:a.aus,note:a.grund||"",typ:"nachtrag"}]);}setOpenAId(null);}}
-                        style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>Genehmigen</button>
-                    </div>
-                  ):(
-                    <button onClick={()=>{setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"offen"}:x));setOpenAId(null);}}
-                      style={{width:"100%",padding:"8px",borderRadius:9,border:"1px solid "+C.yellow,background:C.yellowLight,color:"#b37400",fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                      Entscheidung \u00E4ndern
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        }
-        function renderTauschCard(a){
-          const isOpen=openAId==="t_"+a.id;
-          const sc=a.status==="getauscht"?C.mintDark:a.status==="abgelehnt_manager"?C.red:C.yellow;
-          const sb=a.status==="getauscht"?C.mintLight:a.status==="abgelehnt_manager"?C.redLight:C.yellowLight;
-          const sl=a.status==="getauscht"?"Getauscht":a.status==="abgelehnt_manager"?"Abgelehnt":"Wartet";
-          return(
-            <div key={"t"+a.id} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden",border:"1.5px solid "+(a.status==="ausstehend_manager"||a.status==="partner_ok"?C.yellow:a.status==="getauscht"?C.mint:C.border)}}>
-              <button onClick={()=>setOpenAId(isOpen?null:"t_"+a.id)}
-                style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{textAlign:"left"}}>
-                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.initiator} + {a.partner}</div>
-                  <div style={{fontSize:11,color:C.muted}}>{a.initiatorDate} mit {a.partnerDate}</div>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:sc,background:sb}}>{sl}</span>
-                  <span style={{fontSize:10,color:C.muted}}>{isOpen ? "A" : "V"}</span>
-                </div>
-              </button>
-              {isOpen&&(
-                <div style={{borderTop:"1px solid "+C.border,padding:"12px 14px"}}>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-                    <div><div style={{fontSize:9,color:C.muted}}>{a.initiator}</div><div style={{fontSize:12,fontWeight:700,color:C.text}}>{a.initiatorDate}</div><div style={{fontSize:10,color:C.muted}}>{a.initiatorFiliale}</div></div>
-                    <div><div style={{fontSize:9,color:C.muted}}>{a.partner}</div><div style={{fontSize:12,fontWeight:700,color:C.text}}>{a.partnerDate}</div><div style={{fontSize:10,color:C.muted}}>{a.partnerFiliale}</div></div>
-                  </div>
-                  {a.grund&&<div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>{a.grund}</div>}
-                </div>
-              )}
-            </div>
-          );
-        }
-        function renderAbsageCard(a){
-          const isOpen=openAId==="ab_"+a.id;
-          const sc=a.status==="genehmigt"?C.mintDark:a.status==="abgelehnt"?C.red:C.yellow;
-          const sb=a.status==="genehmigt"?C.mintLight:a.status==="abgelehnt"?C.redLight:C.yellowLight;
-          const sl=a.status==="genehmigt"?"Genehmigt":a.status==="abgelehnt"?"Abgelehnt":"Offen";
-          return(
-            <div key={"ab"+a.id} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden",border:"1.5px solid "+(a.status==="offen"?C.red:a.status==="genehmigt"?C.mint:C.border)}}>
-              <button onClick={()=>setOpenAId(isOpen?null:"ab_"+a.id)}
-                style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{textAlign:"left"}}>
-                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.userName||a.user}</div>
-                  <div style={{fontSize:11,color:C.muted}}>{a.date?new Date(a.date).toLocaleDateString("de-DE"):""}{a.filiale?" - "+a.filiale:""}</div>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:sc,background:sb}}>{sl}</span>
-                  <span style={{fontSize:10,color:C.muted}}>{isOpen ? "A" : "V"}</span>
-                </div>
-              </button>
-              {isOpen&&(
-                <div style={{borderTop:"1px solid "+C.border,padding:"12px 14px"}}>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-                    <div><div style={{fontSize:9,color:C.muted}}>Datum</div><div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.date?new Date(a.date).toLocaleDateString("de-DE"):"-"}</div></div>
-                    <div><div style={{fontSize:9,color:C.muted}}>Filiale</div><div style={{fontSize:13,fontWeight:700,color:C.text}}>{a.filiale||"-"}</div></div>
-                  </div>
-                  {a.grund&&<div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"8px 10px",marginBottom:10}}>{a.grund}</div>}
-                  {a.status==="offen"&&(
-                    <div style={{display:"flex",gap:8}}>
-                      <button onClick={()=>setAbsagenList(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"abgelehnt"}:x))}
-                        style={{flex:1,padding:"9px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
-                      <button onClick={()=>setAbsagenList(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"genehmigt"}:x))}
-                        style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:"linear-gradient(135deg,"+C.red+",#A8432E)",color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>Genehmigen</button>
-                    </div>
-                  )}
-                  {a.status!=="offen"&&(
-                    <button onClick={()=>setAbsagenList(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"offen"}:x))}
-                      style={{width:"100%",padding:"8px",borderRadius:9,border:"1px solid "+C.yellow,background:C.yellowLight,color:"#b37400",fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                      Entscheidung \u00E4ndern
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        }
-        return(
-          <div style={{padding:"14px"}}>
-            <div style={{display:"flex",gap:0,marginBottom:14,borderRadius:10,overflow:"hidden",border:"1px solid "+C.border}}>
-              {[{id:"nachtrag",l:"Nachtrag",n:nOffene},{id:"tausch",l:"Schichttausch",n:tOffene},{id:"absage",l:"Absage",n:abOffene}].map(({id,l,n})=>(
-                <button key={id} onClick={()=>setATab(id)}
-                  style={{flex:1,padding:"10px 2px",border:"none",cursor:"pointer",fontSize:10,fontWeight:700,
-                    background:aTab===id?C.navy:"#fff",color:aTab===id?"#fff":C.muted,position:"relative"}}>
-                  {l}
-                  {n>0&&<span style={{position:"absolute",top:4,right:4,minWidth:14,height:14,borderRadius:99,background:C.red,color:"#fff",fontSize:8,fontWeight:800,display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{n}</span>}
-                </button>
-              ))}
-            </div>
-            {aTab==="nachtrag"&&(
-              <div>
-                {nList.filter(a=>a.status==="offen").map(a=>renderNachtragCard(a))}
-                {nList.filter(a=>a.status!=="offen").length>0&&(
-                  <div style={{marginTop:12}}>
-                    <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>Bearbeitet</div>
-                    {nList.filter(a=>a.status!=="offen").map(a=>renderNachtragCard(a))}
-                  </div>
-                )}
-                {nList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Nachtraege</div>}
-              </div>
-            )}
-            {aTab==="tausch"&&(
-              <div>
-                {tList.filter(a=>a.status==="ausstehend_manager"||a.status==="partner_ok").map(a=>renderTauschCard(a))}
-                {tList.filter(a=>a.status!=="ausstehend_manager"&&a.status!=="partner_ok").length>0&&(
-                  <div style={{marginTop:12}}>
-                    <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>Bearbeitet</div>
-                    {tList.filter(a=>a.status!=="ausstehend_manager"&&a.status!=="partner_ok").map(a=>renderTauschCard(a))}
-                  </div>
-                )}
-                {tList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Schichttausch-Antraege</div>}
-              </div>
-            )}
-            {aTab==="absage"&&(
-              <div>
-                {abList.filter(a=>a.status==="offen").map(a=>renderAbsageCard(a))}
-                {abList.filter(a=>a.status!=="offen").length>0&&(
-                  <div style={{marginTop:12}}>
-                    <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>Bearbeitet</div>
-                    {abList.filter(a=>a.status!=="offen").map(a=>renderAbsageCard(a))}
-                  </div>
-                )}
-                {abList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Absagen</div>}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      {tab==="antraege"&&(
+        <AntraegeTab
+          antraege={antraege}
+          setAntraege={setAntraege}
+          tauschAntraege={tauschAntraege}
+          absagenList={absagenList}
+          setAbsagenList={setAbsagenList}
+          records={records}
+          setRecords={setRecords}
+          aTab={aTab}
+          setATab={setATab}
+          openAId={openAId}
+          setOpenAId={setOpenAId}
+        />
+      )}
 
       {/*  STATISTIK  */}
       {tab==="statistik"&&<StatistikTab records={records} users={users}/>}
@@ -3814,7 +3824,6 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       })()}
     </div>
   );
-}
 
 //  APP ROOT 
 function App(){
