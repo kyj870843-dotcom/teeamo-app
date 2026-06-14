@@ -1156,11 +1156,20 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   }
   function doRegister(){
     if(!regV.trim()){setRegErr("Vorname ist Pflichtfeld.");return;}
-    if(!/^\d{4}$/.test(regP)){setRegErr("PIN muss 4 Ziffern sein.");return;}
+    if(regP.length!==4){setRegErr("PIN muss genau 4 Ziffern sein.");return;}
+    if(!/^[0-9]{4}$/.test(regP)){setRegErr("PIN nur Ziffern (0-9).");return;}
     if(regP!==regP2){setRegErr("PINs stimmen nicht überein.");return;}
-    const vn=regV.trim(),nn=regN.trim(),key=vn.toLowerCase().replace(/[^a-z0-9가-힣]/g,"_").replace(/_+/g,"_").slice(0,20)+"_"+Date.now();
+    const vn=regV.trim();
+    const nn=regN.trim();
+    // Firebase-safe key: nur a-z, 0-9, _
+    const safeBase=vn.toLowerCase()
+      .replace(/[^a-z0-9]/g,"")
+      .replace(/_+/g,"_")
+      .slice(0,12)||"user";
+    const key=safeBase+"_"+Date.now();
     const isAdmin=isAdminName&&regRole==="Admin";
-    const newUser={key,vorname:vn,nachname:nn,emoji:em,kuerzel:vn.slice(0,2),role:isAdmin?"Admin":"Staff",isAdmin,infektionsschutz:null,contractHours:0};
+    const kuerzel=(vn.replace(/[^ -]/g,"").trim()||vn).slice(0,2)||"??";
+    const newUser={key,vorname:vn,nachname:nn,kuerzel,role:isAdmin?"Admin":"Staff",isAdmin,infektionsschutz:null,contractHours:0};
     savePinFn(key, regP);
     setUsers(prev=>[...(Array.isArray(prev)?prev:[]),newUser]);
     setRegV("");setRegN("");setRegP("");setRegP2("");setRegErr("");setRegRole("Staff");setPage("list");
