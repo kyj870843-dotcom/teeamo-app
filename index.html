@@ -57,6 +57,8 @@
 <script type="text/babel" data-presets="react">
 
 
+
+
 const { useState, useEffect, useRef, useCallback } = React;
 
 const C = {
@@ -1969,7 +1971,7 @@ function StatistikTab({records,users}){
                 <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:emp.emoji?18:12,color:"#fff",flexShrink:0}}>{emp.emoji||emp.kuerzel}</div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:800,color:C.text}}>{emp.emoji&&<span style={{marginRight:3}}>{emp.emoji}</span>}{emp.vorname}</div>
-                  <div style={{fontSize:9,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}{contract>0?` · Vertrag: ${contract}h`:""}</div>
+                  <div style={{fontSize:9,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}{contract>{"0?` \u00B7 Vertrag: $"}{contract}h`:""}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:18,fontWeight:800,color:C.mintDark}}>{total.toFixed(1)}<span style={{fontSize:10,color:C.muted}}> Std</span></div>
@@ -1999,7 +2001,7 @@ function StatistikTab({records,users}){
         <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV \u2013 \u00F6ffnet direkt in Excel"}</div>
         {[
           {title:"Stundennachweis (Details)",sub:"Jeder Tag \u00B7 Name \u00B7 Datum \u00B7 Filiale \u00B7 Ein/Aus \u00B7 Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
-          {title:"Monats\u00FCbersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin \u00B7 Gesamtstunden \u00B7 je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`Übersicht_${selMonth}`},
+          {title:"Monats\u00FCbersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin \u00B7 Gesamtstunden \u00B7 je Filiale",fnXlsx:()=>{"exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`\u00DCbersicht_$"}{selMonth}`},
         ].map(({title,sub,fnXlsx,fnCsv,file})=>(
           <div key={file} style={{background:"rgba(255,255,255,.07)",borderRadius:10,padding:"12px",marginBottom:8}}>
             <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{title}</div>
@@ -2767,11 +2769,11 @@ function DienstplanUploadView({ records, users }) {
     const dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
     if (!isPdf) setImgSrc(dataUrl);
 
-    const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
-    const promptText = `Du bist ein Assistent, der Dienstpläne analysiert. Analysiere diesen Dienstplan sehr sorgfältig.
+    const empNames = (Array.isArray(users)?users:[]).filter(u =>{" !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
+    const promptText = `Du bist ein Assistent, der Dienstpl\u00E4ne analysiert. Analysiere diesen Dienstplan sehr sorgf\u00E4ltig.
 
-WICHTIG: Erkenne nur Namen aus dieser exakten Liste (Groß-/Kleinschreibung ignorieren):
-${empNames}
+WICHTIG: Erkenne nur Namen aus dieser exakten Liste (Gro\u00DF-/Kleinschreibung ignorieren):
+$"}{empNames}
 
 Regeln:
 - Jeder Name in der Liste entspricht GENAU einem Mitarbeiter. Ordne gefundene Namen der Liste zu (auch bei leichten Schreibfehlern im Bild).
@@ -3742,6 +3744,8 @@ function App(){
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+
+
 
 
 </script>
