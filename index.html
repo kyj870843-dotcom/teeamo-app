@@ -37,7 +37,7 @@
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app);
 
-  // 전역으로 노출 (babel 스크립트에서 사용)
+  // expose globally
   window._fbDb = db;
   window._fbRef = ref;
   window._fbOnValue = onValue;
@@ -54,11 +54,7 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" data-presets="react">
-
-
-
-
+<script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
 const C = {
@@ -101,14 +97,27 @@ const INIT_USERS = [
   {key:"teddy",   vorname:"Teddy",   nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Te",role:"Admin",      pin:"9002",contractHours:0},
   {key:"yeaji",   vorname:"Yeaji",   nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Yj",role:"Admin",    pin:"9003",contractHours:0},
 ];
-const INIT_RECORDS = [];
+const INIT_RECORDS = [
+  {id:1, user:"Anna",   date:"2026-06-02",filiale:"TEEAMO Arkaden",     ein:"09:02",aus:"18:10",note:"",typ:"normal"},
+  {id:2, user:"Dayoung",date:"2026-06-02",filiale:"TEEAMO Aegidiimarkt",ein:"10:00",aus:"18:00",note:"",typ:"normal"},
+  {id:3, user:"Eunjin", date:"2026-06-03",filiale:"Teenjoy",            ein:"09:05",aus:"17:55",note:"",typ:"normal"},
+  {id:4, user:"Gayeon", date:"2026-06-03",filiale:"TEEAMO Arkaden",     ein:"09:00",aus:"18:00",note:"",typ:"normal"},
+  {id:5, user:"Jiwoo",  date:"2026-06-04",filiale:"TEEAMO Aegidiimarkt",ein:"09:10",aus:"17:50",note:"Stau",typ:"normal"},
+  {id:6, user:"Jiye",   date:"2026-06-04",filiale:"Teenjoy",            ein:"10:00",aus:"18:00",note:"",typ:"normal"},
+  {id:7, user:"Anna",   date:"2026-06-05",filiale:"TEEAMO Arkaden",     ein:"09:02",aus:null,   note:"",typ:"normal"},
+  {id:8, user:"Semi",   date:"2026-06-05",filiale:"Teenjoy",            ein:"09:00",aus:"17:00",note:"",typ:"normal"},
+  {id:9, user:"Saemee", date:"2026-06-08",filiale:"TEEAMO Arkaden",     ein:"09:00",aus:"18:00",note:"",typ:"normal"},
+  {id:10,user:"Yujin",  date:"2026-06-09",filiale:"TEEAMO Aegidiimarkt",ein:"09:05",aus:null,   note:"",typ:"normal"},
+];
 const INIT_ANTRAEGE = [];
 
+//  PIN LocalStorage  () 
 function lsGet(key, fallback) {
   try { const v=localStorage.getItem(key); if(v!==null) return JSON.parse(v); return fallback; } catch { return fallback; }
 }
 function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
 
+// API     localStorage 
 function usePersist(lsKey, init) {
   const [state, setState] = React.useState(() => lsGet(lsKey, init));
   const setAndSave = React.useCallback((updater) => {
@@ -121,10 +130,13 @@ function usePersist(lsKey, init) {
   return [state, setAndSave];
 }
 
+// PIN   
 function usePinStore() {
+  // PIN  localStorage  
   function getPin(userKey) { return lsGet(`pin_${userKey}`, null); }
   function setPin(userKey, pin) { lsSet(`pin_${userKey}`, pin); }
   function initPins(users) {
+    // INIT_USERS PIN LS  ( 1)
     users.forEach(u => {
       if (!lsGet(`pin_${u.key}`, null)) lsSet(`pin_${u.key}`, u.pin);
     });
@@ -132,6 +144,7 @@ function usePinStore() {
   return { getPin, setPin, initPins };
 }
 
+//  Firebase    () 
 function useFirebase(path, fallback) {
   const [data, setData] = useState(fallback);
   const [ready, setReady] = useState(false);
@@ -146,12 +159,14 @@ function useFirebase(path, fallback) {
       const fbOnValue = window._fbOnValue;
       if (!db || !fbRef || !fbOnValue) return false;
       const r = fbRef(db, path);
+      // onValue returns unsubscribe fn
       unsubRef.current = fbOnValue(r, snap => {
         if (cancelled) return;
         const val = snap.val();
         if (val === null) {
           setData(fallback);
         } else if (Array.isArray(fallback)) {
+          // Firebase stores arrays as objects with numeric/string keys
           setData(Object.values(val));
         } else {
           setData(val);
@@ -178,12 +193,14 @@ function useFirebase(path, fallback) {
     return () => { cancelled=true; clearInterval(iv); if(unsubRef.current) unsubRef.current(); };
   }, [path]);
 
+  // setter: Firebase   onValue  UI 
   function fbWrite(next) {
     if (!window._fbDb || !window._fbRef || !window._fbSet) return;
     let toSave;
     if (Array.isArray(next)) {
       if (next.length === 0) { toSave = null; }
       else {
+        // users path: PIN Firebase  
         const sanitize = path === "users"
           ? v => { const {pin:_, ...rest} = v; return rest; }
           : v => v;
@@ -199,6 +216,7 @@ function useFirebase(path, fallback) {
   }
 
   function setter(updater) {
+    //  :    + Firebase 
     setData(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       fbWrite(next);
@@ -206,6 +224,7 @@ function useFirebase(path, fallback) {
     });
   }
 
+  //    (path/field  ,   )
   function fbUpdateField(subPath, value) {
     if (!window._fbDb || !window._fbRef || !window._fbSet) return;
     window._fbSet(window._fbRef(window._fbDb, path + "/" + subPath), value)
@@ -215,6 +234,7 @@ function useFirebase(path, fallback) {
   return [data, setter, ready, fbUpdateField];
 }
 
+//   
 function pad(n) { return String(n).padStart(2, "0"); }
 function useNow() {
   const [t, setT] = useState(new Date());
@@ -229,6 +249,7 @@ function stunden(ein, aus) {
 }
 function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "\u2013" : h.toFixed(1) + "h"; }
 function today() {
+  //    (CET=UTC+1, CEST=UTC+2  )
   return new Date().toLocaleDateString("sv-SE", {timeZone:"Europe/Berlin"});
 }
 
@@ -253,10 +274,15 @@ const FILIAL_COLOR = {
   C:{ bg:"#FAF4E8", text:"#B38B3A", border:"#E8D4A8", dot:"#C8A96A" },
 };
 
+//  Dienstplan: CSV   plan.png    
 function useDienstplanCSV() {
+  // CSV/        (  props   )
   return { plan: {}, sheetMonth: null, error: null, lastFetch: null, refresh: () => {} };
 }
 
+
+
+//  KALENDER VIEW (plan.png   +  ) 
 function KalenderView({ csvCtx, userName, records, users }) {
   const [imgErr, setImgErr] = useState(false);
   const [scale, setScale] = useState(1);
@@ -270,19 +296,25 @@ function KalenderView({ csvCtx, userName, records, users }) {
   const [schedule] = useFirebase("schedule", {});
   const [planImg] = useFirebase("planImage", null);
 
+  // Firebase  schedule   
   function normalizeShifts(val) {
     if (!val) return [];
     if (Array.isArray(val)) return val;
+    // Firebase {0:{...}, 1:{...}}   
     return Object.values(val);
   }
 
+  // schedule  :   
   const myShifts = React.useMemo(() => {
     if (!userName || !schedule) return [];
     const keys = Object.keys(schedule);
+    // 1.  
     if (schedule[userName]) return normalizeShifts(schedule[userName]);
+    // 2.  
     const lower = userName.toLowerCase();
     const k2 = keys.find(k => k.toLowerCase() === lower);
     if (k2) return normalizeShifts(schedule[k2]);
+    // 3.     (firstName) 
     const firstName = userName.split(" ")[0];
     if (firstName !== userName) {
       if (schedule[firstName]) return normalizeShifts(schedule[firstName]);
@@ -291,6 +323,8 @@ function KalenderView({ csvCtx, userName, records, users }) {
     }
     return [];
   }, [schedule, userName]);
+
+  // viewport   (    )
 
   function clampOffset(ox, oy, sc, el) {
     if (!el) return { x: ox, y: oy };
@@ -394,7 +428,7 @@ function KalenderView({ csvCtx, userName, records, users }) {
         </div>
       )}
 
-      
+      {/*   */}
       {userName && myShifts.length > 0 && (
         <MeineSchichtenSection userName={userName} myShifts={myShifts} records={records} users={users}/>
       )}
@@ -410,6 +444,7 @@ function KalenderView({ csvCtx, userName, records, users }) {
   );
 }
 
+//      
 function parseMinutes(timeStr) {
   if (!timeStr) return null;
   const [h, m] = timeStr.split(":").map(Number);
@@ -431,6 +466,7 @@ function getShiftStatus(shift, actualRec) {
   return actual >= planned ? "gearbeitet" : "pr\u00FCfen";
 }
 
+//  SCHICHTTAUSCH MODAL 
 function SchichttauschModal({ userName, myShifts, users, onClose }) {
   const [step, setStep] = useState(1);
   const [myShift, setMyShift] = useState(null);
@@ -445,6 +481,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
   const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
   const [, setNotifications] = useFirebase("notifications", {});
 
+  //   
   useEffect(() => {
     document.body.style.overflow = "hidden";
     document.body.style.position = "fixed";
@@ -494,6 +531,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
       grund, partnerBestaetigt: false, ts: Date.now(),
     };
     setTauschAntraege(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
+    //          
     if (window._fbDb && window._fbRef && window._fbSet) {
       window._fbSet(window._fbRef(window._fbDb, `notifications/tausch_anfrage_${id}`), {
         type: "tausch_anfrage", targetUser: targetUser.vorname,
@@ -521,14 +559,14 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
         display:"flex", flexDirection:"column",
         boxShadow:"0 -4px 24px rgba(0,0,0,.15)",
       }}>
-        
+        {/*   */}
         <div
           onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}
           style={{padding:"14px 22px 8px",cursor:"ns-resize",flexShrink:0,touchAction:"none"}}>
           <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto"}}/>
         </div>
 
-        
+        {/*  */}
         <div style={{padding:"0 22px 10px",flexShrink:0}}>
           <div style={{display:"flex",gap:4,marginBottom:10}}>
             {steps.map((s,i)=>(
@@ -545,7 +583,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
           </div>
         </div>
 
-        
+        {/*   */}
         <div style={{flex:1,overflowY:"auto",padding:"0 22px",WebkitOverflowScrolling:"touch"}}>
           {step===1&&myShifts.map((s,i)=>{
             const d=s.d||s.date; const f=s.f||s.filiale; const t=s.t||s.time;
@@ -558,7 +596,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                 <div style={{fontSize:12,fontWeight:700,color:myShift===s?C.mintDark:C.text}}>
                   {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                 </div>
-                <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                <div style={{fontSize:10,color:C.muted}}>{f}{t?` \u00B7 ${t}`:""}</div>
               </button>
             );
           })}
@@ -592,7 +630,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                     <div style={{fontSize:12,fontWeight:700,color:targetShift===s?C.mintDark:C.text}}>
                       {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                     </div>
-                    <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                    <div style={{fontSize:10,color:C.muted}}>{f}{t?` \u00B7 ${t}`:""}</div>
                   </button>
                 );
               })
@@ -634,7 +672,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
           )}
         </div>
 
-        
+        {/*   */}
         <div style={{padding:"12px 22px",paddingBottom:"max(16px,env(safe-area-inset-bottom))",
           borderTop:`1px solid ${C.border}`,flexShrink:0,display:"flex",gap:9}}>
           <button onClick={()=>step===1?onClose():setStep(s=>s-1)}
@@ -656,6 +694,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
     </div>
   );
 }
+//  MEINE SCHICHTEN SECTION 
 function MeineSchichtenSection({ userName, myShifts, records, users }) {
   const [showTausch, setShowTausch] = useState(false);
   const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
@@ -663,10 +702,12 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
   const [notifications, setNotifications] = useFirebase("notifications", {});
   const [schedule, setSchedule] = useFirebase("schedule", {});
 
+  //   Tausch  
   const pendingTausch = Object.entries(notifications||{})
     .filter(([,n]) => n.type==="tausch_anfrage" && n.targetUser===userName && !n.gelesen);
 
   function bestaetigenTausch(notifKey, antragId, ok) {
+    //   
     if (window._fbDb && window._fbRef && window._fbSet) {
       window._fbSet(window._fbRef(window._fbDb, `notifications/${notifKey}/gelesen`), true)
         .catch(e => console.error(e));
@@ -683,13 +724,17 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
       return;
     }
 
+    //    schedule  (  )
     if (window._fbDb && window._fbRef && window._fbSet && window._fbOnValue) {
+      // once unsubscribe  (onlyOnce: true)
       window._fbOnValue(window._fbRef(window._fbDb, "schedule"), snap => {
         const sched = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
+        // initiator:       
         sched[antrag.initiator] = (sched[antrag.initiator]||[])
           .filter(s => (s.d||s.date) !== antrag.initiatorDate);
         sched[antrag.initiator] = [...sched[antrag.initiator],
           {d: antrag.partnerDate, f: antrag.partnerFiliale, t: antrag.partnerTime||null}];
+        // partner:     initiator  
         sched[antrag.partner] = (sched[antrag.partner]||[])
           .filter(s => (s.d||s.date) !== antrag.partnerDate);
         sched[antrag.partner] = [...sched[antrag.partner],
@@ -700,10 +745,12 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
       }, {onlyOnce: true});
     }
 
+    //   getauscht
     setTauschAntraege(prev => (Array.isArray(prev)?prev:[]).map(a =>
       a.id===antragId ? {...a, status:"getauscht", partnerBestaetigt:true} : a
     ));
 
+    //  2    (teddy + yeaji)
     if (window._fbDb && window._fbRef && window._fbSet) {
       const ts = Date.now();
       ["teddy","yeaji"].forEach(mgr => {
@@ -719,6 +766,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
     }
   }
 
+  //  (schichten + antrge)   
   const myAntraege = (Array.isArray(antraege)?antraege:[]).filter(a => a.user === userName);
   const allDates = [...new Set([
     ...myShifts.map(s => s.d || s.date),
@@ -739,7 +787,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
         </button>
       </div>
 
-      
+      {/*   Tausch   */}
       {pendingTausch.map(([key, n]) => (
         <div key={key} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.mint}`,background:C.mintLight}}>
           <div style={{fontSize:12,fontWeight:800,color:C.mintDark,marginBottom:4}}>
@@ -775,17 +823,17 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
 
         return (
           <div key={d} style={{marginBottom:14}}>
-            
+            {/*   */}
             <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:6}}>
               {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"2-digit"})}
             </div>
 
-            
+            {/*   */}
             {shift && (
               <ShiftRow s={shift} userName={userName} records={records} setNotifications={setNotifications}/>
             )}
 
-            
+            {/* shift    */}
             {!shift && rec && (
               <div style={{padding:"9px 12px",borderRadius:10,marginBottom:5,
                 background:C.mintLight,border:`1px solid ${C.mint}`,
@@ -795,7 +843,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
               </div>
             )}
 
-            
+            {/*  Antrge  */}
             {antr.map((a,i) => (
               <div key={i} style={{marginLeft:12,paddingLeft:10,borderLeft:`2px solid ${C.border}`,marginBottom:4}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
@@ -824,6 +872,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
   );
 }
 
+//  ABSAGEN MODAL 
 function AbsagenModal({ shift, userName, onClose, onSubmit }) {
   const [grund, setGrund] = useState("");
   const [err, setErr] = useState("");
@@ -846,7 +895,7 @@ function AbsagenModal({ shift, userName, onClose, onSubmit }) {
           <div style={{fontSize:12,fontWeight:700,color:C.red}}>
             {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{f}{t?` · ${t}`:""}</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{f}{t?` \u00B7 ${t}`:""}</div>
         </div>
         <div style={{marginBottom:14}}>
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund <span style={{color:C.red}}>*</span></div>
@@ -881,7 +930,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   useEffect(() => {
     if (status === "pr\u00FCfen" && actualRec) {
       const zustaendig = f === "Teenjoy" ? "teddy" : "yeaji";
-      const notifKey = `prüfen_${userName}_${d}`;
+      const notifKey = `pr\u00FCfen_${userName}_${d}`;
       setNotifications(prev => {
         if (prev && prev[notifKey]) return prev;
         return { ...(prev||{}), [notifKey]: {
@@ -896,24 +945,27 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const alreadyAbgesagt = (Array.isArray(absagenList)?absagenList:[])
     .find(a => a.userName === userName && a.date === d);
 
+  // Tausch    (initiator  A)
   const myTausch = (Array.isArray(tauschAntraege)?tauschAntraege:[])
     .find(t => t.initiator === userName && t.initiatorDate === d);
+  // (B) :   tausch   
   const partnerTausch = !myTausch ? (Array.isArray(tauschAntraege)?tauschAntraege:[])
     .find(t => t.partner === userName && t.partnerDate === d) : null;
 
   const tauschLabel = myTausch ? ({
-    ausstehend_bestaetigung: `🔄 Tausch-Anfrage an ${myTausch.partner} · Warte auf Bestätigung`,
-    ausstehend_manager:      `🔄 Tausch wartet auf Manager-Genehmigung`,
-    getauscht:               `✅ Getauscht mit ${myTausch.partner}`,
-    abgelehnt_partner:       `❌ Tausch von ${myTausch.partner} abgelehnt`,
+    ausstehend_bestaetigung: `\uD83D\uDD04 Tausch-Anfrage an ${myTausch.partner} \u00B7 Warte auf Best\u00E4tigung`,
+    ausstehend_manager:      `\uD83D\uDD04 Tausch wartet auf Manager-Genehmigung`,
+    getauscht:               `\u2705 Getauscht mit ${myTausch.partner}`,
+    abgelehnt_partner:       `\u274C Tausch von ${myTausch.partner} abgelehnt`,
   }[myTausch.status] || null) : partnerTausch ? ({
-    ausstehend_bestaetigung: `🔄 Tausch angefragt von ${partnerTausch.initiator} · Deine Antwort ausstehend`,
-    getauscht:               `✅ Getauscht mit ${partnerTausch.initiator}`,
-    abgelehnt_partner:       `❌ Tausch abgelehnt`,
+    ausstehend_bestaetigung: `\uD83D\uDD04 Tausch angefragt von ${partnerTausch.initiator} \u00B7 Deine Antwort ausstehend`,
+    getauscht:               `\u2705 Getauscht mit ${partnerTausch.initiator}`,
+    abgelehnt_partner:       `\u274C Tausch abgelehnt`,
   }[partnerTausch.status] || null) : null;
 
   function handleAbsagen(antrag) {
     setAbsagenList(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
+    //  2   
     const ts = Date.now();
     if (window._fbDb && window._fbRef && window._fbSet) {
       ["teddy","yeaji"].forEach(mgr => {
@@ -927,6 +979,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
     }
   }
 
+  //   
   const badge = {
     gearbeitet: { color: C.mintDark, bg: C.mintLight, label: "Gearbeitet" },
     pr\u00FCfen:     { color: C.yellow,   bg: C.yellowLight,label: "Pr\u00FCfen"    },
@@ -939,14 +992,14 @@ function ShiftRow({ s, userName, records, setNotifications }) {
       <div style={{borderRadius:10,overflow:"hidden",marginBottom:6,
         border:`1px solid ${alreadyAbgesagt?C.red:status==="aktiv"||status==="gearbeitet"?C.mint:C.border}`}}>
 
-        
+        {/*    */}
         <div onClick={()=>{ if(status==="ausstehend"&&!alreadyAbgesagt) setShowAbsagen(true); }}
           style={{display:"flex",alignItems:"center",justifyContent:"space-between",
             padding:"10px 12px",
             background:alreadyAbgesagt?C.redLight:C.card,
             cursor:status==="ausstehend"&&!alreadyAbgesagt?"pointer":"default"}}>
           <div style={{fontSize:12,fontWeight:600,color:alreadyAbgesagt?C.red:C.text}}>
-            {f}{t ? ` · ${t}` : ""}
+            {f}{t ? ` \u00B7 ${t}` : ""}
             {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>{"\uD83D\uDEAB Absage "}{alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
           {tauschLabel && <div style={{fontSize:9,color:C.mintDark,marginTop:3,fontWeight:600}}>{tauschLabel}</div>}
           </div>
@@ -963,7 +1016,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
           </div>
         </div>
 
-        
+        {/*    ( ) */}
         {actualRec && (
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
             padding:"8px 12px",
@@ -987,6 +1040,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   );
 }
 
+//  EINSPRINGEN VIEW 
 function EinspringenView({ userName }) {
   const [freieSchichten, setFreieSchichten] = useFirebase("freieSchichten", []);
   const [, setNotifications] = useFirebase("notifications", {});
@@ -994,13 +1048,16 @@ function EinspringenView({ userName }) {
   const [msg, setMsg] = useState(null);
 
   function einspringen(schicht) {
+    //   
     setSchedule(prev => {
       const updated = { ...(prev||{}) };
       if (!updated[userName]) updated[userName] = [];
       updated[userName] = [...updated[userName], { d: schicht.date, f: schicht.filiale, t: schicht.time }];
       return updated;
     });
+    //   
     setFreieSchichten(prev => (Array.isArray(prev)?prev:[]).filter(s => s.id !== schicht.id));
+    //  2  
     const ts = Date.now();
     if (window._fbDb && window._fbRef && window._fbSet) {
       ["teddy","yeaji"].forEach(mgr => {
@@ -1011,7 +1068,7 @@ function EinspringenView({ userName }) {
         }).catch(e => console.error(e));
       });
     }
-    setMsg(`✅ Du bist jetzt für ${new Date(schicht.date).toLocaleDateString("de-DE")} in ${schicht.filiale} eingeplant!`);
+    setMsg(`\u2705 Du bist jetzt f\u00FCr ${new Date(schicht.date).toLocaleDateString("de-DE")} in ${schicht.filiale} eingeplant!`);
     setTimeout(() => setMsg(null), 4000);
   }
 
@@ -1091,6 +1148,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
     if(pin.length>=4)return;
     const next=pin+k; setPin(next);
     if(next.length===4){
+      // PIN localStorage  (Firebase PIN   )
       const stored = getPin(selUser.key);
       const correct = stored || selUser.pin; // fallback to INIT pin
       if(next===correct) onLogin(selUser.key);
@@ -1160,7 +1218,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
       </div>
       <div style={{padding:"16px 16px 40px"}}>
         <div style={{...S.card,padding:"18px 16px"}}>
-          
+          {/* Vorname (  ) */}
           <div style={{marginBottom:12}}>
             <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:2}}>
               Vorname <span style={{color:C.red}}>*</span>
@@ -1177,12 +1235,12 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
               </div>
             )}
           </div>
-          
+          {/* Nachname */}
           <div style={{marginBottom:12}}>
             <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>Nachname <span style={{fontSize:10,fontWeight:400,color:C.muted}}>{"(nur f\u00FCr Admin sichtbar)"}</span></div>
             <input value={regN} onChange={e=>setRegN(e.target.value)} placeholder="Kim" style={S.input}/>
           </div>
-          
+          {/*    */}
           <div style={{fontSize:10,color:C.muted,marginBottom:12,padding:"7px 10px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
             \u2139\uFE0F Der Name kann nach der Registrierung jederzeit in den Einstellungen ge\u00E4ndert werden.
           </div>
@@ -1215,6 +1273,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
 
   const UserCard=({u})=>{
     const isMgr=MANAGERS.includes(u.key);
+    //  :  + vorname  
     const displayLabel = (u.emoji ? u.emoji+" " : "") + u.vorname;
     return(
       <button onClick={()=>selectUser(u)} style={{width:"100%",display:"flex",alignItems:"center",gap:13,padding:"12px 14px",borderRadius:14,border:`1px solid ${C.border}`,background:C.card,cursor:"pointer",boxShadow:"0 2px 8px rgba(44,44,44,.05)",textAlign:"left",marginBottom:7}}
@@ -1268,6 +1327,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   );
 }
 
+//  CLOCK MODAL 
 function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onClose,onEin,onAus}){
   const isEin = modal==="ein";
   const nowStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
@@ -1369,6 +1429,8 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
   );
 }
 
+
+//  SETTINGS VIEW () 
 function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdmin }) {
   if (!user) return null;
   const [vorname, setVorname] = useState(user.vorname || "");
@@ -1416,7 +1478,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
   return (
     <div style={{position:"fixed",inset:0,background:C.bg,zIndex:500,overflowY:"auto"}}>
-      
+      {/*    */}
       {impfViewer && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:600,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
           <button onClick={()=>setImpfViewer(false)}
@@ -1431,7 +1493,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         </div>
       )}
 
-      
+      {/*  */}
       <div style={{...S.hdr,paddingBottom:20}}>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <button onClick={onClose}
@@ -1447,7 +1509,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
       <div style={{padding:"16px"}}>
 
-        
+        {/*    */}
         <div style={{...S.card,marginBottom:12}}>
           <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"\u270F\uFE0F Name \u00E4ndern"}</div>
           <div style={{fontSize:9,color:C.muted,marginBottom:6}}>
@@ -1469,7 +1531,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           {saveMsg&&<div style={{fontSize:11,color:C.mintDark,marginTop:8,fontWeight:600,textAlign:"center"}}>{saveMsg}</div>}
         </div>
 
-        
+        {/*     */}
         <div style={{...S.card,marginBottom:12}}>
           <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"\u1F6E1\uFE0F Bescheinigung von Infektionsschutzgesetz"}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:12}}>
@@ -1478,7 +1540,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
           {impfDoc ? (
             <div>
-              
+              {/*      */}
               <button onClick={()=>setImpfViewer(true)}
                 style={{width:"100%",padding:"18px",borderRadius:12,border:`2px solid ${C.mint}`,
                   background:C.mintLight,cursor:"pointer",display:"flex",flexDirection:"column",
@@ -1497,7 +1559,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             </div>
           ) : (
             <div>
-              
+              {/*     */}
               <div style={{padding:"16px",borderRadius:10,border:`2px dashed ${C.red}`,background:C.redLight,
                 textAlign:"center",marginBottom:10}}>
                 <div style={{fontSize:24,marginBottom:4}}>{"\u26A0\uFE0F"}</div>
@@ -1520,7 +1582,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           )}
         </div>
 
-        
+        {/*    */}
         <div style={{...S.card,marginBottom:12,border:`1px solid ${C.redLight}`}}>
           <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"\u1F5D1 Konto l\u00F6schen"}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:10}}>
@@ -1554,7 +1616,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           )}
         </div>
 
-        
+        {/*  */}
         <div style={{marginBottom:30}}>
           <button onClick={onLogout}
             style={{width:"100%",padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,
@@ -1571,11 +1633,13 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   );
 }
 
+//  MITARBEITER 
 function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,setAntraege,onLogout,csvCtx}){
   const user=(Array.isArray(users)?users:[]).find(u=>u.key===userKey);
   const now=useNow();
   const [tab,setTab]=useState("home");
 
+  //    localStorage  
   const CLOCK_KEY = `teeamo_clock_${userKey}`;
   const [clockedIn,setClockedIn]=useState(()=>{
     try { const s=localStorage.getItem(CLOCK_KEY); return s?JSON.parse(s).clockedIn:false; } catch{return false;}
@@ -1587,6 +1651,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     try { const s=localStorage.getItem(CLOCK_KEY); return s?JSON.parse(s).clockFiliale:""; } catch{return "";}
   });
 
+  //     
   useEffect(()=>{
     try { localStorage.setItem(CLOCK_KEY, JSON.stringify({clockedIn, clockInTime:clockInTime?clockInTime.toISOString():null, clockFiliale})); } catch{}
   },[clockedIn, clockInTime, clockFiliale]);
@@ -1594,6 +1659,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const [selFiliale,setSelFiliale]=useState(FILIALEN[0]);
   const [grund,setGrund]=useState("");
   const [elapsed,setElapsed]=useState(()=>{
+    //        
     try {
       const s=localStorage.getItem(CLOCK_KEY); const v=s?JSON.parse(s):null;
       if(v&&v.clockedIn&&v.clockInTime) return Math.floor((Date.now()-new Date(v.clockInTime).getTime())/1000);
@@ -1610,9 +1676,11 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
   useEffect(()=>{
     if(!clockedIn){
+      // /   record  (aus:null )
       setElapsed(0);
       return;
     }
+    //  einstempeln      record 
     const tempId="clock_"+user.vorname+"_"+today();
     const inStr=clockInTime?`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`:"??:??";
     setRecords(prev=>{
@@ -1629,6 +1697,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const myAntraege=antraege.filter(a=>a.user===user.vorname);
   const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
 
+  // Dienstplan  :   Tausch  
   const [_notifications] = useFirebase("notifications", {});
   const pendingTauschCount = Object.values(_notifications||{})
     .filter(n => n.type==="tausch_anfrage" && n.targetUser===user.vorname && !n.gelesen).length;
@@ -1636,6 +1705,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   function handleEin(){
     const inStr=`${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`;
     const tempId="clock_"+user.vorname+"_"+today();
+    // einstempeln  aus:null  record    Aktiv    
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
       return [...filtered,{id:tempId,user:user.vorname,date:today(),filiale:selFiliale,ein:inStr,aus:null,note:"",typ:"normal"}];
@@ -1646,6 +1716,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     const outStr=`${pad(now.getHours())}:${pad(now.getMinutes())}`;
     const inStr=`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`;
     const tempId="clock_"+user.vorname+"_"+today();
+    //  record(aus:null)  record 
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
       return [...filtered,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ:"normal"}];
@@ -1657,6 +1728,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     if(!nGrund.trim()){setNMsg("Bitte einen Grund angeben.");return;}
     const id = Date.now();
     const ts = id;
+    // Firebase   (antraege +   notifications)
     setAntraege(prev=>[...prev,{id,user:user.vorname,date:nDatum,filiale:nFiliale,ein:nEin,aus:nAus,grund:nGrund,status:"offen",zustaendig:"all"}]);
     if (window._fbDb && window._fbRef && window._fbSet) {
       ["teddy","yeaji"].forEach(mgr => {
@@ -1824,7 +1896,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             <button onClick={submitNachtrag} style={{width:"100%",padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer"}}>Antrag einreichen</button>
           </div>
 
-          
+          {/* Meine Antrge - Nachtrag    */}
           {myAntraege.length>0&&(
             <div style={S.card}>
               <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>{"Meine Antr\u00E4ge"}</div>
@@ -1896,6 +1968,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   );
 }
 
+//  STATISTIK 
 function StatistikTab({records,users}){
   const [selMonth,setSelMonth]=useState("2026-06");
   const [exported,setExported]=useState(null);
@@ -1914,11 +1987,13 @@ function StatistikTab({records,users}){
   function downloadXLSX(rows, filename, sheetName="Daten") {
     try {
       const ws = window.XLSX.utils.aoa_to_sheet(rows);
+      //    ( )
       const wb = window.XLSX.utils.book_new();
       window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
       window.XLSX.writeFile(wb, filename);
       setExported(filename);setTimeout(()=>setExported(null),3000);
     } catch(e) {
+      // fallback to CSV if XLSX unavailable
       downloadCSV(rows, filename.replace(".xlsx",".csv"));
     }
   }
@@ -1939,8 +2014,8 @@ function StatistikTab({records,users}){
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
       return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["Teenjoy"].toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
     })];
-    if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monats\u00FCbersicht");
-    else downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
+    if(fmt==="xlsx") downloadXLSX(rows,`Monats\u00FCbersicht_${selMonth}.xlsx`,"Monats\u00FCbersicht");
+    else downloadCSV(rows,`Monats\u00FCbersicht_${selMonth}.csv`);
   }
 
   return(
@@ -1971,7 +2046,7 @@ function StatistikTab({records,users}){
                 <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:emp.emoji?18:12,color:"#fff",flexShrink:0}}>{emp.emoji||emp.kuerzel}</div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:800,color:C.text}}>{emp.emoji&&<span style={{marginRight:3}}>{emp.emoji}</span>}{emp.vorname}</div>
-                  <div style={{fontSize:9,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}{contract>{"0?` \u00B7 Vertrag: $"}{contract}h`:""}</div>
+                  <div style={{fontSize:9,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}{contract>0?` \u00B7 Vertrag: ${contract}h`:""}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:18,fontWeight:800,color:C.mintDark}}>{total.toFixed(1)}<span style={{fontSize:10,color:C.muted}}> Std</span></div>
@@ -2001,7 +2076,7 @@ function StatistikTab({records,users}){
         <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV \u2013 \u00F6ffnet direkt in Excel"}</div>
         {[
           {title:"Stundennachweis (Details)",sub:"Jeder Tag \u00B7 Name \u00B7 Datum \u00B7 Filiale \u00B7 Ein/Aus \u00B7 Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
-          {title:"Monats\u00FCbersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin \u00B7 Gesamtstunden \u00B7 je Filiale",fnXlsx:()=>{"exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`\u00DCbersicht_$"}{selMonth}`},
+          {title:"Monats\u00FCbersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin \u00B7 Gesamtstunden \u00B7 je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`\u00DCbersicht_${selMonth}`},
         ].map(({title,sub,fnXlsx,fnCsv,file})=>(
           <div key={file} style={{background:"rgba(255,255,255,.07)",borderRadius:10,padding:"12px",marginBottom:8}}>
             <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{title}</div>
@@ -2026,6 +2101,14 @@ function StatistikTab({records,users}){
   );
 }
 
+
+
+
+
+//  BERSICHT DETAIL TAB 
+
+
+//  BERSICHT ALL TAB 
 function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sColor, sBg, setDetailKey, setUsers, monthAccordion, setMonthAccordion, delRecordConfirm, setDelRecordConfirm }) {
   const emp = safeUsers.find(u=>u.key===empKey);
   if (!emp) return null;
@@ -2168,7 +2251,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
 
   return (
     <div style={{padding:"14px"}}>
-      
+      {/*  */}
       <div style={{display:"flex",gap:0,marginBottom:12,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
         {[{id:"all",l:"All Staffs"},{id:"today",l:"Heutige Staffs"}].map(({id,l})=>(
           <button key={id} onClick={()=>setUTab(id)}
@@ -2179,7 +2262,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
         ))}
       </div>
 
-      
+      {/*   1: All Staffs  */}
       {uTab==="all"&&(
         <div>
           {empList.map(emp=>(
@@ -2206,10 +2289,10 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
         </div>
       )}
 
-      
+      {/*   2: Heutige Staffs  */}
       {uTab==="today"&&(
         <div>
-          
+          {/*  */}
           <div style={{...S.card,marginBottom:10,padding:"9px 12px"}}>
             <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>Legende</div>
             <div style={{display:"flex",flexWrap:"wrap",gap:"6px 14px",marginBottom:6}}>
@@ -2242,13 +2325,16 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
               Kein Dienstplan f\u00FCr heute eingetragen.
             </div>
           ):(()=>{
+            //  : Arkaden  Aegidiimarkt  Teenjoy
             const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","Teenjoy"];
+            //   shift  
             const withShift = todayShiftEmps.map(emp=>{
               const shift=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===todayStr);
               const fil=shift?(shift.filiale||shift.f):"";
               const time=shift?(shift.time||shift.t||""):"";
               return {emp,shift,fil,time};
             });
+            //         
             return filOrder.map(fil=>{
               const group=withShift.filter(x=>x.fil===fil);
               if(group.length===0) return null;
@@ -2290,6 +2376,8 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
   );
 }
 
+//  ADMIN ANTRGE VIEW 
+//  ANTRGE CARD ( ) 
 function AntraegeTab({ antraege, setAntraege, tauschAntraege, absagenList, setAbsagenList, records, setRecords, aTab, setATab, openAId, setOpenAId }) {
   const nList = Array.isArray(antraege) ? antraege : [];
   const tList = Array.isArray(tauschAntraege) ? tauschAntraege : [];
@@ -2520,6 +2608,122 @@ function NachtragCard({ a, isOpen, onToggle, onDecide, onReopen }) {
   );
 }
 
+function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard, setRecords, records }) {
+  const [openId, setOpenId] = useState(null);
+  var list = Array.isArray(antraege) ? antraege : [];
+  var offene = list.filter(a => a.status === "offen");
+  var done = list.filter(a => a.status !== "offen");
+  var byDate = {};
+  done.forEach(function(a) {
+    var d = a.date || "";
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(a);
+  });
+  var dateKeys = Object.keys(byDate).sort(function(a,b){ return b.localeCompare(a); });
+
+  function reopen(id) {
+    setAntraege(function(prev) {
+      return (Array.isArray(prev)?prev:[]).map(function(a){ return a.id===id ? {...a,status:"offen"} : a; });
+    });
+  }
+  function decide(a, ok) {
+    setAntraege(function(prev) {
+      return (Array.isArray(prev)?prev:[]).map(function(x){ return x.id===a.id ? {...x,status:ok?"genehmigt":"abgelehnt"} : x; });
+    });
+    if (ok) {
+      var exists = records.find(function(r){ return r.user===a.user && r.date===a.date && r.typ==="nachtrag"; });
+      if (!exists) {
+        setRecords(function(prev) {
+          return [...(Array.isArray(prev)?prev:[]), {
+            id:Date.now(), user:a.user, date:a.date, filiale:a.filiale,
+            ein:a.ein, aus:a.aus, note:a.grund||"Nachtrag genehmigt", typ:"nachtrag"
+          }];
+        });
+      }
+    } else {
+      setRecords(function(prev) {
+        return (Array.isArray(prev)?prev:[]).filter(function(r){
+          return !(r.user===a.user && r.date===a.date && r.typ==="nachtrag");
+        });
+      });
+    }
+  }
+
+  return (
+    <div style={{padding:"14px"}}>
+      <div style={{fontSize:10, fontWeight:700, color:C.red, marginBottom:8,
+        textTransform:"uppercase", letterSpacing:".05em"}}>
+        {"Offene Antrage (" + offene.length + ")"}
+      </div>
+      {offene.length === 0 ? (
+        <div style={{...S.card, textAlign:"center", color:C.muted, fontSize:12, padding:"18px", marginBottom:14}}>
+          Keine offenen Antrage
+        </div>
+      ) : offene.map(function(a) {
+        return (
+          <NachtragCard key={a.id} a={a}
+            isOpen={openId===a.id}
+            onToggle={function(){ setOpenId(openId===a.id ? null : a.id); }}
+            onDecide={function(ok){ decide(a,ok); }}
+            onReopen={function(){ reopen(a.id); }}
+          />
+        );
+      })}
+      {done.length > 0 && (
+        <div style={{marginTop:16}}>
+          <div style={{fontSize:10, fontWeight:700, color:C.muted, marginBottom:8,
+            textTransform:"uppercase", letterSpacing:".05em"}}>
+            Bearbeitete Antrage
+          </div>
+          {done.filter(function(a){return a.status==="abgelehnt";}).length > 0 && (
+            <div style={{...S.card, marginBottom:10, display:"flex", gap:20, padding:"10px 14px"}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:18, fontWeight:800, color:C.red}}>
+                  {done.filter(function(a){return a.status==="abgelehnt";}).length}
+                </div>
+                <div style={{fontSize:9, color:C.muted}}>Abgelehnt</div>
+              </div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:18, fontWeight:800, color:C.mintDark}}>
+                  {done.filter(function(a){return a.status==="genehmigt";}).length}
+                </div>
+                <div style={{fontSize:9, color:C.muted}}>Genehmigt</div>
+              </div>
+            </div>
+          )}
+          {dateKeys.map(function(d) {
+            var label = d ? new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"long",year:"numeric"}) : "-";
+            return (
+              <div key={d} style={{marginBottom:4}}>
+                <div style={{fontSize:10, color:C.muted, fontWeight:600, marginBottom:4, marginTop:8}}>{label}</div>
+                {byDate[d].map(function(a) {
+                  return (
+                    <NachtragCard key={a.id} a={a}
+                      isOpen={openId===a.id}
+                      onToggle={function(){ setOpenId(openId===a.id ? null : a.id); }}
+                      onDecide={function(ok){ decide(a,ok); }}
+                      onReopen={function(){ reopen(a.id); }}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {myArchiv && myArchiv.length > 0 && (
+        <div style={{marginTop:16}}>
+          <div style={{fontSize:10, fontWeight:700, color:C.muted, marginBottom:8,
+            textTransform:"uppercase", letterSpacing:".05em"}}>Archiv</div>
+          {myArchiv.map(function(entry) { return renderErledigtCard(entry[0], entry[1]); })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+//  ADMIN DIENSTPLAN VIEW 
 function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedule }) {
   const [viewMode, setViewMode] = useState("plan"); // "plan" | "by_emp" | "by_date"
   const [openEmp, setOpenEmp] = useState(null);
@@ -2527,11 +2731,13 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
   const empList = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key))
     .sort((a,b)=>a.vorname.localeCompare(b.vorname));
 
+  // : schedule   
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
   const allDates = [...new Set(
     empList.flatMap(emp => norm(schedule[emp.vorname]||[]).map(s=>s.date||s.d))
   )].filter(Boolean).sort((a,b)=>a.localeCompare(b));
 
+  //   ( )
   const todayStr = today();
   function getEmpStatus(vorname) {
     const r = records.find(r=>r.user===vorname&&r.date===todayStr);
@@ -2541,7 +2747,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
 
   return (
     <div style={{paddingBottom:20}}>
-      
+      {/*   */}
       <div style={{display:"flex",gap:0,margin:"14px 14px 0",borderRadius:12,overflow:"hidden",border:`1px solid ${C.border}`}}>
         {[{id:"plan",l:"\uD83D\uDCCB Plan"},
           {id:"by_emp",l:"\uD83D\uDC64 Nach Mitarbeiter"},
@@ -2555,7 +2761,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
         ))}
       </div>
 
-      
+      {/*    ( ) */}
       {viewMode==="plan"&&(
         <div style={{padding:"14px"}}>
           {!MANAGERS.includes(userKey)&&manager?.vorname&&(
@@ -2567,7 +2773,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
         </div>
       )}
 
-      
+      {/*    */}
       {viewMode==="by_emp"&&(
         <div style={{padding:"14px"}}>
           {empList.map(emp=>{
@@ -2614,14 +2820,14 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                               <div style={{fontSize:13,fontWeight:700,color:C.text}}>
                                 {new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
                               </div>
-                              <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                              <div style={{fontSize:10,color:C.muted}}>{f}{t?` \u00B7 ${t}`:""}</div>
                             </div>
                           </div>
                           <div style={{textAlign:"right"}}>
                             {rec?(
                               <div>
                                 <div style={{fontSize:11,fontWeight:700,color:rec.aus?C.mintDark:C.yellow}}>
-                                  {rec.ein}{rec.aus?` – ${rec.aus}`:" (l\u00E4uft)"}
+                                  {rec.ein}{rec.aus?` \u2013 ${rec.aus}`:" (l\u00E4uft)"}
                                 </div>
                                 <div style={{fontSize:9,color:C.muted}}>{stdLabel(rec.ein,rec.aus)}</div>
                               </div>
@@ -2640,7 +2846,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
         </div>
       )}
 
-      
+      {/*    */}
       {viewMode==="by_date"&&(
         <div style={{padding:"14px"}}>
           {allDates.length===0&&(
@@ -2650,6 +2856,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
           )}
           {allDates.map(d=>{
             const isOpen=openDate===d;
+            //      
             const dayEmps = empList.filter(emp=>
               norm(schedule[emp.vorname]||[]).some(s=>(s.date||s.d)===d)
             );
@@ -2668,7 +2875,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                 </button>
                 {isOpen&&(
                   <div style={{borderTop:`1px solid ${C.border}`}}>
-                    
+                    {/*    */}
                     {FILIALEN.map(fil=>{
                       const filEmps=dayEmps.filter(emp=>{
                         const s=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===d);
@@ -2704,7 +2911,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                                     )}
                                     {rec&&(
                                       <div style={{fontSize:10,color:statusColor,fontWeight:600}}>
-                                        {rec.ein}{rec.aus?` – ${rec.aus}`:""} {rec.aus?`(${stdLabel(rec.ein,rec.aus)})`:""}</div>
+                                        {rec.ein}{rec.aus?` \u2013 ${rec.aus}`:""} {rec.aus?`(${stdLabel(rec.ein,rec.aus)})`:""}</div>
                                     )}
                                   </div>
                                 </div>
@@ -2729,6 +2936,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
   );
 }
 
+//  DIENSTPLAN UPLOAD + AI ANALYSE 
 function DienstplanUploadView({ records, users }) {
   const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
   const [schedule, setSchedule, scheduleReady] = useFirebase("schedule", {});
@@ -2738,13 +2946,16 @@ function DienstplanUploadView({ records, users }) {
   const [showKeyInput, setShowKeyInput] = useState(false);
   const fileRef = useRef(null);
 
+  // plan.png Firebase Storage  base64 Firebase 
   const [planImg, setPlanImg, planReady] = useFirebase("planImage", null);
 
+  //    
   async function handleFile(e) {
     const file = e.target.files[0];
     if (!file) return;
     if (!apiKey) { setShowKeyInput(true); return; }
 
+    // HEIC/HEIF 
     if (file.type === "image/heic" || file.type === "image/heif" || file.name.toLowerCase().endsWith(".heic")) {
       setMsg({ type: "err", text: "\u274C HEIC \uD615\uC2DD\uC740 \uC9C0\uC6D0\uB418\uC9C0 \uC54A\uC544\uC694. JPEG\uB85C \uBCC0\uD658 \uD6C4 \uC5C5\uB85C\uB4DC\uD574\uC8FC\uC138\uC694." });
       return;
@@ -2752,9 +2963,10 @@ function DienstplanUploadView({ records, users }) {
 
     const isPdf = file.type === "application/pdf";
 
+    //    (PDF 20MB,  5MB)
     const maxSize = isPdf ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
     if (file.size > maxSize) {
-      setMsg({ type: "err", text: `❌ Datei zu groß (${(file.size/1024/1024).toFixed(1)}MB). Max: ${isPdf?"20MB":"5MB"}` });
+      setMsg({ type: "err", text: `\u274C Datei zu gro\u00DF (${(file.size/1024/1024).toFixed(1)}MB). Max: ${isPdf?"20MB":"5MB"}` });
       return;
     }
 
@@ -2769,15 +2981,15 @@ function DienstplanUploadView({ records, users }) {
     const dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
     if (!isPdf) setImgSrc(dataUrl);
 
-    const empNames = (Array.isArray(users)?users:[]).filter(u =>{" !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
+    const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
     const promptText = `Du bist ein Assistent, der Dienstpl\u00E4ne analysiert. Analysiere diesen Dienstplan sehr sorgf\u00E4ltig.
 
 WICHTIG: Erkenne nur Namen aus dieser exakten Liste (Gro\u00DF-/Kleinschreibung ignorieren):
-$"}{empNames}
+${empNames}
 
 Regeln:
 - Jeder Name in der Liste entspricht GENAU einem Mitarbeiter. Ordne gefundene Namen der Liste zu (auch bei leichten Schreibfehlern im Bild).
-- Filialen: "Arkaden" oder "TEEAMO Arkaden" → "TEEAMO Arkaden"; "Aegidiimarkt" oder "Aegidiimarkt" oder ähnlich → "TEEAMO Aegidiimarkt"; "Teenjoy" oder "TEEnJOY" → "Teenjoy"
+- Filialen: "Arkaden" oder "TEEAMO Arkaden" \u2192 "TEEAMO Arkaden"; "Aegidiimarkt" oder "Aegidiimarkt" oder \u00E4hnlich \u2192 "TEEAMO Aegidiimarkt"; "Teenjoy" oder "TEEnJOY" \u2192 "Teenjoy"
 - Datum: Jahr ${new Date().getFullYear()}, Format YYYY-MM-DD
 - Zeit: Format HH:MM-HH:MM (z.B. "09:00-17:00"), null wenn nicht angegeben
 - Ignoriere Namen die NICHT in der obigen Liste sind
@@ -2812,7 +3024,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
           })
         });
       } catch(fetchErr) {
-        throw new Error(`Netzwerkfehler: ${fetchErr.message}. Bitte API-Schlüssel prüfen und erneut versuchen.`);
+        throw new Error(`Netzwerkfehler: ${fetchErr.message}. Bitte API-Schl\u00FCssel pr\u00FCfen und erneut versuchen.`);
       }
 
       if (!res.ok) {
@@ -2826,6 +3038,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       let parsed;
       try {
         const raw = JSON.parse(clean);
+        //  (d/f/t)   (date/filiale/time) 
         parsed = {};
         for (const [name, shifts] of Object.entries(raw)) {
           parsed[name] = (shifts || []).map(s => ({
@@ -2839,6 +3052,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         throw new Error(`Raw: ${text.slice(0, 200)}`);
       }
 
+      // Firebase :     (Firebase  )
       const parsedForFb = {};
       for (const [name, shifts] of Object.entries(parsed)) {
         parsedForFb[name] = Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]));
@@ -2849,12 +3063,13 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
           .catch(e=>console.error("schedule save error:", e));
       }
       setSchedule(parsed);
+      //  Firebase  (PDF   )
       if (!isPdf && b64.length < 4000000) {
         setPlanImg(dataUrl);
       }
-      setMsg({ type: "ok", text: `✅ Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
+      setMsg({ type: "ok", text: `\u2705 Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
     } catch (err) {
-      setMsg({ type: "err", text: `❌ 오류: ${err.message}` });
+      setMsg({ type: "err", text: `\u274C \uC624\uB958: ${err.message}` });
     }
     setAnalyzing(false);
   }
@@ -2864,7 +3079,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
   return (
     <div style={{padding:"14px"}}>
 
-      
+      {/* API   */}
       {showKeyInput && (
         <div style={{...S.card, marginBottom:12, border:`1.5px solid ${C.yellow}`}}>
           <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>{"\u1F511 Anthropic API-Schl\u00FCssel"}</div>
@@ -2878,7 +3093,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         </div>
       )}
 
-      
+      {/*   */}
       <div style={{...S.card, marginBottom:12}}>
         <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"\u1F4CB Dienstplan hochladen"}</div>
         <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{"Bild hochladen \u2192 KI analysiert automatisch die Schichten"}</div>
@@ -2910,7 +3125,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         )}
       </div>
 
-      
+      {/*   */}
       {displayImg && (
         <div style={{marginBottom:12}}>
           <img src={displayImg} alt="Dienstplan"
@@ -2918,7 +3133,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         </div>
       )}
 
-      
+      {/*   */}
       {schedule && Object.keys(schedule).length > 0 && (
         <div>
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>
@@ -2940,7 +3155,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
                         <div style={{fontSize:11,fontWeight:700,color:C.text}}>
                           {new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                         </div>
-                        <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                        <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` \u00B7 ${s.time}`:""}</div>
                       </div>
                       <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
                         color:status==="erledigt"?C.mintDark:status==="aktiv"?C.yellow:C.muted,
@@ -2970,6 +3185,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   const [openAId, setOpenAId] = useState(null);
   const [uTab, setUTab] = useState("all");
   const safeUsers=Array.isArray(users)&&users.length>0?users:INIT_USERS;
+  // userKey ,  key prefix fallback (  )
   const manager=safeUsers.find(u=>u.key===userKey)
     || {key:userKey, vorname:userKey?.split("_")[0]||"Manager", emoji:"", kuerzel:"M", role:"Admin"};
   const empList=safeUsers.filter(u=>!MANAGERS.includes(u.key)).sort((a,b)=>a.vorname.localeCompare(b.vorname));
@@ -2990,17 +3206,22 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   const [fsTime, setFsTime] = useState("");
   const [fsNote, setFsNote] = useState("");
 
+  //     (Alarm  )
   const pendingNotifs = Object.entries(notifications||{})
     .filter(([,n]) => n.zustaendig === userKey && !n.gelesen && !n.bearbeitetVon)
     .sort((a,b) => b[1].ts - a[1].ts);
 
+  //         ( )
   const handledByOther = Object.entries(notifications||{})
     .filter(([,n]) => n.zustaendig === userKey && !n.gelesen && n.bearbeitetVon && n.bearbeitetVon !== userKey);
 
+  // Nachtrag(antraege) :   ,   
   const offeneNachtraege = antraege.filter(a => a.status==="offen");
 
+  //  + Nachtraege  
   const alarmCount = pendingNotifs.length + offeneNachtraege.length;
 
+  // Archiv ()
   const myArchiv = Object.entries(archiv||{})
     .filter(([,a]) => a.bearbeitetVon === userKey || a.zustaendig === userKey)
     .sort((a,b) => b[1].ts - a[1].ts);
@@ -3022,13 +3243,17 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     setFsTime(""); setFsNote("");
   }
 
+  //    
   function handleTausch(notifKey, n, ok) {
+    //      
     const antrag = (Array.isArray(tauschAntraege)?tauschAntraege:[]).find(a=>a.id===n.antragId);
 
     if (ok && antrag) {
+      // schedule swap
       if (window._fbDb && window._fbRef && window._fbSet && window._fbOnValue) {
         window._fbOnValue(window._fbRef(window._fbDb, "schedule"), snap => {
           const raw = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
+          // Firebase     
           const norm = (v) => !v ? [] : Array.isArray(v) ? v : Object.values(v);
           const sched = {};
           for (const [k,v] of Object.entries(raw)) sched[k] = norm(v);
@@ -3048,6 +3273,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     }
 
     const entscheidung = ok ? "genehmigt" : "abgelehnt";
+    //     bearbeitetVon 
     ["teddy","yeaji"].forEach(mgr => {
       const k = `${notifKey.replace(/_teddy$|_yeaji$/,"")}_${mgr}`;
       if (window._fbDb && window._fbRef && window._fbSet) {
@@ -3058,11 +3284,13 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     });
     markRead(notifKey);
 
+    // Archiv 
     if (window._fbDb && window._fbRef && window._fbSet) {
       window._fbSet(window._fbRef(window._fbDb, `archiv/${notifKey}`), {
         ...n, entscheidung, bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
       }).catch(e=>console.error(e));
     }
+    // Antraege  
     setTab("antraege"); setATab("tausch");
   }
 
@@ -3092,6 +3320,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       }
     });
     markRead(notifKey);
+    // absagenList   (  list  )
     if (n.absageId) {
       setAbsagenList(prev => {
         const list = Array.isArray(prev)?prev:[];
@@ -3106,6 +3335,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         ...n, entscheidung, bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
       }).catch(e=>console.error(e));
     }
+    // Antraege  
     setTab("antraege"); setATab("absage");
   }
 
@@ -3121,6 +3351,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       }
     });
     markRead(notifKey);
+    // antraege   (  antraege  )
     if (n.antragId) {
       setAntraege(prev => {
         const list = Array.isArray(prev)?prev:[];
@@ -3135,6 +3366,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         ...n, entscheidung, bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
       }).catch(e=>console.error(e));
     }
+    // Antraege  
     setTab("antraege"); setATab("nachtrag");
   }
 
@@ -3154,8 +3386,10 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     }
   }
 
+  // Nachtrag   (notifications   antraege )
   function approveNachtrag(id, ok) {
     setAntraege(prev=>prev.map(a=>a.id===id?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
+    // notifications  nachtrag  bearbeitetVon 
     ["teddy","yeaji"].forEach(mgr => {
       const k = `nachtrag_${id}_${mgr}`;
       if (window._fbDb && window._fbRef && window._fbSet) {
@@ -3166,6 +3400,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     });
   }
 
+  //  Alarm    
   function renderAlarmCard(key, n) {
     const isAbsagen   = n.type==="absagen"||n.kategorie==="Schichtabsage";
     const isTausch    = n.type==="tausch_manager"||n.kategorie==="Schichttausch";
@@ -3177,13 +3412,13 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
 
     return (
       <div key={key} style={{...S.card,marginBottom:10,border:`1.5px solid ${borderColor}`}}>
-        
+        {/* Schichtabsage */}
         {isAbsagen && <>
           <div style={{fontSize:11,fontWeight:800,color:C.red,marginBottom:4}}>{"\uD83D\uDEAB Schichtabsage \u00B7 "}{n.user||n.userName}</div>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` \u00B7 ${n.time}`:""}</div>
           <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC ""}{n.grund}"</div>
           <div style={{fontSize:9,color:C.muted,marginBottom:8}}>{"\u2139\uFE0F Bei Genehmigung wird die Schicht als freie Schicht ver\u00F6ffentlicht."}</div>
           <div style={{display:"flex",gap:8}}>
@@ -3194,7 +3429,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           </div>
         </>}
 
-        
+        {/* Schichttausch */}
         {isTausch && <>
           <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:6}}>{"\u1F504 Schichttausch \u00B7 Partner best\u00E4tigt"}</div>
           <div style={{display:"flex",gap:6,marginBottom:8}}>
@@ -3223,18 +3458,18 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           </div>
         </>}
 
-        
+        {/* Einspringen */}
         {isEinspring && <>
           <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"\uD83D\uDE4B Einspringen \u00B7 "}{n.user}</div>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{n.filiale}{n.time?` \u00B7 ${n.time}`:""}</div>
           <button onClick={()=>handleEinspringen(key,n)}
             style={{width:"100%",padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"\u2713 Zur Kenntnis genommen"}</button>
         </>}
 
-        
+        {/* Nachtrag (via notification) */}
         {isNachtrag && <>
           <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"\uD83D\uDD50 Nachtrag \u00B7 "}{n.user}</div>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
@@ -3250,7 +3485,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           </div>
         </>}
 
-        
+        {/* Prfen */}
         {isPrufen && <>
           <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"\u26A0\uFE0F Stempelzeit pr\u00FCfen \u00B7 "}{n.user}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{new Date(n.date).toLocaleDateString("de-DE")} \u00B7 {n.filiale}</div>
@@ -3262,6 +3497,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     );
   }
 
+  //  Erledigt  
   function renderErledigtCard(key, a) {
     const isOpen = erledigtExpanded[key];
     const label = a.kategorie || a.type || "Sonstige";
@@ -3288,7 +3524,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         {isOpen && (
           <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
             {a.kategorie==="Schichtabsage"&&<>
-              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` · ${a.time}`:""}</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` \u00B7 ${a.time}`:""}</div>
               <div style={{fontSize:10,color:C.text,marginBottom:2}}>Grund: {a.grund}</div>
             </>}
             {a.kategorie==="Schichttausch"&&<>
@@ -3301,7 +3537,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
               <div style={{fontSize:10,color:C.text,marginBottom:2}}>Grund: {a.grund}</div>
             </>}
             {a.kategorie==="Einspringen"&&<>
-              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` · ${a.time}`:""}</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` \u00B7 ${a.time}`:""}</div>
             </>}
             <div style={{fontSize:9,color:C.muted,marginTop:4}}>Bearbeitet: {safeUsers.find(u=>u.key===a.bearbeitetVon)?.vorname||a.bearbeitetVon}</div>
             <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
@@ -3347,7 +3583,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             </button>
           </div>
         </div>
-        
+        {/* Admin   */}
         {!manager?.infektionsschutz&&(
           <div style={{fontSize:10,color:"#ffb347",fontWeight:700,marginTop:8}}>
             \u26A0\uFE0F Bitte Bescheinigung von Infektionsschutzgesetz hochladen
@@ -3365,7 +3601,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         </div>
       </div>
 
-      
+      {/*  BERSICHT  */}
       {tab==="uebersicht"&&!detailKey&&(
         <UebersichtAllTab
           empList={empList}
@@ -3399,7 +3635,8 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         />}
       )}
 
-      
+
+      {/*  DIENSTPLAN  */}
       {tab==="dienstplan"&&(
         <AdminDienstplanView
           records={records}
@@ -3411,7 +3648,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         />
       )}
 
-      
+      {/*  ANTRGE / ARCHIV  */}
       {tab==="antraege"&&(
         <AntraegeTab
           antraege={antraege}
@@ -3428,14 +3665,14 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         />
       )}
 
-      
+      {/*  STATISTIK  */}
       {tab==="statistik"&&<StatistikTab records={records} users={users}/>}
 
-      
+      {/*  ALARM  */}
       {tab==="benachrichtigungen"&&(
         <div style={{padding:"14px"}}>
 
-          
+          {/*  Freie Schicht eintragen     */}
           <div style={{...S.card,marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"\u2795 Freie Schicht eintragen"}</div>
             <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
@@ -3474,7 +3711,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             </button>
           </div>
 
-          
+          {/*     */}
           {(Array.isArray(freieSchichten)?freieSchichten:[]).length>0&&(
             <div style={{marginBottom:14}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>{"Ver\u00F6ffentlichte Schichten"}</div>
@@ -3482,7 +3719,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                 <div key={s.id} style={{...S.card,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
                     <div style={{fontSize:11,fontWeight:700,color:C.text}}>{new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}</div>
-                    <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                    <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` \u00B7 ${s.time}`:""}</div>
                     {s.note&&<div style={{fontSize:9,color:C.muted}}>{s.note}</div>}
                   </div>
                   <button onClick={()=>setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==s.id))}
@@ -3494,14 +3731,14 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             </div>
           )}
 
-          
+          {/*    (Offene Vorgnge) */}
           {(pendingNotifs.length>0||offeneNachtraege.length>0) ? (
             <div style={{marginBottom:14}}>
               <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>
                 \uD83D\uDD14 Offene Vorg\u00E4nge ({pendingNotifs.length+offeneNachtraege.length})
               </div>
 
-              
+              {/* Nachtrag (antraege ) */}
               {offeneNachtraege.map(a=>(
                 <div key={a.id} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.yellow}`}}>
                   <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"\uD83D\uDD50 Nachtrag \u00B7 "}{a.user}</div>
@@ -3519,7 +3756,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                 </div>
               ))}
 
-              
+              {/*  (tausch/absage/einspringen/prufen) */}
               {pendingNotifs.map(([key,n])=>renderAlarmCard(key,n))}
             </div>
           ) : (
@@ -3530,7 +3767,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             </div>
           )}
 
-          
+          {/*  Erledigt ( ,  ) */}
           {myArchiv.length>0&&(
             <div style={{marginBottom:14}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
@@ -3542,7 +3779,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         </div>
       )}
 
-      
+      {/*  NAVIGATION  */}
       <div style={S.nav}>
         {[{id:"uebersicht",icon:"\uD83D\uDC65",lbl:"\u00DCbersicht"},
           {id:"dienstplan",icon:"\uD83D\uDCCB",lbl:"Dienstplan"},
@@ -3588,23 +3825,28 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     </div>
   );
 
+//  APP ROOT 
 function App(){
   const [screen,setScreen]=useState("login");
   const [userKey,setUserKey]=useState(null);
   const { getPin, setPin, initPins } = usePinStore();
 
+  //   Firebase  
   const [users,    setUsers,    usersReady]    = useFirebase("users",    INIT_USERS);
   const [records,  setRecords,  recordsReady]  = useFirebase("records",  INIT_RECORDS);
   const [antraege, setAntraege, antraegeReady] = useFirebase("antraege", INIT_ANTRAEGE);
   const csvCtx = useDienstplanCSV();
 
+  // INIT_USERS PIN LS  1 
   useEffect(() => { if (usersReady) initPins(INIT_USERS); }, [usersReady]);
 
+  //    :     
   useEffect(() => {
     if (!usersReady) return;
     const arr = Array.isArray(users) ? users : [];
     if (arr.length === 0) return;
 
+    //   
     const roleMap = {
       "Mitarbeiterin":"Staff","Mitarbeiter":"Staff",
       "Chefin":"Admin","Chef":"Admin",
@@ -3614,7 +3856,9 @@ function App(){
     let changed = false;
     const migrated = arr.map(u => {
       const patch = {};
+      // role 
       if (roleMap[u.role]) { patch.role = roleMap[u.role]; }
+      //   
       if (u.infektionsschutz === undefined) patch.infektionsschutz = null;
       if (u.contractHours   === undefined) patch.contractHours   = 0;
       if (u.nachname        === undefined) patch.nachname        = "";
@@ -3642,6 +3886,7 @@ function App(){
   }
   function handleLogout(){setUserKey(null);setScreen("login");}
 
+  // users setUsers  Firebase   wrapper
   function setUsersFirebase(updater) {
     setUsers(updater);
   }
@@ -3649,7 +3894,7 @@ function App(){
   if(!allReady) return(
     <div style={{maxWidth:500,margin:"0 auto",minHeight:"100vh",background:"#fff",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
 
-      
+      {/*    -    */}
       <div style={{
         position:"absolute",
         width:"min(88vw,420px)",height:"min(88vw,420px)",
@@ -3667,10 +3912,10 @@ function App(){
         transform:"translate(-50%,-50%)"
       }}/>
 
-      
+      {/*   */}
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",animation:"fadeIn .7s ease both",zIndex:1}}>
 
-        
+        {/* Mnster  */}
         <div style={{
           fontSize:"min(5.5vw,22px)",
           fontStyle:"italic",
@@ -3680,7 +3925,7 @@ function App(){
           marginBottom:8
         }}>{"M\u00FCnster"}</div>
 
-        
+        {/* teeamo   */}
         <div style={{
           fontSize:"min(15vw,64px)",
           fontWeight:900,
@@ -3690,7 +3935,7 @@ function App(){
           marginBottom:18
         }}>teeamo</div>
 
-        
+        {/* 3  (  / ) */}
         <div style={{display:"flex",gap:"min(5vw,22px)",marginBottom:22}}>
           {[
             {color:"#9B2A2A"},
@@ -3703,7 +3948,7 @@ function App(){
           ))}
         </div>
 
-        
+        {/* Love Tea and More */}
         <div style={{textAlign:"center",lineHeight:1.3}}>
           <div style={{
             fontSize:"min(4.5vw,18px)",
@@ -3721,7 +3966,7 @@ function App(){
         </div>
       </div>
 
-      
+      {/*    */}
       <div style={{position:"absolute",bottom:48,display:"flex",gap:8}}>
         {[0,1,2].map(i=>(
           <div key={i} style={{
@@ -3744,10 +3989,6 @@ function App(){
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-
-
-
-
 </script>
 </body>
 </html>
