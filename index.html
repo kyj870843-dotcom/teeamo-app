@@ -111,13 +111,13 @@ const INIT_RECORDS = [
 ];
 const INIT_ANTRAEGE = [];
 
-// ── PIN은 LocalStorage에만 저장 (보안) ─────────────────────────────────────
+//  PIN LocalStorage  () 
 function lsGet(key, fallback) {
   try { const v=localStorage.getItem(key); if(v!==null) return JSON.parse(v); return fallback; } catch { return fallback; }
 }
 function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
 
-// API 키 등 개인 설정용 localStorage 훅
+// API     localStorage 
 function usePersist(lsKey, init) {
   const [state, setState] = React.useState(() => lsGet(lsKey, init));
   const setAndSave = React.useCallback((updater) => {
@@ -130,13 +130,13 @@ function usePersist(lsKey, init) {
   return [state, setAndSave];
 }
 
-// PIN 전용 로컬 훅
+// PIN   
 function usePinStore() {
-  // PIN은 항상 localStorage에서만 읽고 씀
+  // PIN  localStorage  
   function getPin(userKey) { return lsGet(`pin_${userKey}`, null); }
   function setPin(userKey, pin) { lsSet(`pin_${userKey}`, pin); }
   function initPins(users) {
-    // INIT_USERS의 PIN을 LS에 저장 (최초 1회)
+    // INIT_USERS PIN LS  ( 1)
     users.forEach(u => {
       if (!lsGet(`pin_${u.key}`, null)) lsSet(`pin_${u.key}`, u.pin);
     });
@@ -144,7 +144,7 @@ function usePinStore() {
   return { getPin, setPin, initPins };
 }
 
-// ── Firebase 실시간 동기화 훅 (완전판) ────────────────────────────────────────
+//  Firebase    () 
 function useFirebase(path, fallback) {
   const [data, setData] = useState(fallback);
   const [ready, setReady] = useState(false);
@@ -184,7 +184,7 @@ function useFirebase(path, fallback) {
       if (attach()) { clearInterval(iv); return; }
       if (tries > 30) {
         clearInterval(iv);
-        console.error("Firebase 연결 실패:", path);
+        console.error("Firebase \uC5F0\uACB0 \uC2E4\uD328:", path);
         setData(fallback);
         setReady(true);
       }
@@ -193,14 +193,14 @@ function useFirebase(path, fallback) {
     return () => { cancelled=true; clearInterval(iv); if(unsubRef.current) unsubRef.current(); };
   }, [path]);
 
-  // setter: Firebase에 씀 → onValue가 자동으로 UI 갱신
+  // setter: Firebase   onValue  UI 
   function fbWrite(next) {
     if (!window._fbDb || !window._fbRef || !window._fbSet) return;
     let toSave;
     if (Array.isArray(next)) {
       if (next.length === 0) { toSave = null; }
       else {
-        // users path: PIN은 Firebase에 저장하지 않음
+        // users path: PIN Firebase  
         const sanitize = path === "users"
           ? v => { const {pin:_, ...rest} = v; return rest; }
           : v => v;
@@ -216,7 +216,7 @@ function useFirebase(path, fallback) {
   }
 
   function setter(updater) {
-    // 낙관적 업데이트: 로컬 즉시 반영 + Firebase 쓰기
+    //  :    + Firebase 
     setData(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       fbWrite(next);
@@ -224,7 +224,7 @@ function useFirebase(path, fallback) {
     });
   }
 
-  // 단일 필드 업데이트 (path/field 만 변경, 전체 재쓰기 방지)
+  //    (path/field  ,   )
   function fbUpdateField(subPath, value) {
     if (!window._fbDb || !window._fbRef || !window._fbSet) return;
     window._fbSet(window._fbRef(window._fbDb, path + "/" + subPath), value)
@@ -234,7 +234,7 @@ function useFirebase(path, fallback) {
   return [data, setter, ready, fbUpdateField];
 }
 
-// ── 유틸 ─────────────────────────────────────────────────────────────────────
+//   
 function pad(n) { return String(n).padStart(2, "0"); }
 function useNow() {
   const [t, setT] = useState(new Date());
@@ -247,9 +247,9 @@ function stunden(ein, aus) {
   const [ah, am] = aus.split(":").map(Number);
   return (ah * 60 + am - eh * 60 - em) / 60;
 }
-function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "–" : h.toFixed(1) + "h"; }
+function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "\u2013" : h.toFixed(1) + "h"; }
 function today() {
-  // 독일 시간 기준 (CET=UTC+1, CEST=UTC+2 자동 적용)
+  //    (CET=UTC+1, CEST=UTC+2  )
   return new Date().toLocaleDateString("sv-SE", {timeZone:"Europe/Berlin"});
 }
 
@@ -274,15 +274,15 @@ const FILIAL_COLOR = {
   C:{ bg:"#FAF4E8", text:"#B38B3A", border:"#E8D4A8", dot:"#C8A96A" },
 };
 
-// ── Dienstplan: CSV 연동 없이 plan.png 이미지 뷰어만 사용 ──────────────────
+//  Dienstplan: CSV   plan.png    
 function useDienstplanCSV() {
-  // CSV/구글 시트 연동 제거 – 빈 컨텍스트 반환 (다른 뷰에서 props로 받으므로 구조 유지)
+  // CSV/        (  props   )
   return { plan: {}, sheetMonth: null, error: null, lastFetch: null, refresh: () => {} };
 }
 
 
 
-// ── KALENDER VIEW (plan.png 이미지 뷰어 + 내 일정) ──────────────────────────
+//  KALENDER VIEW (plan.png   +  ) 
 function KalenderView({ csvCtx, userName, records, users }) {
   const [imgErr, setImgErr] = useState(false);
   const [scale, setScale] = useState(1);
@@ -296,25 +296,25 @@ function KalenderView({ csvCtx, userName, records, users }) {
   const [schedule] = useFirebase("schedule", {});
   const [planImg] = useFirebase("planImage", null);
 
-  // Firebase에서 온 schedule 값을 배열로 정규화
+  // Firebase  schedule   
   function normalizeShifts(val) {
     if (!val) return [];
     if (Array.isArray(val)) return val;
-    // Firebase가 {0:{...}, 1:{...}} 형태로 저장한 경우
+    // Firebase {0:{...}, 1:{...}}   
     return Object.values(val);
   }
 
-  // schedule 키 매칭: 여러 방식으로 시도
+  // schedule  :   
   const myShifts = React.useMemo(() => {
     if (!userName || !schedule) return [];
     const keys = Object.keys(schedule);
-    // 1. 완전 일치
+    // 1.  
     if (schedule[userName]) return normalizeShifts(schedule[userName]);
-    // 2. 대소문자 무시
+    // 2.  
     const lower = userName.toLowerCase();
     const k2 = keys.find(k => k.toLowerCase() === lower);
     if (k2) return normalizeShifts(schedule[k2]);
-    // 3. 공백 포함 이름이면 첫 단어(firstName)로 시도
+    // 3.     (firstName) 
     const firstName = userName.split(" ")[0];
     if (firstName !== userName) {
       if (schedule[firstName]) return normalizeShifts(schedule[firstName]);
@@ -324,14 +324,14 @@ function KalenderView({ csvCtx, userName, records, users }) {
     return [];
   }, [schedule, userName]);
 
-  // viewport는 그대로 유지 (페이지 줌 비활성화 상태 유지)
+  // viewport   (    )
 
   function clampOffset(ox, oy, sc, el) {
     if (!el) return { x: ox, y: oy };
     const cw = el.clientWidth;
     const ch = el.clientHeight;
     const imgW = cw * sc;
-    const imgH = ch * sc; // height auto이므로 근사
+    const imgH = ch * sc; // height auto 
     const maxX = Math.max(0, (imgW - cw) / 2);
     const maxY = Math.max(0, (imgH - ch) / 2);
     return { x: Math.min(maxX, Math.max(-maxX, ox)), y: Math.min(maxY, Math.max(-maxY, oy)) };
@@ -428,14 +428,14 @@ function KalenderView({ csvCtx, userName, records, users }) {
         </div>
       )}
 
-      {/* 내 일정 */}
+      {/*   */}
       {userName && myShifts.length > 0 && (
         <MeineSchichtenSection userName={userName} myShifts={myShifts} records={records} users={users}/>
       )}
       {userName && myShifts.length === 0 && (
         <div style={{padding:"14px",textAlign:"center"}}>
           <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>
-            📋 Für <strong>{userName}</strong> sind noch keine Schichten im Dienstplan eingetragen.
+            \uD83D\uDCCB F\u00FCr <strong>{userName}</strong> sind noch keine Schichten im Dienstplan eingetragen.
             <div style={{fontSize:9,marginTop:4,opacity:.6}}>Der Manager muss den Plan hochladen und analysieren.</div>
           </div>
         </div>
@@ -444,7 +444,7 @@ function KalenderView({ csvCtx, userName, records, users }) {
   );
 }
 
-// ── 근무 시간 비교 헬퍼 ───────────────────────────────────────────────────────
+//      
 function parseMinutes(timeStr) {
   if (!timeStr) return null;
   const [h, m] = timeStr.split(":").map(Number);
@@ -463,10 +463,10 @@ function getShiftStatus(shift, actualRec) {
   const planned = calcShiftMinutes(shift.time || shift.t);
   const actual = calcShiftMinutes(`${actualRec.ein}-${actualRec.aus}`);
   if (planned == null || actual == null) return "gearbeitet";
-  return actual >= planned ? "gearbeitet" : "prüfen";
+  return actual >= planned ? "gearbeitet" : "pr\u00FCfen";
 }
 
-// ── SCHICHTTAUSCH MODAL ────────────────────────────────────────────────────────
+//  SCHICHTTAUSCH MODAL 
 function SchichttauschModal({ userName, myShifts, users, onClose }) {
   const [step, setStep] = useState(1);
   const [myShift, setMyShift] = useState(null);
@@ -481,7 +481,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
   const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
   const [, setNotifications] = useFirebase("notifications", {});
 
-  // 배경 스크롤 잠금
+  //   
   useEffect(() => {
     document.body.style.overflow = "hidden";
     document.body.style.position = "fixed";
@@ -531,7 +531,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
       grund, partnerBestaetigt: false, ts: Date.now(),
     };
     setTauschAntraege(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
-    // 파트너에게만 알림 전송 – 관리자 알림은 파트너 수락 후 전송
+    //          
     if (window._fbDb && window._fbRef && window._fbSet) {
       window._fbSet(window._fbRef(window._fbDb, `notifications/tausch_anfrage_${id}`), {
         type: "tausch_anfrage", targetUser: targetUser.vorname,
@@ -559,14 +559,14 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
         display:"flex", flexDirection:"column",
         boxShadow:"0 -4px 24px rgba(0,0,0,.15)",
       }}>
-        {/* 드래그 핸들 */}
+        {/*   */}
         <div
           onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}
           style={{padding:"14px 22px 8px",cursor:"ns-resize",flexShrink:0,touchAction:"none"}}>
           <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto"}}/>
         </div>
 
-        {/* 헤더 */}
+        {/*  */}
         <div style={{padding:"0 22px 10px",flexShrink:0}}>
           <div style={{display:"flex",gap:4,marginBottom:10}}>
             {steps.map((s,i)=>(
@@ -576,14 +576,14 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
           </div>
           <div style={{fontSize:14,fontWeight:800,color:C.text}}>{"\u1F504 Schichttausch"}</div>
           <div style={{fontSize:11,color:C.muted,marginTop:2}}>
-            {step===1&&"Welche Schicht möchtest du tauschen?"}
-            {step===2&&"Mit wem möchtest du tauschen?"}
+            {step===1&&"Welche Schicht m\u00F6chtest du tauschen?"}
+            {step===2&&"Mit wem m\u00F6chtest du tauschen?"}
             {step===3&&`Welche Schicht von ${targetUser?.vorname}?`}
             {step===4&&"Zusammenfassung & Grund"}
           </div>
         </div>
 
-        {/* 스크롤 콘텐츠 */}
+        {/*   */}
         <div style={{flex:1,overflowY:"auto",padding:"0 22px",WebkitOverflowScrolling:"touch"}}>
           {step===1&&myShifts.map((s,i)=>{
             const d=s.d||s.date; const f=s.f||s.filiale; const t=s.t||s.time;
@@ -596,7 +596,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                 <div style={{fontSize:12,fontWeight:700,color:myShift===s?C.mintDark:C.text}}>
                   {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                 </div>
-                <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                <div style={{fontSize:10,color:C.muted}}>{f}{t?` \u00B7 ${t}`:""}</div>
               </button>
             );
           })}
@@ -630,7 +630,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                     <div style={{fontSize:12,fontWeight:700,color:targetShift===s?C.mintDark:C.text}}>
                       {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                     </div>
-                    <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                    <div style={{fontSize:10,color:C.muted}}>{f}{t?` \u00B7 ${t}`:""}</div>
                   </button>
                 );
               })
@@ -658,27 +658,27 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                   </div>
                 </div>
                 <div style={{fontSize:10,color:C.mintDark,textAlign:"center"}}>
-                  ⏳ {targetUser?.vorname} muss zuerst bestätigen.
+                  \u23F3 {targetUser?.vorname} muss zuerst best\u00E4tigen.
                 </div>
               </div>
               <div style={{marginBottom:12}}>
                 <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund</div>
                 <textarea value={grund} onChange={e=>{setGrund(e.target.value);setErr("");}}
-                  placeholder="Grund für den Tausch..."
+                  placeholder="Grund f\u00FCr den Tausch..."
                   style={{...S.input,width:"100%",minHeight:70,resize:"none",fontFamily:"inherit"}}/>
               </div>
-              {err&&<div style={{fontSize:11,color:C.red,marginBottom:8,fontWeight:600}}>⚠ {err}</div>}
+              {err&&<div style={{fontSize:11,color:C.red,marginBottom:8,fontWeight:600}}>{"\u26A0 "}{err}</div>}
             </div>
           )}
         </div>
 
-        {/* 하단 버튼 */}
+        {/*   */}
         <div style={{padding:"12px 22px",paddingBottom:"max(16px,env(safe-area-inset-bottom))",
           borderTop:`1px solid ${C.border}`,flexShrink:0,display:"flex",gap:9}}>
           <button onClick={()=>step===1?onClose():setStep(s=>s-1)}
             style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,
               background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
-            {step===1?"✕":"← Zurück"}
+            {step===1?"\u2715":"\u2190 Zur\u00FCck"}
           </button>
           <button
             disabled={!!(step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift)}
@@ -687,14 +687,14 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
               background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
               color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",
               opacity:(step===1&&!myShift||step===2&&!targetUser||step===3&&!targetShift)?0.4:1}}>
-            {step<4?"Weiter →":"Anfrage senden"}
+            {step<4?"Weiter \u2192":"Anfrage senden"}
           </button>
         </div>
       </div>
     </div>
   );
 }
-// ── MEINE SCHICHTEN SECTION ───────────────────────────────────────────────────
+//  MEINE SCHICHTEN SECTION 
 function MeineSchichtenSection({ userName, myShifts, records, users }) {
   const [showTausch, setShowTausch] = useState(false);
   const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
@@ -702,12 +702,12 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
   const [notifications, setNotifications] = useFirebase("notifications", {});
   const [schedule, setSchedule] = useFirebase("schedule", {});
 
-  // 나에게 온 Tausch 수락 요청
+  //   Tausch  
   const pendingTausch = Object.entries(notifications||{})
     .filter(([,n]) => n.type==="tausch_anfrage" && n.targetUser===userName && !n.gelesen);
 
   function bestaetigenTausch(notifKey, antragId, ok) {
-    // 알림 읽음 처리
+    //   
     if (window._fbDb && window._fbRef && window._fbSet) {
       window._fbSet(window._fbRef(window._fbDb, `notifications/${notifKey}/gelesen`), true)
         .catch(e => console.error(e));
@@ -724,33 +724,33 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
       return;
     }
 
-    // 수락 → 즉시 schedule 교체 (관리자 승인 불필요)
+    //    schedule  (  )
     if (window._fbDb && window._fbRef && window._fbSet && window._fbOnValue) {
-      // once는 unsubscribe 불필요 (onlyOnce: true)
+      // once unsubscribe  (onlyOnce: true)
       window._fbOnValue(window._fbRef(window._fbDb, "schedule"), snap => {
         const sched = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
-        // initiator: 원래 날짜 제거 → 파트너 날짜 추가
+        // initiator:       
         sched[antrag.initiator] = (sched[antrag.initiator]||[])
           .filter(s => (s.d||s.date) !== antrag.initiatorDate);
         sched[antrag.initiator] = [...sched[antrag.initiator],
           {d: antrag.partnerDate, f: antrag.partnerFiliale, t: antrag.partnerTime||null}];
-        // partner: 원래 날짜 제거 → initiator 날짜 추가
+        // partner:     initiator  
         sched[antrag.partner] = (sched[antrag.partner]||[])
           .filter(s => (s.d||s.date) !== antrag.partnerDate);
         sched[antrag.partner] = [...sched[antrag.partner],
           {d: antrag.initiatorDate, f: antrag.initiatorFiliale, t: antrag.initiatorTime||null}];
         window._fbSet(window._fbRef(window._fbDb, "schedule"), sched)
-          .then(() => console.log("✅ Schedule getauscht:", antrag.initiator, "↔", antrag.partner))
+          .then(() => console.log("\u2705 Schedule getauscht:", antrag.initiator, "\u2194", antrag.partner))
           .catch(e => console.error("Schedule swap error:", e));
       }, {onlyOnce: true});
     }
 
-    // 상태 → getauscht
+    //   getauscht
     setTauschAntraege(prev => (Array.isArray(prev)?prev:[]).map(a =>
       a.id===antragId ? {...a, status:"getauscht", partnerBestaetigt:true} : a
     ));
 
-    // 관리자 2명 모두에게 알림 전송 (teddy + yeaji)
+    //  2    (teddy + yeaji)
     if (window._fbDb && window._fbRef && window._fbSet) {
       const ts = Date.now();
       ["teddy","yeaji"].forEach(mgr => {
@@ -766,7 +766,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
     }
   }
 
-  // 모든 항목(schichten + anträge)을 날짜 기준으로 묶기
+  //  (schichten + antrge)   
   const myAntraege = (Array.isArray(antraege)?antraege:[]).filter(a => a.user === userName);
   const allDates = [...new Set([
     ...myShifts.map(s => s.d || s.date),
@@ -778,26 +778,26 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
     <div style={{padding:"14px", borderTop:`1px solid ${C.border}`}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
         <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".05em"}}>
-          Meine Schichten & Anträge
+          Meine Schichten & Antr\u00E4ge
         </div>
         <button onClick={()=>setShowTausch(true)}
           style={{fontSize:10,fontWeight:700,padding:"5px 10px",borderRadius:8,
             border:`1.5px solid ${C.mint}`,background:C.mintLight,color:C.mintDark,cursor:"pointer"}}>
-          🔄 Schichttausch
+          \uD83D\uDD04 Schichttausch
         </button>
       </div>
 
-      {/* 나에게 온 Tausch 수락 요청 */}
+      {/*   Tausch   */}
       {pendingTausch.map(([key, n]) => (
         <div key={key} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.mint}`,background:C.mintLight}}>
           <div style={{fontSize:12,fontWeight:800,color:C.mintDark,marginBottom:4}}>
-            🔄 Tausch-Anfrage von {n.initiator}
+            \uD83D\uDD04 Tausch-Anfrage von {n.initiator}
           </div>
           <div style={{fontSize:10,color:C.text,marginBottom:2}}>
-            Du gibst ab: <strong>{new Date(n.myDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} · {n.myFiliale}</strong>
+            Du gibst ab: <strong>{new Date(n.myDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} \u00B7 {n.myFiliale}</strong>
           </div>
           <div style={{fontSize:10,color:C.text,marginBottom:10}}>
-            Du bekommst: <strong>{new Date(n.theirDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} · {n.theirFiliale}</strong>
+            Du bekommst: <strong>{new Date(n.theirDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} \u00B7 {n.theirFiliale}</strong>
           </div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>bestaetigenTausch(key, n.antragId, false)}
@@ -809,7 +809,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
               style={{flex:2,padding:"8px",borderRadius:8,border:"none",
                 background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
                 color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
-              ✅ Bestätigen
+              \u2705 Best\u00E4tigen
             </button>
           </div>
         </div>
@@ -823,36 +823,36 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
 
         return (
           <div key={d} style={{marginBottom:14}}>
-            {/* 날짜 헤더 */}
+            {/*   */}
             <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:6}}>
               {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"2-digit"})}
             </div>
 
-            {/* 근무 카드 */}
+            {/*   */}
             {shift && (
               <ShiftRow s={shift} userName={userName} records={records} setNotifications={setNotifications}/>
             )}
 
-            {/* shift 없이 출근한 경우 */}
+            {/* shift    */}
             {!shift && rec && (
               <div style={{padding:"9px 12px",borderRadius:10,marginBottom:5,
                 background:C.mintLight,border:`1px solid ${C.mint}`,
                 display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{fontSize:11,fontWeight:600,color:C.text}}>{rec.filiale} · {rec.ein} – {rec.aus||"läuft"}</div>
+                <div style={{fontSize:11,fontWeight:600,color:C.text}}>{rec.filiale} \u00B7 {rec.ein} \u2013 {rec.aus||"l\u00E4uft"}</div>
                 <span style={{fontSize:11,fontWeight:700,color:C.mintDark}}>{stdLabel(rec.ein,rec.aus)}</span>
               </div>
             )}
 
-            {/* 관련 Anträge 타임라인 */}
+            {/*  Antrge  */}
             {antr.map((a,i) => (
               <div key={i} style={{marginLeft:12,paddingLeft:10,borderLeft:`2px solid ${C.border}`,marginBottom:4}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                   padding:"7px 10px",borderRadius:8,background:"#fff",border:`1px solid ${C.border}`}}>
                   <div>
-                    <div style={{fontSize:10,fontWeight:700,color:C.text}}>📌 Nachtrag · {a.filiale}</div>
-                    <div style={{fontSize:9,color:C.muted}}>{a.ein} – {a.aus}</div>
+                    <div style={{fontSize:10,fontWeight:700,color:C.text}}>{"\uD83D\uDCCC Nachtrag \u00B7 "}{a.filiale}</div>
+                    <div style={{fontSize:9,color:C.muted}}>{a.ein} \u2013 {a.aus}</div>
                   </div>
-                  <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"✅":"❌"}</span>
+                  <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"\u2705":"\u274C"}</span>
                 </div>
               </div>
             ))}
@@ -872,7 +872,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
   );
 }
 
-// ── ABSAGEN MODAL ─────────────────────────────────────────────────────────────
+//  ABSAGEN MODAL 
 function AbsagenModal({ shift, userName, onClose, onSubmit }) {
   const [grund, setGrund] = useState("");
   const [err, setErr] = useState("");
@@ -895,17 +895,17 @@ function AbsagenModal({ shift, userName, onClose, onSubmit }) {
           <div style={{fontSize:12,fontWeight:700,color:C.red}}>
             {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{f}{t?` · ${t}`:""}</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{f}{t?` \u00B7 ${t}`:""}</div>
         </div>
         <div style={{marginBottom:14}}>
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund <span style={{color:C.red}}>*</span></div>
           <textarea value={grund} onChange={e=>{setGrund(e.target.value);setErr("");}}
-            placeholder="z. B. Ich bin krank und kann nicht kommen…"
+            placeholder="z. B. Ich bin krank und kann nicht kommen\u2026"
             style={{...S.input,width:"100%",minHeight:80,resize:"none",fontFamily:"inherit"}}/>
         </div>
-        {err&&<div style={{fontSize:11,color:C.red,marginBottom:10,fontWeight:600}}>⚠ {err}</div>}
+        {err&&<div style={{fontSize:11,color:C.red,marginBottom:10,fontWeight:600}}>{"\u26A0 "}{err}</div>}
         <div style={{fontSize:10,color:C.muted,marginBottom:14}}>
-          ℹ️ Der Manager wird benachrichtigt. Nach Genehmigung wird deine Schicht als freie Schicht veröffentlicht.
+          \u2139\uFE0F Der Manager wird benachrichtigt. Nach Genehmigung wird deine Schicht als freie Schicht ver\u00F6ffentlicht.
         </div>
         <div style={{display:"flex",gap:9}}>
           <button onClick={onClose} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
@@ -928,13 +928,13 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const [, setNotif] = useFirebase("notifications", {});
 
   useEffect(() => {
-    if (status === "prüfen" && actualRec) {
+    if (status === "pr\u00FCfen" && actualRec) {
       const zustaendig = f === "Teenjoy" ? "teddy" : "yeaji";
-      const notifKey = `prüfen_${userName}_${d}`;
+      const notifKey = `pr\u00FCfen_${userName}_${d}`;
       setNotifications(prev => {
         if (prev && prev[notifKey]) return prev;
         return { ...(prev||{}), [notifKey]: {
-          type: "prüfen", user: userName, date: d, filiale: f,
+          type: "pr\u00FCfen", user: userName, date: d, filiale: f,
           plannedTime: t, actualEin: actualRec.ein, actualAus: actualRec.aus,
           zustaendig, gelesen: false, ts: Date.now()
         }};
@@ -945,27 +945,27 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const alreadyAbgesagt = (Array.isArray(absagenList)?absagenList:[])
     .find(a => a.userName === userName && a.date === d);
 
-  // Tausch 신청 상태 확인 (initiator 입장 A)
+  // Tausch    (initiator  A)
   const myTausch = (Array.isArray(tauschAntraege)?tauschAntraege:[])
     .find(t => t.initiator === userName && t.initiatorDate === d);
-  // 파트너(B) 입장: 이 날짜에 tausch 요청 받은 경우
+  // (B) :   tausch   
   const partnerTausch = !myTausch ? (Array.isArray(tauschAntraege)?tauschAntraege:[])
     .find(t => t.partner === userName && t.partnerDate === d) : null;
 
   const tauschLabel = myTausch ? ({
-    ausstehend_bestaetigung: `🔄 Tausch-Anfrage an ${myTausch.partner} · Warte auf Bestätigung`,
-    ausstehend_manager:      `🔄 Tausch wartet auf Manager-Genehmigung`,
-    getauscht:               `✅ Getauscht mit ${myTausch.partner}`,
-    abgelehnt_partner:       `❌ Tausch von ${myTausch.partner} abgelehnt`,
+    ausstehend_bestaetigung: `\uD83D\uDD04 Tausch-Anfrage an ${myTausch.partner} \u00B7 Warte auf Best\u00E4tigung`,
+    ausstehend_manager:      `\uD83D\uDD04 Tausch wartet auf Manager-Genehmigung`,
+    getauscht:               `\u2705 Getauscht mit ${myTausch.partner}`,
+    abgelehnt_partner:       `\u274C Tausch von ${myTausch.partner} abgelehnt`,
   }[myTausch.status] || null) : partnerTausch ? ({
-    ausstehend_bestaetigung: `🔄 Tausch angefragt von ${partnerTausch.initiator} · Deine Antwort ausstehend`,
-    getauscht:               `✅ Getauscht mit ${partnerTausch.initiator}`,
-    abgelehnt_partner:       `❌ Tausch abgelehnt`,
+    ausstehend_bestaetigung: `\uD83D\uDD04 Tausch angefragt von ${partnerTausch.initiator} \u00B7 Deine Antwort ausstehend`,
+    getauscht:               `\u2705 Getauscht mit ${partnerTausch.initiator}`,
+    abgelehnt_partner:       `\u274C Tausch abgelehnt`,
   }[partnerTausch.status] || null) : null;
 
   function handleAbsagen(antrag) {
     setAbsagenList(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
-    // 관리자 2명 모두에게 알림 전송
+    //  2   
     const ts = Date.now();
     if (window._fbDb && window._fbRef && window._fbSet) {
       ["teddy","yeaji"].forEach(mgr => {
@@ -979,10 +979,10 @@ function ShiftRow({ s, userName, records, setNotifications }) {
     }
   }
 
-  // 상태별 배지 색상
+  //   
   const badge = {
     gearbeitet: { color: C.mintDark, bg: C.mintLight, label: "Gearbeitet" },
-    prüfen:     { color: C.yellow,   bg: C.yellowLight,label: "Prüfen"    },
+    pr\u00FCfen:     { color: C.yellow,   bg: C.yellowLight,label: "Pr\u00FCfen"    },
     aktiv:      { color: C.yellow,   bg: "#FFF9E6",    label: "Im Dienst" },
     ausstehend: { color: C.muted,    bg: C.bg,         label: "Ausstehend"},
   }[alreadyAbgesagt ? "ausstehend" : status] || { color: C.muted, bg: C.bg, label: "Ausstehend" };
@@ -992,15 +992,15 @@ function ShiftRow({ s, userName, records, setNotifications }) {
       <div style={{borderRadius:10,overflow:"hidden",marginBottom:6,
         border:`1px solid ${alreadyAbgesagt?C.red:status==="aktiv"||status==="gearbeitet"?C.mint:C.border}`}}>
 
-        {/* 계획된 근무 행 */}
+        {/*    */}
         <div onClick={()=>{ if(status==="ausstehend"&&!alreadyAbgesagt) setShowAbsagen(true); }}
           style={{display:"flex",alignItems:"center",justifyContent:"space-between",
             padding:"10px 12px",
             background:alreadyAbgesagt?C.redLight:C.card,
             cursor:status==="ausstehend"&&!alreadyAbgesagt?"pointer":"default"}}>
           <div style={{fontSize:12,fontWeight:600,color:alreadyAbgesagt?C.red:C.text}}>
-            {f}{t ? ` · ${t}` : ""}
-            {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>🚫 Absage {alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
+            {f}{t ? ` \u00B7 ${t}` : ""}
+            {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>{"\uD83D\uDEAB Absage "}{alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
           {tauschLabel && <div style={{fontSize:9,color:C.mintDark,marginTop:3,fontWeight:600}}>{tauschLabel}</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -1011,22 +1011,22 @@ function ShiftRow({ s, userName, records, setNotifications }) {
               color:alreadyAbgesagt?C.red:badge.color,
               background:alreadyAbgesagt?"#fff":badge.bg,
               border:`1px solid ${alreadyAbgesagt?C.red:badge.color}`}}>
-              {alreadyAbgesagt?"🚫 Abgesagt":badge.label}
+              {alreadyAbgesagt?"\uD83D\uDEAB Abgesagt":badge.label}
             </span>
           </div>
         </div>
 
-        {/* 실제 기록 행 (출근했을 때만) */}
+        {/*    ( ) */}
         {actualRec && (
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
             padding:"8px 12px",
-            background:status==="gearbeitet"?C.mintLight:status==="prüfen"?C.yellowLight:"#FFF9E6",
+            background:status==="gearbeitet"?C.mintLight:status==="pr\u00FCfen"?C.yellowLight:"#FFF9E6",
             borderTop:`1px dashed ${status==="gearbeitet"?C.mint:C.yellow}`}}>
             <div style={{fontSize:11,color:status==="gearbeitet"?C.mintDark:C.yellow,fontWeight:600}}>
-              {f} · {actualRec.ein}–{actualRec.aus||"läuft"}
+              {f} \u00B7 {actualRec.ein}\u2013{actualRec.aus||"l\u00E4uft"}
             </div>
             <span style={{fontSize:11,fontWeight:700,color:status==="gearbeitet"?C.mintDark:C.yellow}}>
-              {actualRec.aus ? stdLabel(actualRec.ein, actualRec.aus) : "🟡"}
+              {actualRec.aus ? stdLabel(actualRec.ein, actualRec.aus) : "\uD83D\uDFE1"}
             </span>
           </div>
         )}
@@ -1040,7 +1040,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   );
 }
 
-// ── EINSPRINGEN VIEW ──────────────────────────────────────────────────────────
+//  EINSPRINGEN VIEW 
 function EinspringenView({ userName }) {
   const [freieSchichten, setFreieSchichten] = useFirebase("freieSchichten", []);
   const [, setNotifications] = useFirebase("notifications", {});
@@ -1048,16 +1048,16 @@ function EinspringenView({ userName }) {
   const [msg, setMsg] = useState(null);
 
   function einspringen(schicht) {
-    // 내 일정에 추가
+    //   
     setSchedule(prev => {
       const updated = { ...(prev||{}) };
       if (!updated[userName]) updated[userName] = [];
       updated[userName] = [...updated[userName], { d: schicht.date, f: schicht.filiale, t: schicht.time }];
       return updated;
     });
-    // 빈 근무에서 제거
+    //   
     setFreieSchichten(prev => (Array.isArray(prev)?prev:[]).filter(s => s.id !== schicht.id));
-    // 관리자 2명 모두에게 알림
+    //  2  
     const ts = Date.now();
     if (window._fbDb && window._fbRef && window._fbSet) {
       ["teddy","yeaji"].forEach(mgr => {
@@ -1068,7 +1068,7 @@ function EinspringenView({ userName }) {
         }).catch(e => console.error(e));
       });
     }
-    setMsg(`✅ Du bist jetzt für ${new Date(schicht.date).toLocaleDateString("de-DE")} in ${schicht.filiale} eingeplant!`);
+    setMsg(`\u2705 Du bist jetzt f\u00FCr ${new Date(schicht.date).toLocaleDateString("de-DE")} in ${schicht.filiale} eingeplant!`);
     setTimeout(() => setMsg(null), 4000);
   }
 
@@ -1103,19 +1103,19 @@ function EinspringenView({ userName }) {
                   {new Date(s.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
                 </div>
                 <div style={{fontSize:11,color:C.muted,marginTop:2}}>{s.filiale}</div>
-                {s.time&&<div style={{fontSize:11,fontWeight:600,color:C.mintDark,marginTop:2}}>🕐 {s.time}</div>}
-                {s.note&&<div style={{fontSize:10,color:C.muted,marginTop:4}}>📌 {s.note}</div>}
+                {s.time&&<div style={{fontSize:11,fontWeight:600,color:C.mintDark,marginTop:2}}>{"\uD83D\uDD50 "}{s.time}</div>}
+                {s.note&&<div style={{fontSize:10,color:C.muted,marginTop:4}}>{"\uD83D\uDCCC "}{s.note}</div>}
               </div>
               <div style={{width:40,height:40,borderRadius:10,background:C.mintLight,
                 display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>
-                {s.filiale==="Teenjoy"?"🧋":"☕"}
+                {s.filiale==="Teenjoy"?"\uD83E\uDDCB":"\u2615"}
               </div>
             </div>
             <button onClick={()=>einspringen(s)}
               style={{width:"100%",padding:"11px",borderRadius:10,border:"none",
                 background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
                 color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
-              🙋 Ich springe ein!
+              \uD83D\uDE4B Ich springe ein!
             </button>
           </div>
         ))
@@ -1148,7 +1148,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
     if(pin.length>=4)return;
     const next=pin+k; setPin(next);
     if(next.length===4){
-      // PIN은 localStorage에서 확인 (Firebase에 PIN 저장 안 함)
+      // PIN localStorage  (Firebase PIN   )
       const stored = getPin(selUser.key);
       const correct = stored || selUser.pin; // fallback to INIT pin
       if(next===correct) onLogin(selUser.key);
@@ -1158,8 +1158,8 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   function doRegister(){
     if(!regV.trim()){setRegErr("Vorname ist Pflichtfeld.");return;}
     if(!/^\d{4}$/.test(regP)){setRegErr("PIN muss 4 Ziffern sein.");return;}
-    if(regP!==regP2){setRegErr("PINs stimmen nicht überein.");return;}
-    const vn=regV.trim(),nn=regN.trim(),key=vn.toLowerCase().replace(/[^a-z0-9가-힣]/g,"_").replace(/_+/g,"_").slice(0,20)+"_"+Date.now();
+    if(regP!==regP2){setRegErr("PINs stimmen nicht \u00FCberein.");return;}
+    const vn=regV.trim(),nn=regN.trim(),key=vn.toLowerCase().replace(/[^a-z0-9\uAC00-\uD7A3]/g,"_").replace(/_+/g,"_").slice(0,20)+"_"+Date.now();
     const isAdmin=isAdminName&&regRole==="Admin";
     const newUser={key,vorname:vn,nachname:nn,emoji:em,kuerzel:vn.slice(0,2),role:isAdmin?"Admin":"Staff",isAdmin,infektionsschutz:null,contractHours:0};
     savePinFn(key, regP);
@@ -1197,10 +1197,10 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           </div>
           <div style={{minHeight:28,marginBottom:8,fontSize:12,color:C.red,fontWeight:600}}>{err}</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,maxWidth:260,margin:"0 auto"}}>
-            {["1","2","3","4","5","6","7","8","9","","0","⌫"].map((k,i)=>(
+            {["1","2","3","4","5","6","7","8","9","","0","\u232B"].map((k,i)=>(
               k===""?<div key={i}/>:
-              <button key={i} onClick={()=>k==="⌫"?setPin(p=>p.slice(0,-1)):pinKey(k)}
-                style={{height:56,borderRadius:14,border:`1px solid ${C.border}`,background:C.card,fontSize:k==="⌫"?20:22,fontWeight:600,color:C.text,cursor:"pointer"}}
+              <button key={i} onClick={()=>k==="\u232B"?setPin(p=>p.slice(0,-1)):pinKey(k)}
+                style={{height:56,borderRadius:14,border:`1px solid ${C.border}`,background:C.card,fontSize:k==="\u232B"?20:22,fontWeight:600,color:C.text,cursor:"pointer"}}
                 onTouchStart={e=>e.currentTarget.style.background="#eee"} onTouchEnd={e=>e.currentTarget.style.background=C.card}>{k}</button>
             ))}
           </div>
@@ -1218,7 +1218,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
       </div>
       <div style={{padding:"16px 16px 40px"}}>
         <div style={{...S.card,padding:"18px 16px"}}>
-          {/* Vorname (이모지 포함 가능) */}
+          {/* Vorname (  ) */}
           <div style={{marginBottom:12}}>
             <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:2}}>
               Vorname <span style={{color:C.red}}>*</span>
@@ -1227,7 +1227,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
               Tipp: Emoji erlaubt! z.B. <strong>{"Lena \u1F353"}</strong> oder <strong>{"Alex \u1F43B"}</strong>
             </div>
             <input value={regV} onChange={e=>setRegV(e.target.value)}
-              placeholder="z.B. Lena 🍓"
+              placeholder="z.B. Lena \uD83C\uDF53"
               style={{...S.input,fontSize:15}}/>
             {regV&&(
               <div style={{marginTop:6,padding:"8px 11px",borderRadius:9,background:C.mintLight,border:`1px solid ${C.mint}`,fontSize:12,color:C.mintDark,fontWeight:700}}>
@@ -1240,9 +1240,9 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
             <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>Nachname <span style={{fontSize:10,fontWeight:400,color:C.muted}}>{"(nur f\u00FCr Admin sichtbar)"}</span></div>
             <input value={regN} onChange={e=>setRegN(e.target.value)} placeholder="Kim" style={S.input}/>
           </div>
-          {/* 이름 변경 안내 */}
+          {/*    */}
           <div style={{fontSize:10,color:C.muted,marginBottom:12,padding:"7px 10px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
-            ℹ️ Der Name kann nach der Registrierung jederzeit in den Einstellungen geändert werden.
+            \u2139\uFE0F Der Name kann nach der Registrierung jederzeit in den Einstellungen ge\u00E4ndert werden.
           </div>
           {isAdminName&&(
             <div style={{marginBottom:12}}>
@@ -1250,7 +1250,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
               <div style={{display:"flex",gap:9}}>
                 {["Staff","Admin"].map(r=>(
                   <button key={r} onClick={()=>setRegRole(r)} style={{flex:1,padding:"10px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",border:`2px solid ${regRole===r?C.mint:C.border}`,background:regRole===r?C.mintLight:"#fff",color:regRole===r?C.mintDark:C.muted}}>
-                    {r==="Admin"?"👑 Admin":"👤 Staff"}
+                    {r==="Admin"?"\uD83D\uDC51 Admin":"\uD83D\uDC64 Staff"}
                   </button>
                 ))}
               </div>
@@ -1260,7 +1260,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
             {[["PIN (4 Ziffern) *",regP,setRegP],["PIN wiederholen *",regP2,setRegP2]].map(([lbl,val,set])=>(
               <div key={lbl}>
                 <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>{lbl}</div>
-                <input type="password" inputMode="numeric" maxLength={4} value={val} onChange={e=>set(e.target.value.replace(/\D/g,""))} placeholder="••••" style={{...S.input,letterSpacing:"0.3em",fontSize:18}}/>
+                <input type="password" inputMode="numeric" maxLength={4} value={val} onChange={e=>set(e.target.value.replace(/\D/g,""))} placeholder="\u2022\u2022\u2022\u2022" style={{...S.input,letterSpacing:"0.3em",fontSize:18}}/>
               </div>
             ))}
           </div>
@@ -1273,7 +1273,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
 
   const UserCard=({u})=>{
     const isMgr=MANAGERS.includes(u.key);
-    // 로그인 목록: 이모지 + vorname 만 표시
+    //  :  + vorname  
     const displayLabel = (u.emoji ? u.emoji+" " : "") + u.vorname;
     return(
       <button onClick={()=>selectUser(u)} style={{width:"100%",display:"flex",alignItems:"center",gap:13,padding:"12px 14px",borderRadius:14,border:`1px solid ${C.border}`,background:C.card,cursor:"pointer",boxShadow:"0 2px 8px rgba(44,44,44,.05)",textAlign:"left",marginBottom:7}}
@@ -1308,7 +1308,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
       <div style={{padding:"16px 16px 40px"}}>
         <button onClick={()=>setPage("kalender")} style={{width:"100%",padding:"14px 16px",borderRadius:14,border:`1.5px solid ${C.mint}`,background:C.mintLight,color:C.mintDark,fontSize:14,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:6}}
           onTouchStart={e=>{e.currentTarget.style.background=C.mint;e.currentTarget.style.color="#fff";}} onTouchEnd={e=>{e.currentTarget.style.background=C.mintLight;e.currentTarget.style.color=C.mintDark;}}>
-          📋 Dienstplan anzeigen
+          \uD83D\uDCCB Dienstplan anzeigen
         </button>
         <div style={{textAlign:"center",fontSize:10,color:C.muted,marginBottom:18}}>{"Ohne Anmeldung \u2013 nur Leseansicht"}</div>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
@@ -1327,7 +1327,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   );
 }
 
-// ── CLOCK MODAL ───────────────────────────────────────────────────────────────
+//  CLOCK MODAL 
 function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onClose,onEin,onAus}){
   const isEin = modal==="ein";
   const nowStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
@@ -1357,7 +1357,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
       <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))"}}>
         <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 20px"}}/>
         <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>
-          {isEin?"Einstempeln bestätigen":"Ausstempeln bestätigen"}
+          {isEin?"Einstempeln best\u00E4tigen":"Ausstempeln best\u00E4tigen"}
         </div>
         <div style={{fontSize:12,color:C.muted,marginBottom:14}}>
           Filiale: <strong style={{color:C.text}}>{isEin?selFiliale:clockFiliale}</strong>
@@ -1370,20 +1370,20 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 border:`2px solid ${!manualMode?C.mint:C.border}`,
                 background:!manualMode?C.mintLight:"#fff",
                 color:!manualMode?C.mintDark:C.muted}}>
-              🕐 Jetzt ({nowStr})
+              \uD83D\uDD50 Jetzt ({nowStr})
             </button>
             <button onClick={()=>setManualMode(true)}
               style={{flex:1,padding:"9px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",
                 border:`2px solid ${manualMode?C.yellow:C.border}`,
                 background:manualMode?C.yellowLight:"#fff",
                 color:manualMode?C.yellow:C.muted}}>
-              ✏️ Zeit eingeben
+              \u270F\uFE0F Zeit eingeben
             </button>
           </div>
           {manualMode&&(
             <div style={{background:C.yellowLight,borderRadius:10,padding:"12px 14px",border:`1.5px solid ${ausInvalid?C.red:C.yellow}`}}>
               <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:6}}>
-                {isEin?"Tatsächliche Einstempelzeit":"Tatsächliche Ausstempelzeit"}
+                {isEin?"Tats\u00E4chliche Einstempelzeit":"Tats\u00E4chliche Ausstempelzeit"}
               </div>
               <input type="time" value={manualTime} onChange={e=>setManualTime(e.target.value)}
                 style={{...S.input,width:"80%",display:"block",margin:"0 auto",fontSize:20,fontWeight:700,textAlign:"center",borderColor:ausInvalid?C.red:C.yellow}}/>
@@ -1392,12 +1392,12 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 const diff=(ah*60+am)-(clockInTime.getHours()*60+clockInTime.getMinutes());
                 if(diff<=0) return(
                   <div style={{fontSize:11,color:C.red,fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    ⚠ Die Zeit liegt vor der Einstempelzeit ({pad(clockInTime.getHours())}:{pad(clockInTime.getMinutes())} Uhr)
+                    \u26A0 Die Zeit liegt vor der Einstempelzeit ({pad(clockInTime.getHours())}:{pad(clockInTime.getMinutes())} Uhr)
                   </div>
                 );
                 return(
                   <div style={{fontSize:11,color:"#3a7a55",fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    ⏱ {Math.floor(diff/60)}h {diff%60}min Arbeitszeit
+                    \u23F1 {Math.floor(diff/60)}h {diff%60}min Arbeitszeit
                   </div>
                 );
               })()}
@@ -1407,7 +1407,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 if(diff<=0) return null;
                 return(
                   <div style={{fontSize:11,color:C.yellow,fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    ⏱ {Math.floor(diff/60)}h {diff%60}min bereits vergangen
+                    \u23F1 {Math.floor(diff/60)}h {diff%60}min bereits vergangen
                   </div>
                 );
               })()}
@@ -1430,7 +1430,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
 }
 
 
-// ── SETTINGS VIEW (마이페이지) ──────────────────────────────────────────────
+//  SETTINGS VIEW () 
 function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdmin }) {
   if (!user) return null;
   const [vorname, setVorname] = useState(user.vorname || "");
@@ -1445,7 +1445,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
     setUsers(prev => (Array.isArray(prev)?prev:[]).map(u =>
       u.key === userKey ? { ...u, vorname: vorname.trim() } : u
     ));
-    setSaveMsg("✅ Gespeichert!");
+    setSaveMsg("\u2705 Gespeichert!");
     setTimeout(() => setSaveMsg(""), 2000);
   }
 
@@ -1453,7 +1453,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) {
-      setSaveMsg("❌ Datei zu groß (max. 10MB)");
+      setSaveMsg("\u274C Datei zu gro\u00DF (max. 10MB)");
       return;
     }
     const b64 = await new Promise(res => {
@@ -1465,7 +1465,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
     setUsers(prev => (Array.isArray(prev)?prev:[]).map(u =>
       u.key === userKey ? { ...u, infektionsschutz: b64 } : u
     ));
-    setSaveMsg("✅ Bescheinigung hochgeladen!");
+    setSaveMsg("\u2705 Bescheinigung hochgeladen!");
     setTimeout(() => setSaveMsg(""), 2500);
   }
 
@@ -1478,12 +1478,12 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
   return (
     <div style={{position:"fixed",inset:0,background:C.bg,zIndex:500,overflowY:"auto"}}>
-      {/* 위생증 뷰어 팝업 */}
+      {/*    */}
       {impfViewer && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:600,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
           <button onClick={()=>setImpfViewer(false)}
             style={{position:"absolute",top:20,right:20,background:"rgba(255,255,255,.15)",border:"none",borderRadius:10,padding:"8px 14px",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>
-            ✕ Schließen
+            \u2715 Schlie\u00DFen
           </button>
           {isPdf ? (
             <iframe src={impfDoc} style={{width:"92vw",height:"82vh",borderRadius:12,border:"none"}}/>
@@ -1493,12 +1493,12 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         </div>
       )}
 
-      {/* 헤더 */}
+      {/*  */}
       <div style={{...S.hdr,paddingBottom:20}}>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <button onClick={onClose}
             style={{background:"rgba(255,255,255,.12)",border:"none",borderRadius:10,padding:"7px 12px",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-            ← Zurück
+            \u2190 Zur\u00FCck
           </button>
           <div>
             <div style={{fontSize:18,fontWeight:800}}>Einstellungen</div>
@@ -1509,7 +1509,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
       <div style={{padding:"16px"}}>
 
-        {/* ① 이름 변경 */}
+        {/*    */}
         <div style={{...S.card,marginBottom:12}}>
           <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"\u270F\uFE0F Name \u00E4ndern"}</div>
           <div style={{fontSize:9,color:C.muted,marginBottom:6}}>
@@ -1520,7 +1520,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             style={{...S.input,fontSize:15,marginBottom:10}}/>
           {vorname&&<div style={{fontSize:11,color:C.mintDark,marginBottom:10}}>Vorschau: Hallo, {vorname}!</div>}
           <div style={{fontSize:9,color:C.muted,marginBottom:10}}>
-            ℹ️ Der Name kann jederzeit hier geändert werden.
+            \u2139\uFE0F Der Name kann jederzeit hier ge\u00E4ndert werden.
           </div>
           <button onClick={saveName}
             style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
@@ -1531,7 +1531,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           {saveMsg&&<div style={{fontSize:11,color:C.mintDark,marginTop:8,fontWeight:600,textAlign:"center"}}>{saveMsg}</div>}
         </div>
 
-        {/* ② 🛡️ 위생증 보관함 */}
+        {/*     */}
         <div style={{...S.card,marginBottom:12}}>
           <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"\u1F6E1\uFE0F Bescheinigung von Infektionsschutzgesetz"}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:12}}>
@@ -1540,26 +1540,26 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
           {impfDoc ? (
             <div>
-              {/* 있으면 → 크게 보기 버튼 */}
+              {/*      */}
               <button onClick={()=>setImpfViewer(true)}
                 style={{width:"100%",padding:"18px",borderRadius:12,border:`2px solid ${C.mint}`,
                   background:C.mintLight,cursor:"pointer",display:"flex",flexDirection:"column",
                   alignItems:"center",gap:6,marginBottom:10}}>
                 <span style={{fontSize:32}}>{"\u1F6E1\uFE0F"}</span>
                 <span style={{fontSize:13,fontWeight:800,color:C.mintDark}}>Bescheinigung anzeigen</span>
-                <span style={{fontSize:10,color:C.muted}}>Tippen zum Vergrößern · {isPdf?"PDF":"Bild"}</span>
+                <span style={{fontSize:10,color:C.muted}}>{"Tippen zum Vergr\u00F6\u00DFern \u00B7 "}{isPdf?"PDF":"Bild"}</span>
               </button>
               <input type="file" accept="image/*,application/pdf" ref={fileRef}
                 style={{display:"none"}} onChange={handleImpfUpload}/>
               <button onClick={()=>fileRef.current.click()}
                 style={{width:"100%",padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,
                   background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                🔄 Ersetzen / Aktualisieren
+                 Ersetzen / Aktualisieren
               </button>
             </div>
           ) : (
             <div>
-              {/* 없으면 → 업로드 버튼 */}
+              {/*     */}
               <div style={{padding:"16px",borderRadius:10,border:`2px dashed ${C.red}`,background:C.redLight,
                 textAlign:"center",marginBottom:10}}>
                 <div style={{fontSize:24,marginBottom:4}}>{"\u26A0\uFE0F"}</div>
@@ -1576,28 +1576,28 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
                 style={{width:"100%",padding:"12px",borderRadius:9,border:"none",
                   background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
                   color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
-                📎 Bescheinigung hochladen
+                 Bescheinigung hochladen
               </button>
             </div>
           )}
         </div>
 
-        {/* ③ 계정 삭제 */}
+        {/*    */}
         <div style={{...S.card,marginBottom:12,border:`1px solid ${C.redLight}`}}>
           <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"\u1F5D1 Konto l\u00F6schen"}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:10}}>
-            Diese Aktion kann nicht rückgängig gemacht werden.
+            Diese Aktion kann nicht r\u00FCckg\u00E4ngig gemacht werden.
           </div>
           {!deleteConfirm ? (
             <button onClick={()=>setDeleteConfirm(true)}
               style={{width:"100%",padding:"10px",borderRadius:9,border:`1.5px solid ${C.red}`,
                 background:C.redLight,color:C.red,fontWeight:800,fontSize:12,cursor:"pointer"}}>
-              Konto löschen
+              Konto l\u00F6schen
             </button>
           ) : (
             <div>
               <div style={{fontSize:11,color:C.red,fontWeight:700,marginBottom:10,textAlign:"center"}}>
-                Wirklich löschen? Diese Aktion ist endgültig.
+                Wirklich l\u00F6schen? Diese Aktion ist endg\u00FCltig.
               </div>
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>setDeleteConfirm(false)}
@@ -1609,14 +1609,14 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
                   style={{flex:1,padding:"10px",borderRadius:9,border:"none",
                     background:`linear-gradient(135deg,${C.red},#A8432E)`,
                     color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
-                  Ja, löschen
+                  Ja, l\u00F6schen
                 </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* 로그아웃 */}
+        {/*  */}
         <div style={{marginBottom:30}}>
           <button onClick={onLogout}
             style={{width:"100%",padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,
@@ -1624,7 +1624,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             Abmelden
           </button>
           <div style={{fontSize:9,color:C.muted,textAlign:"center",lineHeight:1.5}}>
-            ℹ️ Aktive Schichten bleiben bis zum Ausstempeln gespeichert.
+            \u2139\uFE0F Aktive Schichten bleiben bis zum Ausstempeln gespeichert.
           </div>
         </div>
 
@@ -1633,13 +1633,13 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   );
 }
 
-// ── MITARBEITER ───────────────────────────────────────────────────────────────
+//  MITARBEITER 
 function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,setAntraege,onLogout,csvCtx}){
   const user=(Array.isArray(users)?users:[]).find(u=>u.key===userKey);
   const now=useNow();
   const [tab,setTab]=useState("home");
 
-  // ── 근무 상태 localStorage 유지 ──────────────────────────────────────────────
+  //    localStorage  
   const CLOCK_KEY = `teeamo_clock_${userKey}`;
   const [clockedIn,setClockedIn]=useState(()=>{
     try { const s=localStorage.getItem(CLOCK_KEY); return s?JSON.parse(s).clockedIn:false; } catch{return false;}
@@ -1651,7 +1651,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     try { const s=localStorage.getItem(CLOCK_KEY); return s?JSON.parse(s).clockFiliale:""; } catch{return "";}
   });
 
-  // 상태 바뀔 때마다 즉시 저장
+  //     
   useEffect(()=>{
     try { localStorage.setItem(CLOCK_KEY, JSON.stringify({clockedIn, clockInTime:clockInTime?clockInTime.toISOString():null, clockFiliale})); } catch{}
   },[clockedIn, clockInTime, clockFiliale]);
@@ -1659,7 +1659,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const [selFiliale,setSelFiliale]=useState(FILIALEN[0]);
   const [grund,setGrund]=useState("");
   const [elapsed,setElapsed]=useState(()=>{
-    // 앱 재시작 시 이미 근무 중이면 경과시간 복원
+    //        
     try {
       const s=localStorage.getItem(CLOCK_KEY); const v=s?JSON.parse(s):null;
       if(v&&v.clockedIn&&v.clockInTime) return Math.floor((Date.now()-new Date(v.clockInTime).getTime())/1000);
@@ -1676,11 +1676,11 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
   useEffect(()=>{
     if(!clockedIn){
-      // 로그아웃/재접속 후 임시 record 정리 (aus:null 짜리)
+      // /   record  (aus:null )
       setElapsed(0);
       return;
     }
-    // 이미 einstempeln 상태로 앱 재접속 시 임시 record 복원
+    //  einstempeln      record 
     const tempId="clock_"+user.vorname+"_"+today();
     const inStr=clockInTime?`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`:"??:??";
     setRecords(prev=>{
@@ -1697,7 +1697,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const myAntraege=antraege.filter(a=>a.user===user.vorname);
   const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
 
-  // Dienstplan 탭 뱃지: 나에게 온 Tausch 요청 수
+  // Dienstplan  :   Tausch  
   const [_notifications] = useFirebase("notifications", {});
   const pendingTauschCount = Object.values(_notifications||{})
     .filter(n => n.type==="tausch_anfrage" && n.targetUser===user.vorname && !n.gelesen).length;
@@ -1705,7 +1705,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   function handleEin(){
     const inStr=`${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`;
     const tempId="clock_"+user.vorname+"_"+today();
-    // einstempeln 즉시 aus:null 로 record 저장 → 관리자가 Aktiv 상태 볼 수 있음
+    // einstempeln  aus:null  record    Aktiv    
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
       return [...filtered,{id:tempId,user:user.vorname,date:today(),filiale:selFiliale,ein:inStr,aus:null,note:"",typ:"normal"}];
@@ -1716,7 +1716,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     const outStr=`${pad(now.getHours())}:${pad(now.getMinutes())}`;
     const inStr=`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`;
     const tempId="clock_"+user.vorname+"_"+today();
-    // 임시 record(aus:null)를 완성된 record로 교체
+    //  record(aus:null)  record 
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
       return [...filtered,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ:"normal"}];
@@ -1728,7 +1728,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     if(!nGrund.trim()){setNMsg("Bitte einen Grund angeben.");return;}
     const id = Date.now();
     const ts = id;
-    // Firebase에 직접 저장 (antraege배열 + 양쪽 관리자 notifications)
+    // Firebase   (antraege +   notifications)
     setAntraege(prev=>[...prev,{id,user:user.vorname,date:nDatum,filiale:nFiliale,ein:nEin,aus:nAus,grund:nGrund,status:"offen",zustaendig:"all"}]);
     if (window._fbDb && window._fbRef && window._fbSet) {
       ["teddy","yeaji"].forEach(mgr => {
@@ -1740,7 +1740,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
         }).catch(e => console.error(e));
       });
     }
-    setNMsg("Antrag eingereicht! Wird von Yeaji oder Teddy geprüft.");setNGrund("");
+    setNMsg("Antrag eingereicht! Wird von Yeaji oder Teddy gepr\u00FCft.");setNGrund("");
   }
 
   const elStr=`${pad(Math.floor(elapsed/3600))}:${pad(Math.floor((elapsed%3600)/60))}:${pad(elapsed%60)}`;
@@ -1768,14 +1768,14 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             <div style={{fontSize:11,opacity:.5,marginTop:1}}>{user.role}</div>
             {!user.infektionsschutz&&(
               <div style={{fontSize:10,color:"#ffb347",fontWeight:700,marginTop:4}}>
-                ⚠️ Bitte Bescheinigung von Infektionsschutzgesetz hochladen
+                \u26A0\uFE0F Bitte Bescheinigung von Infektionsschutzgesetz hochladen
               </div>
             )}
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
             <button onClick={()=>setShowSettings(true)}
               style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
-              ⚙️
+              \u2699\uFE0F
             </button>
             <button onClick={onLogout}
               style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
@@ -1800,9 +1800,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:9,height:9,borderRadius:"50%",background:"#3a9e68",boxShadow:"0 0 0 3px rgba(58,158,104,.25)",animation:"pulse 1.4s infinite"}}/>
             <div>
-              <div style={{fontSize:12,fontWeight:800,color:"#1a5c38"}}>Im Dienst · {clockFiliale}</div>
+              <div style={{fontSize:12,fontWeight:800,color:"#1a5c38"}}>{"Im Dienst \u00B7 "}{clockFiliale}</div>
               <div style={{fontSize:10,color:"#3a7a55"}}>
-                {clockInTime?`seit ${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())} Uhr`:""} · {elStr}
+                {clockInTime?`seit ${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())} Uhr`:""} \u00B7 {elStr}
               </div>
             </div>
           </div>
@@ -1826,7 +1826,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               {clockedIn&&<span style={{fontSize:11,opacity:.85,fontVariantNumeric:"tabular-nums"}}>{elStr}</span>}
             </button>
             <div style={{marginTop:9,fontSize:12,color:C.muted}}>
-              {clockedIn?<span>Eingecheckt: <span style={{color:C.mintDark,fontWeight:700}}>{clockFiliale}</span></span>:"Filiale wählen & einstempeln"}
+              {clockedIn?<span>Eingecheckt: <span style={{color:C.mintDark,fontWeight:700}}>{clockFiliale}</span></span>:"Filiale w\u00E4hlen & einstempeln"}
             </div>
           </div>
           {!clockedIn&&(
@@ -1841,7 +1841,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           )}
           <div style={{...S.card,marginBottom:12}}>
             <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:5}}>Grund <span style={{fontWeight:400,color:C.muted}}>(optional)</span></div>
-            <textarea value={grund} onChange={e=>setGrund(e.target.value)} placeholder="z. B. früher erschienen wegen Lieferung…" style={{width:"100%",height:58,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
+            <textarea value={grund} onChange={e=>setGrund(e.target.value)} placeholder="z. B. fr\u00FCher erschienen wegen Lieferung\u2026" style={{width:"100%",height:58,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
           </div>
           <div style={S.card}>
             <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,letterSpacing:".05em",textTransform:"uppercase"}}>{"Monats\u00FCbersicht"}</div>
@@ -1890,13 +1890,13 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             </div>
             <div style={{marginBottom:12}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Grund <span style={{color:C.red}}>*</span></div>
-              <textarea value={nGrund} onChange={e=>{setNGrund(e.target.value);setNMsg("");}} placeholder="z. B. Vergessen einzustempeln…" style={{width:"100%",height:66,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
+              <textarea value={nGrund} onChange={e=>{setNGrund(e.target.value);setNMsg("");}} placeholder="z. B. Vergessen einzustempeln\u2026" style={{width:"100%",height:66,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
             </div>
             {nMsg&&<div style={{fontSize:11,color:nMsg.startsWith("Bitte")?C.red:C.mintDark,marginBottom:9,fontWeight:600}}>{nMsg}</div>}
             <button onClick={submitNachtrag} style={{width:"100%",padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer"}}>Antrag einreichen</button>
           </div>
 
-          {/* Meine Anträge - Nachtrag 탭 아래 통합 */}
+          {/* Meine Antrge - Nachtrag    */}
           {myAntraege.length>0&&(
             <div style={S.card}>
               <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>{"Meine Antr\u00E4ge"}</div>
@@ -1904,9 +1904,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
                 <div key={a.id} style={{paddingBottom:i<myAntraege.length-1?9:0,marginBottom:i<myAntraege.length-1?9:0,borderBottom:i<myAntraege.length-1?`1px solid ${C.border}`:"none"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                     <div>
-                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{a.date} · {a.filiale}</div>
-                      <div style={{fontSize:10,color:C.muted}}>{a.ein} – {a.aus}</div>
-                      {a.grund&&<div style={{fontSize:9,color:C.muted,marginTop:2}}>📌 {a.grund}</div>}
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{a.date} \u00B7 {a.filiale}</div>
+                      <div style={{fontSize:10,color:C.muted}}>{a.ein} \u2013 {a.aus}</div>
+                      {a.grund&&<div style={{fontSize:9,color:C.muted,marginTop:2}}>{"\uD83D\uDCCC "}{a.grund}</div>}
                     </div>
                     <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"Genehmigt":"Abgelehnt"}</span>
                   </div>
@@ -1923,10 +1923,10 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
       <div style={S.nav}>
         {[
-          {id:"home",       icon:"🏠", lbl:"Startseite"},
-          {id:"dienstplan", icon:"📋", lbl:"Dienstplan", badge: pendingTauschCount},
-          {id:"einspringen",icon:"🙋", lbl:"Einspringen"},
-          {id:"nachtrag",   icon:"🕐", lbl:"Nachtrag"},
+          {id:"home",       icon:"\uD83C\uDFE0", lbl:"Startseite"},
+          {id:"dienstplan", icon:"\uD83D\uDCCB", lbl:"Dienstplan", badge: pendingTauschCount},
+          {id:"einspringen",icon:"\uD83D\uDE4B", lbl:"Einspringen"},
+          {id:"nachtrag",   icon:"\uD83D\uDD50", lbl:"Nachtrag"},
         ].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
             <div style={{position:"relative",display:"inline-block"}}>
@@ -1968,7 +1968,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   );
 }
 
-// ── STATISTIK ─────────────────────────────────────────────────────────────────
+//  STATISTIK 
 function StatistikTab({records,users}){
   const [selMonth,setSelMonth]=useState("2026-06");
   const [exported,setExported]=useState(null);
@@ -1987,7 +1987,7 @@ function StatistikTab({records,users}){
   function downloadXLSX(rows, filename, sheetName="Daten") {
     try {
       const ws = window.XLSX.utils.aoa_to_sheet(rows);
-      // 헤더 행 굵게 (기본 스타일)
+      //    ( )
       const wb = window.XLSX.utils.book_new();
       window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
       window.XLSX.writeFile(wb, filename);
@@ -2007,15 +2007,15 @@ function StatistikTab({records,users}){
     else downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
   }
   function exportSummary(fmt="xlsx"){
-    const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","Teenjoy (Std)","Ø Std/Tag"];
+    const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","Teenjoy (Std)","\u00D8 Std/Tag"];
     const rows=[hdr,...empList.map(emp=>{
       const er=monthRecs.filter(r=>r.user===emp.vorname);
       const total=er.reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
       return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["Teenjoy"].toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
     })];
-    if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monatsübersicht");
-    else downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
+    if(fmt==="xlsx") downloadXLSX(rows,`Monats\u00FCbersicht_${selMonth}.xlsx`,"Monats\u00FCbersicht");
+    else downloadCSV(rows,`Monats\u00FCbersicht_${selMonth}.csv`);
   }
 
   return(
@@ -2030,7 +2030,7 @@ function StatistikTab({records,users}){
           ))}
         </div>
       </div>
-      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,letterSpacing:".06em",textTransform:"uppercase"}}>Übersicht – {MONTH_LABELS[selMonth]}</div>
+      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,letterSpacing:".06em",textTransform:"uppercase"}}>{"\u00DCbersicht \u2013 "}{MONTH_LABELS[selMonth]}</div>
       <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:14}}>
         {empList.map(emp=>{
           const er=monthRecs.filter(r=>r.user===emp.vorname);
@@ -2046,7 +2046,7 @@ function StatistikTab({records,users}){
                 <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:emp.emoji?18:12,color:"#fff",flexShrink:0}}>{emp.emoji||emp.kuerzel}</div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:800,color:C.text}}>{emp.emoji&&<span style={{marginRight:3}}>{emp.emoji}</span>}{emp.vorname}</div>
-                  <div style={{fontSize:9,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}{contract>0?` · Vertrag: ${contract}h`:""}</div>
+                  <div style={{fontSize:9,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}{contract>0?` \u00B7 Vertrag: ${contract}h`:""}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:18,fontWeight:800,color:C.mintDark}}>{total.toFixed(1)}<span style={{fontSize:10,color:C.muted}}> Std</span></div>
@@ -2075,8 +2075,8 @@ function StatistikTab({records,users}){
         <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>{"\u1F4E5 Daten exportieren"}</div>
         <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV \u2013 \u00F6ffnet direkt in Excel"}</div>
         {[
-          {title:"Stundennachweis (Details)",sub:"Jeder Tag · Name · Datum · Filiale · Ein/Aus · Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
-          {title:"Monatsübersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin · Gesamtstunden · je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`Übersicht_${selMonth}`},
+          {title:"Stundennachweis (Details)",sub:"Jeder Tag \u00B7 Name \u00B7 Datum \u00B7 Filiale \u00B7 Ein/Aus \u00B7 Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
+          {title:"Monats\u00FCbersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin \u00B7 Gesamtstunden \u00B7 je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`\u00DCbersicht_${selMonth}`},
         ].map(({title,sub,fnXlsx,fnCsv,file})=>(
           <div key={file} style={{background:"rgba(255,255,255,.07)",borderRadius:10,padding:"12px",marginBottom:8}}>
             <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{title}</div>
@@ -2105,10 +2105,10 @@ function StatistikTab({records,users}){
 
 
 
-// ── ÜBERSICHT DETAIL TAB ─────────────────────────────────────────────────────
+//  BERSICHT DETAIL TAB 
 
 
-// ── ÜBERSICHT ALL TAB ────────────────────────────────────────────────────────
+//  BERSICHT ALL TAB 
 function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab }) {
 
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
@@ -2120,7 +2120,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
 
   return (
     <div style={{padding:"14px"}}>
-      {/* 서브탭 */}
+      {/*  */}
       <div style={{display:"flex",gap:0,marginBottom:12,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
         {[{id:"all",l:"All Staffs"},{id:"today",l:"Heutige Staffs"}].map(({id,l})=>(
           <button key={id} onClick={()=>setUTab(id)}
@@ -2131,7 +2131,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
         ))}
       </div>
 
-      {/* ── 탭 1: All Staffs ── */}
+      {/*   1: All Staffs  */}
       {uTab==="all"&&(
         <div>
           {empList.map(emp=>(
@@ -2158,10 +2158,10 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
         </div>
       )}
 
-      {/* ── 탭 2: Heutige Staffs ── */}
+      {/*   2: Heutige Staffs  */}
       {uTab==="today"&&(
         <div>
-          {/* 범례 */}
+          {/*  */}
           <div style={{...S.card,marginBottom:10,padding:"9px 12px"}}>
             <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>Legende</div>
             <div style={{display:"flex",flexWrap:"wrap",gap:"6px 14px",marginBottom:6}}>
@@ -2185,25 +2185,25 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
               ))}
             </div>
             <div style={{fontSize:8,color:C.muted,marginTop:6,borderTop:`1px solid ${C.border}`,paddingTop:5}}>
-              Hinweis: Nicht erschienen = kein Einstempeleintrag für heute.
+              Hinweis: Nicht erschienen = kein Einstempeleintrag f\u00FCr heute.
             </div>
           </div>
 
           {todayShiftEmps.length===0?(
             <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"24px"}}>
-              Kein Dienstplan für heute eingetragen.
+              Kein Dienstplan f\u00FCr heute eingetragen.
             </div>
           ):(()=>{
-            // 지점 순서: Arkaden → Aegidiimarkt → Teenjoy
+            //  : Arkaden  Aegidiimarkt  Teenjoy
             const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","Teenjoy"];
-            // 직원별 오늘 shift 정보 수집
+            //   shift  
             const withShift = todayShiftEmps.map(emp=>{
               const shift=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===todayStr);
               const fil=shift?(shift.filiale||shift.f):"";
               const time=shift?(shift.time||shift.t||""):"";
               return {emp,shift,fil,time};
             });
-            // 지점별 그룹 → 각 그룹 내 근무시간 순 정렬
+            //         
             return filOrder.map(fil=>{
               const group=withShift.filter(x=>x.fil===fil);
               if(group.length===0) return null;
@@ -2245,8 +2245,8 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
   );
 }
 
-// ── ADMIN ANTRÄGE VIEW ────────────────────────────────────────────────────────
-// ── ANTRÄGE CARD (최상위 컴포넌트) ─────────────────────────────────────────
+//  ADMIN ANTRGE VIEW 
+//  ANTRGE CARD ( ) 
 function NachtragCard({ a, isOpen, onToggle, onDecide, onReopen }) {
   var sc = a.status==="genehmigt" ? C.mintDark : a.status==="abgelehnt" ? C.red : C.yellow;
   var sb = a.status==="genehmigt" ? C.mintLight : a.status==="abgelehnt" ? C.redLight : C.yellowLight;
@@ -2266,7 +2266,7 @@ function NachtragCard({ a, isOpen, onToggle, onDecide, onReopen }) {
         </div>
         <div style={{display:"flex", alignItems:"center", gap:8}}>
           <span style={{fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:99, color:sc, background:sb}}>{sl}</span>
-          <span style={{fontSize:11, color:C.muted}}>{isOpen ? "▲" : "▼"}</span>
+          <span style={{fontSize:11, color:C.muted}}>{isOpen ? "\u25B2" : "\u25BC"}</span>
         </div>
       </button>
       {isOpen && (
@@ -2312,7 +2312,7 @@ function NachtragCard({ a, isOpen, onToggle, onDecide, onReopen }) {
               style={{width:"100%", padding:"8px", borderRadius:9,
                 border:"1px solid "+C.yellow, background:C.yellowLight,
                 color:"#b37400", fontWeight:700, fontSize:11, cursor:"pointer"}}>
-              Entscheidung ändern
+              Entscheidung \u00E4ndern
             </button>
           )}
         </div>
@@ -2436,7 +2436,7 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
 }
 
 
-// ── ADMIN DIENSTPLAN VIEW ────────────────────────────────────────────────────
+//  ADMIN DIENSTPLAN VIEW 
 function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedule }) {
   const [viewMode, setViewMode] = useState("plan"); // "plan" | "by_emp" | "by_date"
   const [openEmp, setOpenEmp] = useState(null);
@@ -2444,13 +2444,13 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
   const empList = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key))
     .sort((a,b)=>a.vorname.localeCompare(b.vorname));
 
-  // 날짜별: schedule에서 이번달 날짜 목록
+  // : schedule   
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
   const allDates = [...new Set(
     empList.flatMap(emp => norm(schedule[emp.vorname]||[]).map(s=>s.date||s.d))
   )].filter(Boolean).sort((a,b)=>a.localeCompare(b));
 
-  // 직원 상태 (오늘 기준)
+  //   ( )
   const todayStr = today();
   function getEmpStatus(vorname) {
     const r = records.find(r=>r.user===vorname&&r.date===todayStr);
@@ -2460,11 +2460,11 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
 
   return (
     <div style={{paddingBottom:20}}>
-      {/* 탭 선택 */}
+      {/*   */}
       <div style={{display:"flex",gap:0,margin:"14px 14px 0",borderRadius:12,overflow:"hidden",border:`1px solid ${C.border}`}}>
-        {[{id:"plan",l:"📋 Plan"},
-          {id:"by_emp",l:"👤 Nach Mitarbeiter"},
-          {id:"by_date",l:"📅 Nach Datum"}].map(({id,l})=>(
+        {[{id:"plan",l:"\uD83D\uDCCB Plan"},
+          {id:"by_emp",l:"\uD83D\uDC64 Nach Mitarbeiter"},
+          {id:"by_date",l:"\uD83D\uDCC5 Nach Datum"}].map(({id,l})=>(
           <button key={id} onClick={()=>setViewMode(id)}
             style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",fontSize:10,fontWeight:700,
               background:viewMode===id?C.navy:"#fff",
@@ -2474,7 +2474,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
         ))}
       </div>
 
-      {/* ① 근무표 이미지 (줌 가능) */}
+      {/*    ( ) */}
       {viewMode==="plan"&&(
         <div style={{padding:"14px"}}>
           {!MANAGERS.includes(userKey)&&manager?.vorname&&(
@@ -2486,7 +2486,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
         </div>
       )}
 
-      {/* ② 직원별 보기 */}
+      {/*    */}
       {viewMode==="by_emp"&&(
         <div style={{padding:"14px"}}>
           {empList.map(emp=>{
@@ -2533,14 +2533,14 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                               <div style={{fontSize:13,fontWeight:700,color:C.text}}>
                                 {new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
                               </div>
-                              <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                              <div style={{fontSize:10,color:C.muted}}>{f}{t?` \u00B7 ${t}`:""}</div>
                             </div>
                           </div>
                           <div style={{textAlign:"right"}}>
                             {rec?(
                               <div>
                                 <div style={{fontSize:11,fontWeight:700,color:rec.aus?C.mintDark:C.yellow}}>
-                                  {rec.ein}{rec.aus?` – ${rec.aus}`:" (läuft)"}
+                                  {rec.ein}{rec.aus?` \u2013 ${rec.aus}`:" (l\u00E4uft)"}
                                 </div>
                                 <div style={{fontSize:9,color:C.muted}}>{stdLabel(rec.ein,rec.aus)}</div>
                               </div>
@@ -2559,7 +2559,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
         </div>
       )}
 
-      {/* ③ 날짜별 보기 */}
+      {/*    */}
       {viewMode==="by_date"&&(
         <div style={{padding:"14px"}}>
           {allDates.length===0&&(
@@ -2569,7 +2569,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
           )}
           {allDates.map(d=>{
             const isOpen=openDate===d;
-            // 그 날 근무 예정 직원 목록
+            //      
             const dayEmps = empList.filter(emp=>
               norm(schedule[emp.vorname]||[]).some(s=>(s.date||s.d)===d)
             );
@@ -2588,7 +2588,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                 </button>
                 {isOpen&&(
                   <div style={{borderTop:`1px solid ${C.border}`}}>
-                    {/* 지점별로 묶어서 표시 */}
+                    {/*    */}
                     {FILIALEN.map(fil=>{
                       const filEmps=dayEmps.filter(emp=>{
                         const s=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===d);
@@ -2598,7 +2598,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                       return(
                         <div key={fil}>
                           <div style={{padding:"7px 14px",background:C.bg,fontSize:10,fontWeight:700,color:C.muted}}>
-                            {filialInit(fil)} · {fil}
+                            {filialInit(fil)} \u00B7 {fil}
                           </div>
                           {filEmps.map((emp,i)=>{
                             const shift=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===d);
@@ -2606,7 +2606,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                             const status=rec?.aus?"Feierabend":rec?.ein?"Im Dienst":"Nicht erschienen";
                             const statusColor=rec?.aus?C.mintDark:rec?.ein?C.yellow:C.red;
                             const statusBg=rec?.aus?C.mintLight:rec?.ein?C.yellowLight:C.redLight;
-                            const statusLabel=rec?.aus?"Feierabend ✓":rec?.ein?"Im Dienst ●":"Nicht erschienen";
+                            const statusLabel=rec?.aus?"Feierabend \u2713":rec?.ein?"Im Dienst \u25CF":"Nicht erschienen";
                             return(
                               <div key={emp.key} style={{display:"flex",justifyContent:"space-between",
                                 alignItems:"center",padding:"10px 14px",
@@ -2624,7 +2624,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                                     )}
                                     {rec&&(
                                       <div style={{fontSize:10,color:statusColor,fontWeight:600}}>
-                                        {rec.ein}{rec.aus?` – ${rec.aus}`:""} {rec.aus?`(${stdLabel(rec.ein,rec.aus)})`:""}</div>
+                                        {rec.ein}{rec.aus?` \u2013 ${rec.aus}`:""} {rec.aus?`(${stdLabel(rec.ein,rec.aus)})`:""}</div>
                                     )}
                                   </div>
                                 </div>
@@ -2649,7 +2649,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
   );
 }
 
-// ── DIENSTPLAN UPLOAD + AI ANALYSE ───────────────────────────────────────────
+//  DIENSTPLAN UPLOAD + AI ANALYSE 
 function DienstplanUploadView({ records, users }) {
   const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
   const [schedule, setSchedule, scheduleReady] = useFirebase("schedule", {});
@@ -2659,32 +2659,32 @@ function DienstplanUploadView({ records, users }) {
   const [showKeyInput, setShowKeyInput] = useState(false);
   const fileRef = useRef(null);
 
-  // plan.png도 Firebase Storage 대신 base64로 Firebase에 저장
+  // plan.png Firebase Storage  base64 Firebase 
   const [planImg, setPlanImg, planReady] = useFirebase("planImage", null);
 
-  // 이미지 선택 → 분석
+  //    
   async function handleFile(e) {
     const file = e.target.files[0];
     if (!file) return;
     if (!apiKey) { setShowKeyInput(true); return; }
 
-    // HEIC/HEIF 체크
+    // HEIC/HEIF 
     if (file.type === "image/heic" || file.type === "image/heif" || file.name.toLowerCase().endsWith(".heic")) {
-      setMsg({ type: "err", text: "❌ HEIC 형식은 지원되지 않아요. JPEG로 변환 후 업로드해주세요." });
+      setMsg({ type: "err", text: "\u274C HEIC \uD615\uC2DD\uC740 \uC9C0\uC6D0\uB418\uC9C0 \uC54A\uC544\uC694. JPEG\uB85C \uBCC0\uD658 \uD6C4 \uC5C5\uB85C\uB4DC\uD574\uC8FC\uC138\uC694." });
       return;
     }
 
     const isPdf = file.type === "application/pdf";
 
-    // 파일 크기 체크 (PDF 20MB, 이미지 5MB)
+    //    (PDF 20MB,  5MB)
     const maxSize = isPdf ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
     if (file.size > maxSize) {
-      setMsg({ type: "err", text: `❌ Datei zu groß (${(file.size/1024/1024).toFixed(1)}MB). Max: ${isPdf?"20MB":"5MB"}` });
+      setMsg({ type: "err", text: `\u274C Datei zu gro\u00DF (${(file.size/1024/1024).toFixed(1)}MB). Max: ${isPdf?"20MB":"5MB"}` });
       return;
     }
 
     setAnalyzing(true);
-    setMsg({ type: "info", text: "⏳ Analysiere… (kann 20–40 Sek. dauern)" });
+    setMsg({ type: "info", text: "\u23F3 Analysiere\u2026 (kann 20\u201340 Sek. dauern)" });
 
     const b64 = await new Promise(res => {
       const r = new FileReader();
@@ -2695,14 +2695,14 @@ function DienstplanUploadView({ records, users }) {
     if (!isPdf) setImgSrc(dataUrl);
 
     const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
-    const promptText = `Du bist ein Assistent, der Dienstpläne analysiert. Analysiere diesen Dienstplan sehr sorgfältig.
+    const promptText = `Du bist ein Assistent, der Dienstpl\u00E4ne analysiert. Analysiere diesen Dienstplan sehr sorgf\u00E4ltig.
 
-WICHTIG: Erkenne nur Namen aus dieser exakten Liste (Groß-/Kleinschreibung ignorieren):
+WICHTIG: Erkenne nur Namen aus dieser exakten Liste (Gro\u00DF-/Kleinschreibung ignorieren):
 ${empNames}
 
 Regeln:
 - Jeder Name in der Liste entspricht GENAU einem Mitarbeiter. Ordne gefundene Namen der Liste zu (auch bei leichten Schreibfehlern im Bild).
-- Filialen: "Arkaden" oder "TEEAMO Arkaden" → "TEEAMO Arkaden"; "Aegidiimarkt" oder "Aegidiimarkt" oder ähnlich → "TEEAMO Aegidiimarkt"; "Teenjoy" oder "TEEnJOY" → "Teenjoy"
+- Filialen: "Arkaden" oder "TEEAMO Arkaden" \u2192 "TEEAMO Arkaden"; "Aegidiimarkt" oder "Aegidiimarkt" oder \u00E4hnlich \u2192 "TEEAMO Aegidiimarkt"; "Teenjoy" oder "TEEnJOY" \u2192 "Teenjoy"
 - Datum: Jahr ${new Date().getFullYear()}, Format YYYY-MM-DD
 - Zeit: Format HH:MM-HH:MM (z.B. "09:00-17:00"), null wenn nicht angegeben
 - Ignoriere Namen die NICHT in der obigen Liste sind
@@ -2737,7 +2737,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
           })
         });
       } catch(fetchErr) {
-        throw new Error(`Netzwerkfehler: ${fetchErr.message}. Bitte API-Schlüssel prüfen und erneut versuchen.`);
+        throw new Error(`Netzwerkfehler: ${fetchErr.message}. Bitte API-Schl\u00FCssel pr\u00FCfen und erneut versuchen.`);
       }
 
       if (!res.ok) {
@@ -2751,7 +2751,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       let parsed;
       try {
         const raw = JSON.parse(clean);
-        // 짧은 키(d/f/t) → 긴 키(date/filiale/time) 변환
+        //  (d/f/t)   (date/filiale/time) 
         parsed = {};
         for (const [name, shifts] of Object.entries(raw)) {
           parsed[name] = (shifts || []).map(s => ({
@@ -2765,24 +2765,24 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         throw new Error(`Raw: ${text.slice(0, 200)}`);
       }
 
-      // Firebase에 저장: 배열값을 인덱스 객체로 변환 (Firebase 배열 호환)
+      // Firebase :     (Firebase  )
       const parsedForFb = {};
       for (const [name, shifts] of Object.entries(parsed)) {
         parsedForFb[name] = Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]));
       }
       if (window._fbDb && window._fbRef && window._fbSet) {
         window._fbSet(window._fbRef(window._fbDb, "schedule"), parsedForFb)
-          .then(()=>console.log("✅ schedule saved:", Object.keys(parsedForFb)))
+          .then(()=>console.log("\u2705 schedule saved:", Object.keys(parsedForFb)))
           .catch(e=>console.error("schedule save error:", e));
       }
       setSchedule(parsed);
-      // 이미지만 Firebase에 저장 (PDF는 저장 안 함)
+      //  Firebase  (PDF   )
       if (!isPdf && b64.length < 4000000) {
         setPlanImg(dataUrl);
       }
-      setMsg({ type: "ok", text: `✅ Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
+      setMsg({ type: "ok", text: `\u2705 Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
     } catch (err) {
-      setMsg({ type: "err", text: `❌ 오류: ${err.message}` });
+      setMsg({ type: "err", text: `\u274C \uC624\uB958: ${err.message}` });
     }
     setAnalyzing(false);
   }
@@ -2792,7 +2792,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
   return (
     <div style={{padding:"14px"}}>
 
-      {/* API 키 입력 */}
+      {/* API   */}
       {showKeyInput && (
         <div style={{...S.card, marginBottom:12, border:`1.5px solid ${C.yellow}`}}>
           <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>{"\u1F511 Anthropic API-Schl\u00FCssel"}</div>
@@ -2806,7 +2806,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         </div>
       )}
 
-      {/* 업로드 버튼 */}
+      {/*   */}
       <div style={{...S.card, marginBottom:12}}>
         <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"\u1F4CB Dienstplan hochladen"}</div>
         <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{"Bild hochladen \u2192 KI analysiert automatisch die Schichten"}</div>
@@ -2815,18 +2815,18 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
           style={{width:"100%",padding:"12px",borderRadius:11,border:`2px dashed ${C.mint}`,
             background:C.mintLight,color:C.mintDark,fontWeight:800,fontSize:13,cursor:"pointer",
             opacity:analyzing?0.6:1}}>
-          {analyzing ? "⏳ KI analysiert…" : "📷 Bild oder PDF auswählen & analysieren"}
+          {analyzing ? "\u23F3 KI analysiert\u2026" : "\uD83D\uDCF7 Bild oder PDF ausw\u00E4hlen & analysieren"}
         </button>
         {!apiKey&&(
           <button onClick={()=>setShowKeyInput(true)}
             style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
-            🔑 API-Schlüssel eingeben
+            \uD83D\uDD11 API-Schl\u00FCssel eingeben
           </button>
         )}
         {apiKey&&(
           <button onClick={()=>setShowKeyInput(v=>!v)}
             style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
-            🔑 API-Schlüssel ändern
+            \uD83D\uDD11 API-Schl\u00FCssel \u00E4ndern
           </button>
         )}
         {msg&&(
@@ -2838,7 +2838,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         )}
       </div>
 
-      {/* 근무표 이미지 */}
+      {/*   */}
       {displayImg && (
         <div style={{marginBottom:12}}>
           <img src={displayImg} alt="Dienstplan"
@@ -2846,7 +2846,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         </div>
       )}
 
-      {/* 추출된 일정 */}
+      {/*   */}
       {schedule && Object.keys(schedule).length > 0 && (
         <div>
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>
@@ -2868,12 +2868,12 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
                         <div style={{fontSize:11,fontWeight:700,color:C.text}}>
                           {new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                         </div>
-                        <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                        <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` \u00B7 ${s.time}`:""}</div>
                       </div>
                       <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
                         color:status==="erledigt"?C.mintDark:status==="aktiv"?C.yellow:C.muted,
                         background:status==="erledigt"?C.mintLight:status==="aktiv"?C.yellowLight:C.border}}>
-                        {status==="erledigt"?"✅ Gearbeitet":status==="aktiv"?"🟡 Aktiv":"⏳ Ausstehend"}
+                        {status==="erledigt"?"\u2705 Gearbeitet":status==="aktiv"?"\uD83D\uDFE1 Aktiv":"\u23F3 Ausstehend"}
                       </span>
                     </div>
                   );
@@ -2898,7 +2898,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   const [openAId, setOpenAId] = useState(null);
   const [uTab, setUTab] = useState("all");
   const safeUsers=Array.isArray(users)&&users.length>0?users:INIT_USERS;
-  // userKey로 찾되, 없으면 key prefix로 fallback (동적 생성 계정)
+  // userKey ,  key prefix fallback (  )
   const manager=safeUsers.find(u=>u.key===userKey)
     || {key:userKey, vorname:userKey?.split("_")[0]||"Manager", emoji:"", kuerzel:"M", role:"Admin"};
   const empList=safeUsers.filter(u=>!MANAGERS.includes(u.key)).sort((a,b)=>a.vorname.localeCompare(b.vorname));
@@ -2919,22 +2919,22 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   const [fsTime, setFsTime] = useState("");
   const [fsNote, setFsNote] = useState("");
 
-  // 내 담당 미처리 알림 (Alarm 탭에 표시)
+  //     (Alarm  )
   const pendingNotifs = Object.entries(notifications||{})
     .filter(([,n]) => n.zustaendig === userKey && !n.gelesen && !n.bearbeitetVon)
     .sort((a,b) => b[1].ts - a[1].ts);
 
-  // 이미 다른 관리자가 처리했지만 내 알림으로도 온 경우 (읽음 처리만)
+  //         ( )
   const handledByOther = Object.entries(notifications||{})
     .filter(([,n]) => n.zustaendig === userKey && !n.gelesen && n.bearbeitetVon && n.bearbeitetVon !== userKey);
 
-  // Nachtrag(antraege) 미처리: 양쪽 관리자에게 표시, 한명이 처리하면 숨김
+  // Nachtrag(antraege) :   ,   
   const offeneNachtraege = antraege.filter(a => a.status==="offen");
 
-  // 알림 + Nachtraege 합산 뱃지
+  //  + Nachtraege  
   const alarmCount = pendingNotifs.length + offeneNachtraege.length;
 
-  // Archiv (처리완료)
+  // Archiv ()
   const myArchiv = Object.entries(archiv||{})
     .filter(([,a]) => a.bearbeitetVon === userKey || a.zustaendig === userKey)
     .sort((a,b) => b[1].ts - a[1].ts);
@@ -2956,9 +2956,9 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     setFsTime(""); setFsNote("");
   }
 
-  // ── 처리 함수들 ──
+  //    
   function handleTausch(notifKey, n, ok) {
-    // 이미 다른 관리자가 처리했으면 그냥 읽음만
+    //      
     const antrag = (Array.isArray(tauschAntraege)?tauschAntraege:[]).find(a=>a.id===n.antragId);
 
     if (ok && antrag) {
@@ -2966,7 +2966,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       if (window._fbDb && window._fbRef && window._fbSet && window._fbOnValue) {
         window._fbOnValue(window._fbRef(window._fbDb, "schedule"), snap => {
           const raw = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
-          // Firebase 배열 → 실제 배열 정규화
+          // Firebase     
           const norm = (v) => !v ? [] : Array.isArray(v) ? v : Object.values(v);
           const sched = {};
           for (const [k,v] of Object.entries(raw)) sched[k] = norm(v);
@@ -2986,7 +2986,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     }
 
     const entscheidung = ok ? "genehmigt" : "abgelehnt";
-    // 양쪽 관리자 알림 모두 bearbeitetVon 표시
+    //     bearbeitetVon 
     ["teddy","yeaji"].forEach(mgr => {
       const k = `${notifKey.replace(/_teddy$|_yeaji$/,"")}_${mgr}`;
       if (window._fbDb && window._fbRef && window._fbSet) {
@@ -2997,13 +2997,13 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     });
     markRead(notifKey);
 
-    // Archiv에 저장
+    // Archiv 
     if (window._fbDb && window._fbRef && window._fbSet) {
       window._fbSet(window._fbRef(window._fbDb, `archiv/${notifKey}`), {
         ...n, entscheidung, bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
       }).catch(e=>console.error(e));
     }
-    // Antraege 탭으로 이동
+    // Antraege  
     setTab("antraege"); setATab("tausch");
   }
 
@@ -3033,7 +3033,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       }
     });
     markRead(notifKey);
-    // absagenList에 없으면 추가 (알림만 있고 list에 없는 경우)
+    // absagenList   (  list  )
     if (n.absageId) {
       setAbsagenList(prev => {
         const list = Array.isArray(prev)?prev:[];
@@ -3048,7 +3048,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         ...n, entscheidung, bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
       }).catch(e=>console.error(e));
     }
-    // Antraege 탭으로 이동
+    // Antraege  
     setTab("antraege"); setATab("absage");
   }
 
@@ -3064,7 +3064,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       }
     });
     markRead(notifKey);
-    // antraege에 없으면 추가 (알림만 있고 antraege에 없는 경우)
+    // antraege   (  antraege  )
     if (n.antragId) {
       setAntraege(prev => {
         const list = Array.isArray(prev)?prev:[];
@@ -3079,7 +3079,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         ...n, entscheidung, bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
       }).catch(e=>console.error(e));
     }
-    // Antraege 탭으로 이동
+    // Antraege  
     setTab("antraege"); setATab("nachtrag");
   }
 
@@ -3099,10 +3099,10 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     }
   }
 
-  // Nachtrag 직접 처리 (notifications 경유 없이 antraege에서 직접)
+  // Nachtrag   (notifications   antraege )
   function approveNachtrag(id, ok) {
     setAntraege(prev=>prev.map(a=>a.id===id?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
-    // notifications에서 해당 nachtrag 알림 bearbeitetVon 처리
+    // notifications  nachtrag  bearbeitetVon 
     ["teddy","yeaji"].forEach(mgr => {
       const k = `nachtrag_${id}_${mgr}`;
       if (window._fbDb && window._fbRef && window._fbSet) {
@@ -3113,13 +3113,13 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     });
   }
 
-  // ── Alarm 탭 카드 렌더 ──
+  //  Alarm    
   function renderAlarmCard(key, n) {
     const isAbsagen   = n.type==="absagen"||n.kategorie==="Schichtabsage";
     const isTausch    = n.type==="tausch_manager"||n.kategorie==="Schichttausch";
     const isEinspring = n.type==="einspringen"||n.kategorie==="Einspringen";
     const isNachtrag  = n.type==="nachtrag"||n.kategorie==="Nachtrag";
-    const isPrufen    = n.type==="prüfen";
+    const isPrufen    = n.type==="pr\u00FCfen";
 
     const borderColor = isAbsagen?C.red:isTausch?C.mint:isEinspring?C.mint:isNachtrag?C.yellow:C.yellow;
 
@@ -3127,12 +3127,12 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       <div key={key} style={{...S.card,marginBottom:10,border:`1.5px solid ${borderColor}`}}>
         {/* Schichtabsage */}
         {isAbsagen && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.red,marginBottom:4}}>🚫 Schichtabsage · {n.user||n.userName}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.red,marginBottom:4}}>{"\uD83D\uDEAB Schichtabsage \u00B7 "}{n.user||n.userName}</div>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
-          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>📌 "{n.grund}"</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` \u00B7 ${n.time}`:""}</div>
+          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC ""}{n.grund}"</div>
           <div style={{fontSize:9,color:C.muted,marginBottom:8}}>{"\u2139\uFE0F Bei Genehmigung wird die Schicht als freie Schicht ver\u00F6ffentlicht."}</div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>handleAbsagenNotif(key,n,false)}
@@ -3173,23 +3173,23 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
 
         {/* Einspringen */}
         {isEinspring && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:4}}>🙋 Einspringen · {n.user}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"\uD83D\uDE4B Einspringen \u00B7 "}{n.user}</div>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{n.filiale}{n.time?` \u00B7 ${n.time}`:""}</div>
           <button onClick={()=>handleEinspringen(key,n)}
             style={{width:"100%",padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"\u2713 Zur Kenntnis genommen"}</button>
         </>}
 
         {/* Nachtrag (via notification) */}
         {isNachtrag && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>🕐 Nachtrag · {n.user}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"\uD83D\uDD50 Nachtrag \u00B7 "}{n.user}</div>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{n.filiale} · {n.ein} – {n.aus}</div>
-          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>📌 "{n.grund}"</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{n.filiale} \u00B7 {n.ein} \u2013 {n.aus}</div>
+          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC ""}{n.grund}"</div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>handleNachtragNotif(key,n,false)}
               style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
@@ -3198,11 +3198,11 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           </div>
         </>}
 
-        {/* Prüfen */}
+        {/* Prfen */}
         {isPrufen && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>⚠️ Stempelzeit prüfen · {n.user}</div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}</div>
-          <div style={{fontSize:10,color:C.yellow,marginBottom:10}}>Geplant: {n.plannedTime} · Gearbeitet: {n.actualEin}–{n.actualAus}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"\u26A0\uFE0F Stempelzeit pr\u00FCfen \u00B7 "}{n.user}</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{new Date(n.date).toLocaleDateString("de-DE")} \u00B7 {n.filiale}</div>
+          <div style={{fontSize:10,color:C.yellow,marginBottom:10}}>Geplant: {n.plannedTime} \u00B7 Gearbeitet: {n.actualEin}\u2013{n.actualAus}</div>
           <button onClick={()=>markRead(key)}
             style={{width:"100%",padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>{"\u2713 Zur Kenntnis"}</button>
         </>}
@@ -3210,14 +3210,14 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
     );
   }
 
-  // ── Erledigt 카드 ──
+  //  Erledigt  
   function renderErledigtCard(key, a) {
     const isOpen = erledigtExpanded[key];
     const label = a.kategorie || a.type || "Sonstige";
-    const emojiMap = {Schichtabsage:"🚫",Schichttausch:"🔄",Einspringen:"🙋",Nachtrag:"🕐"};
-    const emoji = emojiMap[label] || "📌";
+    const emojiMap = {Schichtabsage:"\uD83D\uDEAB",Schichttausch:"\uD83D\uDD04",Einspringen:"\uD83D\uDE4B",Nachtrag:"\uD83D\uDD50"};
+    const emoji = emojiMap[label] || "\uD83D\uDCCC";
     const eColor = a.entscheidung==="genehmigt"?C.mintDark:a.entscheidung==="abgelehnt"?C.red:C.muted;
-    const eLabel = a.entscheidung==="genehmigt"?"✅ Genehmigt":a.entscheidung==="abgelehnt"?"❌ Abgelehnt":"✓ Bestätigt";
+    const eLabel = a.entscheidung==="genehmigt"?"\u2705 Genehmigt":a.entscheidung==="abgelehnt"?"\u274C Abgelehnt":"\u2713 Best\u00E4tigt";
     return (
       <div key={key} style={{...S.card,marginBottom:6,border:`1px solid ${C.border}`}}>
         <button onClick={()=>setErledigtExpanded(p=>({...p,[key]:!p[key]}))}
@@ -3225,7 +3225,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:14}}>{emoji}</span>
             <div style={{textAlign:"left"}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.text}}>{label} · {a.user||a.initiator}</div>
+              <div style={{fontSize:11,fontWeight:700,color:C.text}}>{label} \u00B7 {a.user||a.initiator}</div>
               <div style={{fontSize:9,color:C.muted}}>{a.date?new Date(a.date).toLocaleDateString("de-DE"):(a.initiatorDate?new Date(a.initiatorDate).toLocaleDateString("de-DE"):"")}</div>
             </div>
           </div>
@@ -3237,26 +3237,26 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         {isOpen && (
           <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
             {a.kategorie==="Schichtabsage"&&<>
-              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` · ${a.time}`:""}</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` \u00B7 ${a.time}`:""}</div>
               <div style={{fontSize:10,color:C.text,marginBottom:2}}>Grund: {a.grund}</div>
             </>}
             {a.kategorie==="Schichttausch"&&<>
               <div style={{fontSize:10,color:C.muted,marginBottom:2}}>
-                {a.initiator} ({new Date(a.initiatorDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}) ⇄ {a.partner} ({new Date(a.partnerDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})})
+                {a.initiator} ({new Date(a.initiatorDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}) \u21C4 {a.partner} ({new Date(a.partnerDate).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})})
               </div>
             </>}
             {a.kategorie==="Nachtrag"&&<>
-              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} · {a.ein} – {a.aus}</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} \u00B7 {a.ein} \u2013 {a.aus}</div>
               <div style={{fontSize:10,color:C.text,marginBottom:2}}>Grund: {a.grund}</div>
             </>}
             {a.kategorie==="Einspringen"&&<>
-              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` · ${a.time}`:""}</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` \u00B7 ${a.time}`:""}</div>
             </>}
             <div style={{fontSize:9,color:C.muted,marginTop:4}}>Bearbeitet: {safeUsers.find(u=>u.key===a.bearbeitetVon)?.vorname||a.bearbeitetVon}</div>
             <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
               <button onClick={()=>deleteArchiv(key)}
                 style={{fontSize:9,color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:"3px 8px",background:C.redLight,cursor:"pointer"}}>
-                🗑 Löschen
+                \uD83D\uDDD1 L\u00F6schen
               </button>
             </div>
           </div>
@@ -3288,7 +3288,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
             <button onClick={()=>setShowMgrSettings(true)}
               style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
-              ⚙️
+              \u2699\uFE0F
             </button>
             <button onClick={onLogout}
               style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
@@ -3296,10 +3296,10 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             </button>
           </div>
         </div>
-        {/* Admin 위생증 경고 */}
+        {/* Admin   */}
         {!manager?.infektionsschutz&&(
           <div style={{fontSize:10,color:"#ffb347",fontWeight:700,marginTop:8}}>
-            ⚠️ Bitte Bescheinigung von Infektionsschutzgesetz hochladen
+            \u26A0\uFE0F Bitte Bescheinigung von Infektionsschutzgesetz hochladen
           </div>
         )}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginTop:14}}>
@@ -3314,7 +3314,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         </div>
       </div>
 
-      {/* ── ÜBERSICHT ── */}
+      {/*  BERSICHT  */}
       {tab==="uebersicht"&&!detailKey&&(
         <UebersichtAllTab
           empList={empList}
@@ -3348,8 +3348,8 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
               {delRecordConfirm&&(
                 <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
                   <div style={{background:"#fff",borderRadius:18,padding:"24px 20px",width:"100%",maxWidth:320}}>
-                    <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:8,textAlign:"center"}}>{"Eintrag löschen?"}</div>
-                    <div style={{fontSize:12,color:C.muted,marginBottom:20,textAlign:"center"}}>{"Dieser Eintrag wird dauerhaft gelöscht."}</div>
+                    <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:8,textAlign:"center"}}>{"Eintrag l\u00F6schen?"}</div>
+                    <div style={{fontSize:12,color:C.muted,marginBottom:20,textAlign:"center"}}>{"Dieser Eintrag wird dauerhaft gel\u00F6scht."}</div>
                     <div style={{display:"flex",gap:10}}>
                       <button onClick={()=>setDelRecordConfirm(null)}
                         style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>
@@ -3357,7 +3357,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                       </button>
                       <button onClick={()=>{setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>r.id!==delRecordConfirm));setDelRecordConfirm(null);}}
                         style={{flex:1,padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,"+C.red+",#A8432E)",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
-                        {"Löschen"}
+                        {"L\u00F6schen"}
                       </button>
                     </div>
                   </div>
@@ -3365,7 +3365,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
               )}
               <button onClick={()=>setDetailKey(null)}
                 style={{background:"none",border:"none",cursor:"pointer",color:C.mintDark,fontSize:13,fontWeight:700,marginBottom:12}}>
-                {"< Zurück"}
+                {"< Zur\u00FCck"}
               </button>
               <div style={{...S.card,display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
                 <div style={{width:52,height:52,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:17,color:"#fff"}}>{emp.kuerzel}</div>
@@ -3415,7 +3415,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         {mDiff!==null&&<span style={{fontSize:11,fontWeight:700,color:mDiff>=0?C.mintDark:C.red}}>{(mDiff>=0?"+":"")+mDiff.toFixed(1)+"h"}</span>}
-                        <span style={{fontSize:11,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                        <span style={{fontSize:11,color:C.muted}}>{isOpen?"\u25B2":"\u25BC"}</span>
                       </div>
                     </button>
                     {isOpen&&(
@@ -3462,7 +3462,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       )}
 
 
-      {/* ── DIENSTPLAN ── */}
+      {/*  DIENSTPLAN  */}
       {tab==="dienstplan"&&(
         <AdminDienstplanView
           records={records}
@@ -3474,7 +3474,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         />
       )}
 
-      {/* ── ANTRÄGE / ARCHIV ── */}
+      {/*  ANTRGE / ARCHIV  */}
       {tab==="antraege"&&(()=>{
         const nList=Array.isArray(antraege)?antraege:[];
         const tList=Array.isArray(tauschAntraege)?tauschAntraege:[];
@@ -3521,7 +3521,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                   ):(
                     <button onClick={()=>{setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"offen"}:x));setOpenAId(null);}}
                       style={{width:"100%",padding:"8px",borderRadius:9,border:"1px solid "+C.yellow,background:C.yellowLight,color:"#b37400",fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                      Entscheidung ändern
+                      Entscheidung \u00E4ndern
                     </button>
                   )}
                 </div>
@@ -3595,7 +3595,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                   {a.status!=="offen"&&(
                     <button onClick={()=>setAbsagenList(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"offen"}:x))}
                       style={{width:"100%",padding:"8px",borderRadius:9,border:"1px solid "+C.yellow,background:C.yellowLight,color:"#b37400",fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                      Entscheidung ändern
+                      Entscheidung \u00E4ndern
                     </button>
                   )}
                 </div>
@@ -3655,14 +3655,14 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         );
       })()}
 
-      {/* ── STATISTIK ── */}
+      {/*  STATISTIK  */}
       {tab==="statistik"&&<StatistikTab records={records} users={users}/>}
 
-      {/* ── ALARM ── */}
+      {/*  ALARM  */}
       {tab==="benachrichtigungen"&&(
         <div style={{padding:"14px"}}>
 
-          {/* ① Freie Schicht eintragen – 항상 맨 위 */}
+          {/*  Freie Schicht eintragen     */}
           <div style={{...S.card,marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"\u2795 Freie Schicht eintragen"}</div>
             <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
@@ -3697,11 +3697,11 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
               style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
                 background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
                 color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
-              Schicht veröffentlichen
+              Schicht ver\u00F6ffentlichen
             </button>
           </div>
 
-          {/* 등록된 빈 근무 목록 */}
+          {/*     */}
           {(Array.isArray(freieSchichten)?freieSchichten:[]).length>0&&(
             <div style={{marginBottom:14}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>{"Ver\u00F6ffentlichte Schichten"}</div>
@@ -3709,34 +3709,34 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                 <div key={s.id} style={{...S.card,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
                     <div style={{fontSize:11,fontWeight:700,color:C.text}}>{new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}</div>
-                    <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                    <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` \u00B7 ${s.time}`:""}</div>
                     {s.note&&<div style={{fontSize:9,color:C.muted}}>{s.note}</div>}
                   </div>
                   <button onClick={()=>setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==s.id))}
                     style={{fontSize:10,color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:"3px 8px",background:C.redLight,cursor:"pointer"}}>
-                    Löschen
+                    L\u00F6schen
                   </button>
                 </div>
               ))}
             </div>
           )}
 
-          {/* ② 미처리 알림 (Offene Vorgänge) */}
+          {/*    (Offene Vorgnge) */}
           {(pendingNotifs.length>0||offeneNachtraege.length>0) ? (
             <div style={{marginBottom:14}}>
               <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>
-                🔔 Offene Vorgänge ({pendingNotifs.length+offeneNachtraege.length})
+                \uD83D\uDD14 Offene Vorg\u00E4nge ({pendingNotifs.length+offeneNachtraege.length})
               </div>
 
-              {/* Nachtrag (antraege에서 직접) */}
+              {/* Nachtrag (antraege ) */}
               {offeneNachtraege.map(a=>(
                 <div key={a.id} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.yellow}`}}>
-                  <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>🕐 Nachtrag · {a.user}</div>
+                  <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"\uD83D\uDD50 Nachtrag \u00B7 "}{a.user}</div>
                   <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
                     {new Date(a.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
                   </div>
-                  <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} · {a.ein} – {a.aus}</div>
-                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>📌 "{a.grund}"</div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} \u00B7 {a.ein} \u2013 {a.aus}</div>
+                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC ""}{a.grund}"</div>
                   <div style={{display:"flex",gap:8}}>
                     <button onClick={()=>approveNachtrag(a.id,false)}
                       style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
@@ -3746,7 +3746,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                 </div>
               ))}
 
-              {/* 알림 (tausch/absage/einspringen/prufen) */}
+              {/*  (tausch/absage/einspringen/prufen) */}
               {pendingNotifs.map(([key,n])=>renderAlarmCard(key,n))}
             </div>
           ) : (
@@ -3757,11 +3757,11 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             </div>
           )}
 
-          {/* ③ Erledigt (처리 완료, 맨 아래) */}
+          {/*  Erledigt ( ,  ) */}
           {myArchiv.length>0&&(
             <div style={{marginBottom:14}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
-                ✅ Erledigt ({myArchiv.length})
+                \u2705 Erledigt ({myArchiv.length})
               </div>
               {myArchiv.map(([key,a])=>renderErledigtCard(key,a))}
             </div>
@@ -3769,13 +3769,13 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         </div>
       )}
 
-      {/* ── NAVIGATION ── */}
+      {/*  NAVIGATION  */}
       <div style={S.nav}>
-        {[{id:"uebersicht",icon:"👥",lbl:"Übersicht"},
-          {id:"dienstplan",icon:"📋",lbl:"Dienstplan"},
-          {id:"antraege",icon:"📂",lbl:"Anträge"},
-          {id:"benachrichtigungen",icon:"🔔",lbl:`Alarm${alarmCount>0?" ("+alarmCount+")":""}` },
-          {id:"statistik",icon:"📊",lbl:"Statistik"}].map(t=>(
+        {[{id:"uebersicht",icon:"\uD83D\uDC65",lbl:"\u00DCbersicht"},
+          {id:"dienstplan",icon:"\uD83D\uDCCB",lbl:"Dienstplan"},
+          {id:"antraege",icon:"\uD83D\uDCC2",lbl:"Antr\u00E4ge"},
+          {id:"benachrichtigungen",icon:"\uD83D\uDD14",lbl:`Alarm${alarmCount>0?" ("+alarmCount+")":""}` },
+          {id:"statistik",icon:"\uD83D\uDCCA",lbl:"Statistik"}].map(t=>(
           <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
             <div style={{position:"relative",display:"inline-block"}}>
               <span style={{fontSize:19}}>{t.icon}</span>
@@ -3801,7 +3801,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
               <div style={{width:48,height:48,borderRadius:"50%",background:C.redLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 14px"}}>{"\u1F5D1"}</div>
               <div style={{fontSize:16,fontWeight:800,color:C.text,textAlign:"center",marginBottom:6}}>{"Konto l\u00F6schen?"}</div>
               <div style={{fontSize:12,color:C.muted,textAlign:"center",marginBottom:20}}>
-                Das Konto von <strong style={{color:C.text}}>{empToDel?.vorname}</strong> wird dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.
+                Das Konto von <strong style={{color:C.text}}>{empToDel?.vorname}</strong>{" wird dauerhaft gel\u00F6scht. Diese Aktion kann nicht r\u00FCckg\u00E4ngig gemacht werden."}
               </div>
               <div style={{display:"flex",gap:9}}>
                 <button onClick={()=>setDeleteConfirm(null)} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
@@ -3816,28 +3816,28 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
   );
 }
 
-// ── APP ROOT ──────────────────────────────────────────────────────────────────
+//  APP ROOT 
 function App(){
   const [screen,setScreen]=useState("login");
   const [userKey,setUserKey]=useState(null);
   const { getPin, setPin, initPins } = usePinStore();
 
-  // 모든 데이터를 Firebase 실시간 동기화
+  //   Firebase  
   const [users,    setUsers,    usersReady]    = useFirebase("users",    INIT_USERS);
   const [records,  setRecords,  recordsReady]  = useFirebase("records",  INIT_RECORDS);
   const [antraege, setAntraege, antraegeReady] = useFirebase("antraege", INIT_ANTRAEGE);
   const csvCtx = useDienstplanCSV();
 
-  // INIT_USERS의 PIN을 LS에 최초 1회 저장
+  // INIT_USERS PIN LS  1 
   useEffect(() => { if (usersReady) initPins(INIT_USERS); }, [usersReady]);
 
-  // ── 기존 계정 마이그레이션: 누락 필드 자동 보완 ──────────────────────────
+  //    :     
   useEffect(() => {
     if (!usersReady) return;
     const arr = Array.isArray(users) ? users : [];
     if (arr.length === 0) return;
 
-    // 역할 통합 맵
+    //   
     const roleMap = {
       "Mitarbeiterin":"Staff","Mitarbeiter":"Staff",
       "Chefin":"Admin","Chef":"Admin",
@@ -3847,9 +3847,9 @@ function App(){
     let changed = false;
     const migrated = arr.map(u => {
       const patch = {};
-      // role 통합
+      // role 
       if (roleMap[u.role]) { patch.role = roleMap[u.role]; }
-      // 누락 필드 기본값
+      //   
       if (u.infektionsschutz === undefined) patch.infektionsschutz = null;
       if (u.contractHours   === undefined) patch.contractHours   = 0;
       if (u.nachname        === undefined) patch.nachname        = "";
@@ -3877,7 +3877,7 @@ function App(){
   }
   function handleLogout(){setUserKey(null);setScreen("login");}
 
-  // users에 setUsers 대신 Firebase 직접 쓰기 wrapper
+  // users setUsers  Firebase   wrapper
   function setUsersFirebase(updater) {
     setUsers(updater);
   }
@@ -3885,7 +3885,7 @@ function App(){
   if(!allReady) return(
     <div style={{maxWidth:500,margin:"0 auto",minHeight:"100vh",background:"#fff",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
 
-      {/* 큰 원형 테두리 - 브랜드 로고 스타일 */}
+      {/*    -    */}
       <div style={{
         position:"absolute",
         width:"min(88vw,420px)",height:"min(88vw,420px)",
@@ -3903,10 +3903,10 @@ function App(){
         transform:"translate(-50%,-50%)"
       }}/>
 
-      {/* 로고 콘텐츠 */}
+      {/*   */}
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",animation:"fadeIn .7s ease both",zIndex:1}}>
 
-        {/* Münster 상단 */}
+        {/* Mnster  */}
         <div style={{
           fontSize:"min(5.5vw,22px)",
           fontStyle:"italic",
@@ -3916,7 +3916,7 @@ function App(){
           marginBottom:8
         }}>{"M\u00FCnster"}</div>
 
-        {/* teeamo 메인 로고 */}
+        {/* teeamo   */}
         <div style={{
           fontSize:"min(15vw,64px)",
           fontWeight:900,
@@ -3926,7 +3926,7 @@ function App(){
           marginBottom:18
         }}>teeamo</div>
 
-        {/* 3개 아이콘 (브랜드 특유의 꽃/하트 심볼) */}
+        {/* 3  (  / ) */}
         <div style={{display:"flex",gap:"min(5vw,22px)",marginBottom:22}}>
           {[
             {color:"#9B2A2A"},
@@ -3957,7 +3957,7 @@ function App(){
         </div>
       </div>
 
-      {/* 하단 로딩 점 */}
+      {/*    */}
       <div style={{position:"absolute",bottom:48,display:"flex",gap:8}}>
         {[0,1,2].map(i=>(
           <div key={i} style={{
