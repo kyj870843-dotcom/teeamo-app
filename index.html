@@ -1207,7 +1207,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,maxWidth:260,margin:"0 auto"}}>
             {["1","2","3","4","5","6","7","8","9","","0","⌫"].map((k,i)=>(
               k===""?<div key={i}/>:
-              <button key={i} onClick={()=>{"k==="⌫"?setPin(p=>p.slice(0,-1)):pinKey(k)"}}
+              <button key={i} onClick={()=>{k==="⌫"?setPin(p=>p.slice(0,-1)):pinKey(k)}}}
                 style={{height:56,borderRadius:14,border:`1px solid ${C.border}`,background:C.card,fontSize:k==="⌫"?20:22,fontWeight:600,color:C.text,cursor:"pointer"}}
                 onTouchStart={e=>e.currentTarget.style.background="#eee"} onTouchEnd={e=>e.currentTarget.style.background=C.card}>{k}</button>
             ))}
