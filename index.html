@@ -596,7 +596,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                 <div style={{fontSize:12,fontWeight:700,color:myShift===s?C.mintDark:C.text}}>
                   {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                 </div>
-                <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                <div style={{fontSize:10,color:C.muted}}>{f}{t?` \u00B7 ${t}`:""}</div>
               </button>
             );
           })}
@@ -630,7 +630,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                     <div style={{fontSize:12,fontWeight:700,color:targetShift===s?C.mintDark:C.text}}>
                       {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                     </div>
-                    <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                    <div style={{fontSize:10,color:C.muted}}>{f}{t?` \u00B7 ${t}`:""}</div>
                   </button>
                 );
               })
@@ -895,7 +895,7 @@ function AbsagenModal({ shift, userName, onClose, onSubmit }) {
           <div style={{fontSize:12,fontWeight:700,color:C.red}}>
             {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{f}{t?` · ${t}`:""}</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{f}{t?` \u00B7 ${t}`:""}</div>
         </div>
         <div style={{marginBottom:14}}>
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund <span style={{color:C.red}}>*</span></div>
@@ -930,7 +930,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   useEffect(() => {
     if (status === "pr\u00FCfen" && actualRec) {
       const zustaendig = f === "Teenjoy" ? "teddy" : "yeaji";
-      const notifKey = `prüfen_${userName}_${d}`;
+      const notifKey = `pr\u00FCfen_${userName}_${d}`;
       setNotifications(prev => {
         if (prev && prev[notifKey]) return prev;
         return { ...(prev||{}), [notifKey]: {
@@ -953,14 +953,14 @@ function ShiftRow({ s, userName, records, setNotifications }) {
     .find(t => t.partner === userName && t.partnerDate === d) : null;
 
   const tauschLabel = myTausch ? ({
-    ausstehend_bestaetigung: `🔄 Tausch-Anfrage an ${myTausch.partner} · Warte auf Bestätigung`,
-    ausstehend_manager:      `🔄 Tausch wartet auf Manager-Genehmigung`,
-    getauscht:               `✅ Getauscht mit ${myTausch.partner}`,
-    abgelehnt_partner:       `❌ Tausch von ${myTausch.partner} abgelehnt`,
+    ausstehend_bestaetigung: `\uD83D\uDD04 Tausch-Anfrage an ${myTausch.partner} \u00B7 Warte auf Best\u00E4tigung`,
+    ausstehend_manager:      `\uD83D\uDD04 Tausch wartet auf Manager-Genehmigung`,
+    getauscht:               `\u2705 Getauscht mit ${myTausch.partner}`,
+    abgelehnt_partner:       `\u274C Tausch von ${myTausch.partner} abgelehnt`,
   }[myTausch.status] || null) : partnerTausch ? ({
-    ausstehend_bestaetigung: `🔄 Tausch angefragt von ${partnerTausch.initiator} · Deine Antwort ausstehend`,
-    getauscht:               `✅ Getauscht mit ${partnerTausch.initiator}`,
-    abgelehnt_partner:       `❌ Tausch abgelehnt`,
+    ausstehend_bestaetigung: `\uD83D\uDD04 Tausch angefragt von ${partnerTausch.initiator} \u00B7 Deine Antwort ausstehend`,
+    getauscht:               `\u2705 Getauscht mit ${partnerTausch.initiator}`,
+    abgelehnt_partner:       `\u274C Tausch abgelehnt`,
   }[partnerTausch.status] || null) : null;
 
   function handleAbsagen(antrag) {
@@ -999,7 +999,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
             background:alreadyAbgesagt?C.redLight:C.card,
             cursor:status==="ausstehend"&&!alreadyAbgesagt?"pointer":"default"}}>
           <div style={{fontSize:12,fontWeight:600,color:alreadyAbgesagt?C.red:C.text}}>
-            {f}{t ? ` · ${t}` : ""}
+            {f}{t ? ` \u00B7 ${t}` : ""}
             {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>{"\uD83D\uDEAB Absage "}{alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
           {tauschLabel && <div style={{fontSize:9,color:C.mintDark,marginTop:3,fontWeight:600}}>{tauschLabel}</div>}
           </div>
@@ -1068,7 +1068,7 @@ function EinspringenView({ userName }) {
         }).catch(e => console.error(e));
       });
     }
-    setMsg(`✅ Du bist jetzt für ${new Date(schicht.date).toLocaleDateString("de-DE")} in ${schicht.filiale} eingeplant!`);
+    setMsg(`\u2705 Du bist jetzt f\u00FCr ${new Date(schicht.date).toLocaleDateString("de-DE")} in ${schicht.filiale} eingeplant!`);
     setTimeout(() => setMsg(null), 4000);
   }
 
@@ -2076,8 +2076,8 @@ function StatistikTab({records,users}){
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
       return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["Teenjoy"].toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
     })];
-    if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monats\u00FCbersicht");
-    else downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
+    if(fmt==="xlsx") downloadXLSX(rows,`Monats\u00FCbersicht_${selMonth}.xlsx`,"Monats\u00FCbersicht");
+    else downloadCSV(rows,`Monats\u00FCbersicht_${selMonth}.csv`);
   }
 
   return(
@@ -2108,7 +2108,7 @@ function StatistikTab({records,users}){
                 <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:emp.emoji?18:12,color:"#fff",flexShrink:0}}>{emp.emoji||emp.kuerzel}</div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:800,color:C.text}}>{emp.emoji&&<span style={{marginRight:3}}>{emp.emoji}</span>}{emp.vorname}</div>
-                  <div style={{fontSize:9,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}{contract>0?` · Vertrag: ${contract}h`:""}</div>
+                  <div style={{fontSize:9,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}{contract>0?` \u00B7 Vertrag: ${contract}h`:""}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:18,fontWeight:800,color:C.mintDark}}>{total.toFixed(1)}<span style={{fontSize:10,color:C.muted}}> Std</span></div>
@@ -2138,7 +2138,7 @@ function StatistikTab({records,users}){
         <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV \u2013 \u00F6ffnet direkt in Excel"}</div>
         {[
           {title:"Stundennachweis (Details)",sub:"Jeder Tag \u00B7 Name \u00B7 Datum \u00B7 Filiale \u00B7 Ein/Aus \u00B7 Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
-          {title:"Monats\u00FCbersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin \u00B7 Gesamtstunden \u00B7 je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`Übersicht_${selMonth}`},
+          {title:"Monats\u00FCbersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin \u00B7 Gesamtstunden \u00B7 je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`\u00DCbersicht_${selMonth}`},
         ].map(({title,sub,fnXlsx,fnCsv,file})=>(
           <div key={file} style={{background:"rgba(255,255,255,.07)",borderRadius:10,padding:"12px",marginBottom:8}}>
             <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{title}</div>
@@ -2904,14 +2904,14 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                               <div style={{fontSize:13,fontWeight:700,color:C.text}}>
                                 {new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
                               </div>
-                              <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                              <div style={{fontSize:10,color:C.muted}}>{f}{t?` \u00B7 ${t}`:""}</div>
                             </div>
                           </div>
                           <div style={{textAlign:"right"}}>
                             {rec?(
                               <div>
                                 <div style={{fontSize:11,fontWeight:700,color:rec.aus?C.mintDark:C.yellow}}>
-                                  {rec.ein}{rec.aus?` – ${rec.aus}`:" (l\u00E4uft)"}
+                                  {rec.ein}{rec.aus?` \u2013 ${rec.aus}`:" (l\u00E4uft)"}
                                 </div>
                                 <div style={{fontSize:9,color:C.muted}}>{stdLabel(rec.ein,rec.aus)}</div>
                               </div>
@@ -2995,7 +2995,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                                     )}
                                     {rec&&(
                                       <div style={{fontSize:10,color:statusColor,fontWeight:600}}>
-                                        {rec.ein}{rec.aus?` – ${rec.aus}`:""} {rec.aus?`(${stdLabel(rec.ein,rec.aus)})`:""}</div>
+                                        {rec.ein}{rec.aus?` \u2013 ${rec.aus}`:""} {rec.aus?`(${stdLabel(rec.ein,rec.aus)})`:""}</div>
                                     )}
                                   </div>
                                 </div>
@@ -3050,7 +3050,7 @@ function DienstplanUploadView({ records, users }) {
     //    (PDF 20MB,  5MB)
     const maxSize = isPdf ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
     if (file.size > maxSize) {
-      setMsg({ type: "err", text: `❌ Datei zu groß (${(file.size/1024/1024).toFixed(1)}MB). Max: ${isPdf?"20MB":"5MB"}` });
+      setMsg({ type: "err", text: `\u274C Datei zu gro\u00DF (${(file.size/1024/1024).toFixed(1)}MB). Max: ${isPdf?"20MB":"5MB"}` });
       return;
     }
 
@@ -3066,14 +3066,14 @@ function DienstplanUploadView({ records, users }) {
     if (!isPdf) setImgSrc(dataUrl);
 
     const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
-    const promptText = `Du bist ein Assistent, der Dienstpläne analysiert. Analysiere diesen Dienstplan sehr sorgfältig.
+    const promptText = `Du bist ein Assistent, der Dienstpl\u00E4ne analysiert. Analysiere diesen Dienstplan sehr sorgf\u00E4ltig.
 
-WICHTIG: Erkenne nur Namen aus dieser exakten Liste (Groß-/Kleinschreibung ignorieren):
+WICHTIG: Erkenne nur Namen aus dieser exakten Liste (Gro\u00DF-/Kleinschreibung ignorieren):
 ${empNames}
 
 Regeln:
 - Jeder Name in der Liste entspricht GENAU einem Mitarbeiter. Ordne gefundene Namen der Liste zu (auch bei leichten Schreibfehlern im Bild).
-- Filialen: "Arkaden" oder "TEEAMO Arkaden" → "TEEAMO Arkaden"; "Aegidiimarkt" oder "Aegidiimarkt" oder ähnlich → "TEEAMO Aegidiimarkt"; "Teenjoy" oder "TEEnJOY" → "Teenjoy"
+- Filialen: "Arkaden" oder "TEEAMO Arkaden" \u2192 "TEEAMO Arkaden"; "Aegidiimarkt" oder "Aegidiimarkt" oder \u00E4hnlich \u2192 "TEEAMO Aegidiimarkt"; "Teenjoy" oder "TEEnJOY" \u2192 "Teenjoy"
 - Datum: Jahr ${new Date().getFullYear()}, Format YYYY-MM-DD
 - Zeit: Format HH:MM-HH:MM (z.B. "09:00-17:00"), null wenn nicht angegeben
 - Ignoriere Namen die NICHT in der obigen Liste sind
@@ -3108,7 +3108,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
           })
         });
       } catch(fetchErr) {
-        throw new Error(`Netzwerkfehler: ${fetchErr.message}. Bitte API-Schlüssel prüfen und erneut versuchen.`);
+        throw new Error(`Netzwerkfehler: ${fetchErr.message}. Bitte API-Schl\u00FCssel pr\u00FCfen und erneut versuchen.`);
       }
 
       if (!res.ok) {
@@ -3151,9 +3151,9 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       if (!isPdf && b64.length < 4000000) {
         setPlanImg(dataUrl);
       }
-      setMsg({ type: "ok", text: `✅ Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
+      setMsg({ type: "ok", text: `\u2705 Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
     } catch (err) {
-      setMsg({ type: "err", text: `❌ 오류: ${err.message}` });
+      setMsg({ type: "err", text: `\u274C \uC624\uB958: ${err.message}` });
     }
     setAnalyzing(false);
   }
@@ -3239,7 +3239,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
                         <div style={{fontSize:11,fontWeight:700,color:C.text}}>
                           {new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                         </div>
-                        <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                        <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` \u00B7 ${s.time}`:""}</div>
                       </div>
                       <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
                         color:status==="erledigt"?C.mintDark:status==="aktiv"?C.yellow:C.muted,
@@ -3502,7 +3502,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` \u00B7 ${n.time}`:""}</div>
           <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC "}{n.grund}</div>
           <div style={{fontSize:9,color:C.muted,marginBottom:8}}>{"\u2139\uFE0F Bei Genehmigung wird die Schicht als freie Schicht ver\u00F6ffentlicht."}</div>
           <div style={{display:"flex",gap:8}}>
@@ -3548,7 +3548,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{n.filiale}{n.time?` \u00B7 ${n.time}`:""}</div>
           <button onClick={()=>handleEinspringen(key,n)}
             style={{width:"100%",padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"\u2713 Zur Kenntnis genommen"}</button>
         </>}
@@ -3608,7 +3608,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
         {isOpen && (
           <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
             {a.kategorie==="Schichtabsage"&&<>
-              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` · ${a.time}`:""}</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` \u00B7 ${a.time}`:""}</div>
               <div style={{fontSize:10,color:C.text,marginBottom:2}}>Grund: {a.grund}</div>
             </>}
             {a.kategorie==="Schichttausch"&&<>
@@ -3621,7 +3621,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
               <div style={{fontSize:10,color:C.text,marginBottom:2}}>Grund: {a.grund}</div>
             </>}
             {a.kategorie==="Einspringen"&&<>
-              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` · ${a.time}`:""}</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale}{a.time?` \u00B7 ${a.time}`:""}</div>
             </>}
             <div style={{fontSize:9,color:C.muted,marginTop:4}}>Bearbeitet: {safeUsers.find(u=>u.key===a.bearbeitetVon)?.vorname||a.bearbeitetVon}</div>
             <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
@@ -3807,7 +3807,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
                 <div key={s.id} style={{...S.card,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
                     <div style={{fontSize:11,fontWeight:700,color:C.text}}>{new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}</div>
-                    <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                    <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` \u00B7 ${s.time}`:""}</div>
                     {s.note&&<div style={{fontSize:9,color:C.muted}}>{s.note}</div>}
                   </div>
                   <button onClick={()=>setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==s.id))}
