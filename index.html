@@ -132,22 +132,37 @@ function usePersist(lsKey, init) {
 }
 
 // PIN   
-function usePinStore() {
-  const [pins, setPins] = useFirebase("pins", {});
+// PIN cache (Firebase에서 로드)
+const _pinCache = {};
 
+// Firebase에서 PIN 로드 (앱 시작 시 한 번)
+function loadPinsFromFirebase() {
+  if (!window._fbDb || !window._fbRef || !window._fbOnValue) return;
+  window._fbOnValue(window._fbRef(window._fbDb, "pins"), snap => {
+    const data = snap.val() || {};
+    Object.assign(_pinCache, data);
+    // localStorage에도 동기화
+    Object.entries(data).forEach(([k,v]) => { if(v) lsSet(`pin_${k}`, v); });
+  });
+}
+
+function usePinStore() {
   function getPin(userKey) {
-    // Firebase 우선, 없으면 localStorage fallback
-    if (pins && pins[userKey]) return pins[userKey];
+    // 캐시 우선, 없으면 localStorage
+    if (_pinCache[userKey]) return _pinCache[userKey];
     return lsGet(`pin_${userKey}`, null);
   }
 
   function setPin(userKey, pin) {
+    // localStorage 저장
     lsSet(`pin_${userKey}`, pin);
+    // 캐시 업데이트
+    _pinCache[userKey] = pin;
+    // Firebase 저장
     if (window._fbDb && window._fbRef && window._fbSet) {
       window._fbSet(window._fbRef(window._fbDb, `pins/${userKey}`), pin)
         .catch(e => console.error("PIN save error:", e));
     }
-    setPins(prev => ({...(prev||{}), [userKey]: pin}));
   }
 
   function initPins(users) {
@@ -4070,6 +4085,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 //  APP ROOT 
 function App(){
   const [screen,setScreen]=useState("login");
+  React.useEffect(()=>{ loadPinsFromFirebase(); },[]);
   const [userKey,setUserKey]=useState(null);
   const { getPin, setPin, initPins } = usePinStore();
 
