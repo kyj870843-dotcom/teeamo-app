@@ -4013,7 +4013,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             <div style={{marginBottom:8}}>
               <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Datum</div>
               <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)}
-                style={{...S.input,width:"100%",fontSize:12}}/>
+                style={{...S.input,width:"auto",fontSize:12}}/>
               {fsDate&&<div style={{fontSize:11,fontWeight:700,color:C.mintDark,marginTop:4}}>
                 {new Date(fsDate).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
               </div>}
@@ -4021,11 +4021,21 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             <div style={{marginBottom:8}}>
               <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Uhrzeit</div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <input type="text" inputMode="numeric" value={fsTimeFrom} onChange={e=>setFsTimeFrom(e.target.value)}
+                <input type="text" inputMode="numeric" value={fsTimeFrom}
+                  onChange={e=>{
+                    let v=e.target.value.replace(/[^0-9]/g,"");
+                    if(v.length>=3) v=v.slice(0,2)+":"+v.slice(2,4);
+                    setFsTimeFrom(v);
+                  }}
                   placeholder="von HH:MM" maxLength={5}
                   style={{...S.input,flex:1,fontSize:12,textAlign:"center"}}/>
                 <span style={{color:C.muted,fontWeight:700}}>–</span>
-                <input type="text" inputMode="numeric" value={fsTimeTo} onChange={e=>setFsTimeTo(e.target.value)}
+                <input type="text" inputMode="numeric" value={fsTimeTo}
+                  onChange={e=>{
+                    let v=e.target.value.replace(/[^0-9]/g,"");
+                    if(v.length>=3) v=v.slice(0,2)+":"+v.slice(2,4);
+                    setFsTimeTo(v);
+                  }}
                   placeholder="bis HH:MM" maxLength={5}
                   style={{...S.input,flex:1,fontSize:12,textAlign:"center"}}/>
               </div>
