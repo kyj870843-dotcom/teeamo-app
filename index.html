@@ -3173,28 +3173,54 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
           <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>
             Extrahierte Schichten
           </div>
-          {Object.entries(schedule).map(([name, shifts]) => {
-            if (!Array.isArray(shifts) || shifts.length === 0) return null;
+          {Object.entries(schedule).map(([name, rawShifts]) => {
+            const normShifts = !rawShifts?[]:Array.isArray(rawShifts)?rawShifts:Object.values(rawShifts);
+            if (normShifts.length === 0) return null;
+            const accountExists = Array.isArray(users) && users.some(u=>u.vorname===name);
+            const todayStr = today();
             return (
               <div key={name} style={{...S.card, marginBottom:10}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:8}}>{name}</div>
-                {shifts.map((s, i) => {
-                  const actualRec = records.find(r => r.user === name && r.date === s.date);
-                  const status = !actualRec ? "ausstehend" : !actualRec.aus ? "aktiv" : "erledigt";
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+                  <div style={{fontSize:13,fontWeight:800,color:C.text}}>{name}</div>
+                  {!accountExists&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:99,background:C.border,color:C.muted}}>Kein Konto</span>}
+                </div>
+                {normShifts.map((shift, i) => {
+                  const d = shift.date||shift.d;
+                  const f = shift.filiale||shift.f;
+                  const t = shift.time||shift.t;
+                  const actualRec = accountExists ? records.find(r => r.user === name && r.date === d) : null;
+                  let status, statusLabel, statusColor, statusBg;
+                  if (!accountExists) {
+                    status="ausstehend"; statusLabel="Ausstehend";
+                    statusColor=C.muted; statusBg=C.border;
+                  } else if (!actualRec) {
+                    if (d < todayStr) {
+                      status="nicht_erschienen"; statusLabel="Nicht erschienen";
+                      statusColor=C.red; statusBg=C.redLight;
+                    } else {
+                      status="ausstehend"; statusLabel="Ausstehend";
+                      statusColor=C.muted; statusBg=C.border;
+                    }
+                  } else if (!actualRec.aus||actualRec.aus==="") {
+                    status="aktiv"; statusLabel="Aktiv";
+                    statusColor=C.yellow; statusBg=C.yellowLight;
+                  } else {
+                    status="erledigt"; statusLabel="Gearbeitet";
+                    statusColor=C.mintDark; statusBg=C.mintLight;
+                  }
                   return (
                     <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",
                       padding:"8px 10px",borderRadius:9,marginBottom:5,
                       background:status==="erledigt"?C.mintLight:status==="aktiv"?"#FFF9E6":C.bg}}>
                       <div>
                         <div style={{fontSize:11,fontWeight:700,color:C.text}}>
-                          {new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                          {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
                         </div>
-                        <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
+                        <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
                       </div>
                       <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
-                        color:status==="erledigt"?C.mintDark:status==="aktiv"?C.yellow:C.muted,
-                        background:status==="erledigt"?C.mintLight:status==="aktiv"?C.yellowLight:C.border}}>
-                        {status==="erledigt"?"✅ Gearbeitet":status==="aktiv"?"🟡 Aktiv":"⏳ Ausstehend"}
+                        color:statusColor, background:statusBg}}>
+                        {statusLabel}
                       </span>
                     </div>
                   );
