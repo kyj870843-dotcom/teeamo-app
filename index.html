@@ -148,9 +148,16 @@ function loadPinsFromFirebase() {
 
 function usePinStore() {
   function getPin(userKey) {
-    // 캐시 우선, 없으면 localStorage
+    // 캐시 우선
     if (_pinCache[userKey]) return _pinCache[userKey];
-    return lsGet(`pin_${userKey}`, null);
+    // localStorage에서 읽고 Firebase에도 동기화
+    const local = lsGet(`pin_${userKey}`, null);
+    if (local && window._fbDb && window._fbRef && window._fbSet) {
+      _pinCache[userKey] = local;
+      window._fbSet(window._fbRef(window._fbDb, `pins/${userKey}`), local)
+        .catch(e => {});
+    }
+    return local;
   }
 
   function setPin(userKey, pin) {
