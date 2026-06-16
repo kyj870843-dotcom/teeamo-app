@@ -3537,7 +3537,8 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   const [archiv, setArchiv] = useFirebase("archiv", {});
   const [fsDate, setFsDate] = useState(today());
   const [fsFiliale, setFsFiliale] = useState(FILIALEN[0]);
-  const [fsTime, setFsTime] = useState("");
+  const [fsTimeFrom, setFsTimeFrom] = useState("");
+  const [fsTimeTo, setFsTimeTo] = useState("");
   const [fsNote, setFsNote] = useState("");
 
   //     (Alarm  )
@@ -3572,7 +3573,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   function addFreieSchicht() {
     if (!fsDate) return;
     setFreieSchichten(prev => [...(Array.isArray(prev)?prev:[]), {
-      id: Date.now(), date: fsDate, filiale: fsFiliale, time: fsTime||null, note: fsNote, besetzt: false
+      id: Date.now(), date: fsDate, filiale: fsFiliale, time: (fsTimeFrom&&fsTimeTo)?`${fsTimeFrom}-${fsTimeTo}`:fsTimeFrom||null, note: fsNote, besetzt: false
     }]);
     setFsTime(""); setFsNote("");
   }
@@ -4009,16 +4010,24 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           {/*  Freie Schicht eintragen     */}
           <div style={{...S.card,marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"➕ Freie Schicht eintragen"}</div>
-            <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-end"}}>
-              <div>
-                <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Datum</div>
-                <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)}
-                  style={{...S.input,width:"auto",minWidth:0,fontSize:12}}/>
-              </div>
-              <div>
-                <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Uhrzeit</div>
-                <input type="text" value={fsTime} onChange={e=>setFsTime(e.target.value)} placeholder="HH:MM" maxLength={5}
-                  style={{...S.input,width:"auto",minWidth:0,fontSize:12}}/>
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Datum</div>
+              <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)}
+                style={{...S.input,width:"100%",fontSize:12}}/>
+              {fsDate&&<div style={{fontSize:11,fontWeight:700,color:C.mintDark,marginTop:4}}>
+                {new Date(fsDate).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+              </div>}
+            </div>
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Uhrzeit</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <input type="text" inputMode="numeric" value={fsTimeFrom} onChange={e=>setFsTimeFrom(e.target.value)}
+                  placeholder="von HH:MM" maxLength={5}
+                  style={{...S.input,flex:1,fontSize:12,textAlign:"center"}}/>
+                <span style={{color:C.muted,fontWeight:700}}>–</span>
+                <input type="text" inputMode="numeric" value={fsTimeTo} onChange={e=>setFsTimeTo(e.target.value)}
+                  placeholder="bis HH:MM" maxLength={5}
+                  style={{...S.input,flex:1,fontSize:12,textAlign:"center"}}/>
               </div>
             </div>
             <div style={{marginBottom:8}}>
