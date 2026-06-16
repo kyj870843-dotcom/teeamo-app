@@ -1057,7 +1057,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const f = s.f || s.filiale;
   const t = s.t || s.time;
   const actualRec = (Array.isArray(records)?records:[]).find(r => r.user === userName && r.date === d);
-  const status = getShiftStatus({ time: t }, actualRec);
+  const status = getShiftStatus({ time: t }, actualRec, d);
   const [showModal, setShowModal] = useState(false);
   const [modalTab, setModalTab] = useState("absagen"); // "absagen" | "nachtrag"
   const [absagenList, setAbsagenList] = useFirebase("absagen", []);
@@ -1114,18 +1114,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
 
   function handleAbsagen(antrag) {
     setAbsagenList(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
-    //  2   
-    const ts = Date.now();
-    if (window._fbDb && window._fbRef && window._fbSet) {
-      ["teddy","yeaji"].forEach(mgr => {
-        window._fbSet(window._fbRef(window._fbDb, `notifications/absagen_${antrag.id}_${mgr}`), {
-          type: "absagen", kategorie: "Schichtabsage",
-          user: userName, date: d, filiale: f, time: t,
-          userName, grund: antrag.grund, absageId: antrag.id,
-          zustaendig: mgr, bearbeitetVon: null, status: "offen", gelesen: false, ts
-        }).catch(e => console.error(e));
-      });
-    }
+    // Dienstplan에서 직접 처리 - Alarm 알림 없음
   }
 
   //   
@@ -1177,14 +1166,38 @@ function ShiftRow({ s, userName, records, setNotifications }) {
             padding:"8px 12px",
             background:status==="gearbeitet"?C.mintLight:status==="prüfen"?C.yellowLight:"#FFF9E6",
             borderTop:`1px dashed ${status==="gearbeitet"?C.mint:C.yellow}`}}>
-            <div style={{fontSize:11,color:status==="gearbeitet"?C.mintDark:C.yellow,fontWeight:600}}>
-              {f} · {actualRec.ein}–{actualRec.aus||"läuft"}
+            <div style={{fontSize:11,color:status==="gearbeitet"?C.mintDark:status==="prüfen"?C.yellow:C.yellow,fontWeight:600}}>
+              {actualRec.ein}{"–"}{actualRec.aus||"läuft"}
             </div>
             <span style={{fontSize:11,fontWeight:700,color:status==="gearbeitet"?C.mintDark:C.yellow}}>
               {actualRec.aus ? stdLabel(actualRec.ein, actualRec.aus) : "🟡"}
             </span>
           </div>
         )}
+        {/* Nachtrag 제출 대기/완료 표시 */}
+        {(()=>{
+          const myNachtrag=(Array.isArray(antraege)?antraege:[]).find(a=>a.user===userName&&a.date===d);
+          if(!myNachtrag) return null;
+          const isPending=myNachtrag.status==="offen";
+          const isApproved=myNachtrag.status==="genehmigt";
+          if(!isPending&&!isApproved) return null;
+          return(
+            <div style={{padding:"7px 12px",borderTop:`1px solid ${isPending?C.yellow:C.mint}`,
+              background:isPending?C.yellowLight:C.mintLight,
+              display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{fontSize:10,fontWeight:700,color:isPending?C.yellow:C.mintDark}}>
+                {"📌 Nachtrag · "}{myNachtrag.filiale}
+                <div style={{fontSize:9,fontWeight:400,color:C.muted,marginTop:1}}>{myNachtrag.ein}{" – "}{myNachtrag.aus}</div>
+              </div>
+              <span style={{fontSize:9,padding:"2px 7px",borderRadius:99,fontWeight:700,
+                background:isPending?"#fff":C.mint,
+                color:isPending?C.yellow:C.mintDark,
+                border:`1px solid ${isPending?C.yellow:C.mint}`}}>
+                {isPending?"Ausstehend":"✓ Genehmigt"}
+              </span>
+            </div>
+          );
+        })()}
       </div>
 
       {showModal&&(
@@ -1261,14 +1274,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
                     const id=Date.now();
                     const antrag={id,user:userName,date:d,filiale:f,ein:nEin,aus:nAus,grund:nGrund,status:"offen",zustaendig:"all"};
                     setAntraege(prev=>[...(Array.isArray(prev)?prev:[]),antrag]);
-                    if(window._fbDb&&window._fbRef&&window._fbSet){
-                      ["teddy","yeaji"].forEach(mgr=>{
-                        window._fbSet(window._fbRef(window._fbDb,`notifications/nachtrag_${id}_${mgr}`),{
-                          type:"nachtrag",kategorie:"Nachtrag",user:userName,date:d,filiale:f,
-                          ein:nEin,aus:nAus,grund:nGrund,antragId:id,zustaendig:mgr,gelesen:false,ts:Date.now()
-                        }).catch(()=>{});
-                      });
-                    }
+                    // Dienstplan에서 직접 처리 - Alarm 알림 없음
                     setNMsg("Nachtrag gesendet!");
                     setTimeout(()=>{setShowModal(false);setNMsg("");setNGrund("");},1500);
                   }} style={{flex:2,padding:"11px",borderRadius:10,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
@@ -2700,9 +2706,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
   }
 
   const tabs = [
-    {id:"nachtrag", l:"Nachtrag", n:nOffene},
     {id:"tausch", l:"Schichttausch", n:tOffene},
-    {id:"absage", l:"Absage", n:abOffene},
   ];
 
   return (
@@ -3229,14 +3233,28 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                           <div style={{textAlign:"right"}}>
                             {!accountExists?(
                               <span style={{fontSize:9,padding:"3px 7px",borderRadius:99,background:C.bg,color:C.muted,fontWeight:600}}>Ausstehend</span>
-                            ):rec?(
-                              <div>
-                                <div style={{fontSize:11,fontWeight:700,color:rec.aus?C.mintDark:C.yellow}}>
-                                  {rec.ein}{rec.aus?` – ${rec.aus}`:" (läuft)"}
+                            ):rec?(()=>{
+                              const pln=calcShiftMinutes(t);
+                              const act=rec.aus?calcShiftMinutes(`${rec.ein}-${rec.aus}`):null;
+                              const st=!rec.aus?"aktiv":(!pln||!act||act>=pln)?"gearbeitet":"prüfen";
+                              const sc=st==="gearbeitet"?C.mintDark:C.yellow;
+                              return(
+                                <div style={{textAlign:"right"}}>
+                                  <div style={{fontSize:10,fontWeight:700,color:sc}}>
+                                    {rec.ein}{rec.aus?` – ${rec.aus}`:" (läuft)"}
+                                  </div>
+                                  <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end",marginTop:2}}>
+                                    <span style={{fontSize:9,color:C.muted}}>{rec.aus?stdLabel(rec.ein,rec.aus):""}</span>
+                                    <span style={{fontSize:8,padding:"1px 5px",borderRadius:99,fontWeight:700,
+                                      background:st==="gearbeitet"?C.mintLight:C.yellowLight,
+                                      color:sc}}>
+                                      {st==="gearbeitet"?"Gearbeitet":st==="aktiv"?"Aktiv":"Prüfen"}
+                                    </span>
+                                  </div>
+                                  {st==="prüfen"&&rec.note&&<div style={{fontSize:8,color:C.muted,marginTop:1}}>{"📝 "}{rec.note}</div>}
                                 </div>
-                                <div style={{fontSize:9,color:C.muted}}>{stdLabel(rec.ein,rec.aus)}</div>
-                              </div>
-                            ):(
+                              );
+                            })():(
                               <span style={{fontSize:9,padding:"3px 7px",borderRadius:99,
                                 background:d<today()?C.redLight:C.bg,
                                 color:d<today()?C.red:C.muted,fontWeight:600}}>
