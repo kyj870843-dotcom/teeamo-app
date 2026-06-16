@@ -1496,7 +1496,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
               <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:6}}>
                 {isEin?"Tatsächliche Einstempelzeit":"Tatsächliche Ausstempelzeit"}
               </div>
-              <input type="time" value={manualTime} onChange={e=>setManualTime(e.target.value)}
+              <input type="text" value={manualTime} onChange={e=>setManualTime(e.target.value)} placeholder="HH:MM" maxLength={5}
                 style={{...S.input,width:"80%",display:"block",margin:"0 auto",fontSize:20,fontWeight:700,textAlign:"center",borderColor:ausInvalid?C.red:C.yellow}}/>
               {!isEin&&clockInTime&&(()=>{
                 const [ah,am]=manualTime.split(":").map(Number);
@@ -1996,7 +1996,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               {[["Einstempeln",nEin,setNEin],["Ausstempeln",nAus,setNAus]].map(([lbl,val,set])=>(
                 <div key={lbl} style={{display:"flex",flexDirection:"column"}}>
                   <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>{lbl}</div>
-                  <input type="time" value={val} onChange={e=>set(e.target.value)} style={{...S.input, width:"50%", display:"block", margin:"0 auto", minWidth:0, boxSizing:"border-box"}}/>
+                  <input type="text" value={val} onChange={e=>set(e.target.value)} placeholder="HH:MM" maxLength={5} style={{...S.input, width:"50%", display:"block", margin:"0 auto", minWidth:0, boxSizing:"border-box", textAlign:"center"}}/>
                 </div>
               ))}
             </div>
@@ -4002,7 +4002,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
               </div>
               <div>
                 <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Uhrzeit</div>
-                <input type="time" value={fsTime} onChange={e=>setFsTime(e.target.value)}
+                <input type="text" value={fsTime} onChange={e=>setFsTime(e.target.value)} placeholder="HH:MM" maxLength={5}
                   style={{...S.input,width:"auto",minWidth:0,fontSize:12}}/>
               </div>
             </div>
