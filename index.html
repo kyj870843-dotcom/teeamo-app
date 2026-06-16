@@ -22,7 +22,7 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script type="module" id="firebase-init">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getDatabase, ref, onValue, set, push, remove, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+  import { getDatabase, ref, onValue, set, get, push, remove, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAdFpLR51E3uV5i4CDB-By1iC0lr-7vfBA",
@@ -44,6 +44,7 @@
   window._fbSet = set;
   window._fbPush = push;
   window._fbRemove = remove;
+  window._fbGet = get;
   window._fbUpdate = update;
   window._fbReady = true;
 
@@ -2731,34 +2732,76 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
 
 //  ADMIN DIENSTPLAN VIEW 
 function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedule }) {
-  const [viewMode, setViewMode] = useState("plan"); // "plan" | "by_emp" | "by_date"
+  const [viewMode, setViewMode] = useState("plan");
   const [openEmp, setOpenEmp] = useState(null);
   const [openDate, setOpenDate] = useState(null);
+  const [selMonth, setSelMonth] = useState(null); // null = current schedule
   const empList = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key))
     .sort((a,b)=>a.vorname.localeCompare(b.vorname));
 
-  // : schedule   
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
-  
-  // schedule   (    )
-  const scheduleNames = Object.keys(schedule||{}).filter(name=>
-    norm(schedule[name]).length>0
+
+  // Firebase에서 월별 schedule 목록 로드
+  const [allMonthSchedules, setAllMonthSchedules] = React.useState({});
+  React.useEffect(()=>{
+    if(!window._fbDb||!window._fbRef||!window._fbGet) return;
+    // schedule_YYYY_MM 키들 찾기
+    const months = ["2026_01","2026_02","2026_03","2026_04","2026_05","2026_06",
+                    "2026_07","2026_08","2026_09","2026_10","2026_11","2026_12",
+                    "2027_01","2027_02","2027_03","2027_04","2027_05","2027_06"];
+    const promises = months.map(m=>
+      window._fbGet(window._fbRef(window._fbDb,"schedule_"+m))
+        .then(snap=>({m, data:snap.val()}))
+        .catch(()=>({m,data:null}))
+    );
+    Promise.all(promises).then(results=>{
+      const found={};
+      results.forEach(({m,data})=>{ if(data) found[m]=data; });
+      setAllMonthSchedules(found);
+    });
+  },[]);
+
+  // 선택된 월의 schedule 또는 현재 schedule
+  const activeSchedule = React.useMemo(()=>{
+    if(!selMonth) return schedule||{};
+    const raw = allMonthSchedules[selMonth];
+    if(!raw) return schedule||{};
+    // Firebase object → array 변환
+    const result={};
+    for(const [name,shifts] of Object.entries(raw)){
+      result[name]=Array.isArray(shifts)?shifts:Object.values(shifts||{});
+    }
+    return result;
+  },[selMonth, allMonthSchedules, schedule]);
+
+  // 사용 가능한 월 목록
+  const availableMonths = React.useMemo(()=>{
+    const months=Object.keys(allMonthSchedules);
+    // 현재 schedule의 월도 추출
+    const currentDates=Object.values(schedule||{}).flatMap(sh=>norm(sh).map(s=>s.date||s.d)).filter(Boolean);
+    if(currentDates.length>0){
+      const m=currentDates[0].slice(0,7).replace("-","_");
+      if(!months.includes(m)) months.push(m);
+    }
+    return months.sort().reverse();
+  },[allMonthSchedules, schedule]);
+
+  // 선택된 schedule 기반 데이터
+  const scheduleNames = Object.keys(activeSchedule).filter(name=>
+    norm(activeSchedule[name]).length>0
   ).sort((a,b)=>a.localeCompare(b));
-  
-  // schedule    -      +  
+
   const allNames = [...new Set([
     ...scheduleNames,
     ...empList.map(e=>e.vorname)
   ])].sort((a,b)=>a.localeCompare(b));
-  
-  // hasAccount:         
+
   const hasAccount = name => empList.some(e=>e.vorname===name);
-  
+
   const allDates = [...new Set(
-    allNames.flatMap(name => norm(schedule[name]||[]).map(s=>s.date||s.d))
+    allNames.flatMap(name => norm(activeSchedule[name]||[]).map(s=>s.date||s.d))
   )].filter(Boolean).sort((a,b)=>a.localeCompare(b));
 
-  //   ( )
   const todayStr = today();
   function getEmpStatus(vorname) {
     const r = records.find(r=>r.user===vorname&&r.date===todayStr);
@@ -2768,6 +2811,29 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
 
   return (
     <div style={{paddingBottom:20}}>
+      {/* 월 선택 */}
+      {availableMonths.length>0&&(
+        <div style={{padding:"12px 14px 0"}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".05em"}}>
+            Monat auswählen
+          </div>
+          <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
+            {availableMonths.map(m=>{
+              const [yr,mo]=m.split("_");
+              const label=new Date(yr+"-"+mo+"-01").toLocaleDateString("de-DE",{month:"long",year:"numeric"});
+              const isActive=selMonth===m||(selMonth===null&&m===availableMonths[0]);
+              return(
+                <button key={m} onClick={()=>setSelMonth(m===availableMonths[0]&&!selMonth?null:m)}
+                  style={{flexShrink:0,padding:"8px 14px",borderRadius:10,border:`1.5px solid ${isActive?C.navy:C.border}`,
+                    background:isActive?C.navy:"#fff",color:isActive?"#fff":C.muted,
+                    fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {/*   */}
       <div style={{display:"flex",gap:0,margin:"14px 14px 0",borderRadius:12,overflow:"hidden",border:`1px solid ${C.border}`}}>
         {[{id:"plan",l:"📋 Plan"},
@@ -2800,7 +2866,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
           {allNames.map(name=>{
             const emp = empList.find(e=>e.vorname===name);
             const accountExists = !!emp;
-            const shifts = norm(schedule[name]||[])
+            const shifts = norm(activeSchedule[name]||[])
               .filter(s=>s.date||s.d)
               .sort((a,b)=>(a.date||a.d).localeCompare(b.date||b.d));
             const isOpen = openEmp===(emp?emp.key:name);
@@ -3159,10 +3225,18 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       for (const [name, shifts] of Object.entries(parsed)) {
         parsedForFb[name] = Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]));
       }
+      // 월별 저장: 첫 번째 날짜에서 월 추출
+      const allShiftDates = Object.values(parsed).flatMap(sh=>sh.map(s=>s.date)).filter(Boolean).sort();
+      const detectedMonth = allShiftDates.length>0 ? allShiftDates[0].slice(0,7) : new Date().toISOString().slice(0,7);
+      const monthKey = "schedule_" + detectedMonth.replace("-","_");
       if (window._fbDb && window._fbRef && window._fbSet) {
-        window._fbSet(window._fbRef(window._fbDb, "schedule"), parsedForFb)
-          .then(()=>console.log("✅ schedule saved:", Object.keys(parsedForFb)))
+        // 월별 노드에 저장
+        window._fbSet(window._fbRef(window._fbDb, monthKey), parsedForFb)
+          .then(()=>console.log("✅ schedule saved to", monthKey, Object.keys(parsedForFb)))
           .catch(e=>console.error("schedule save error:", e));
+        // 현재 schedule도 유지 (기존 호환성)
+        window._fbSet(window._fbRef(window._fbDb, "schedule"), parsedForFb)
+          .catch(e=>console.error(e));
       }
       setSchedule(parsed);
       //  Firebase  (PDF   )
