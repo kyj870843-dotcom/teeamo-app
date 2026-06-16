@@ -2592,7 +2592,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
 
 //  ADMIN ANTRGE VIEW 
 //  ANTRGE CARD ( ) 
-function AntraegeTab({ antraege, setAntraege, tauschAntraege, absagenList, setAbsagenList, records, setRecords, aTab, setATab, openAId, setOpenAId }) {
+function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege, absagenList, setAbsagenList, records, setRecords, aTab, setATab, openAId, setOpenAId, userKey }) {
   const nList = Array.isArray(antraege) ? antraege : [];
   const tList = Array.isArray(tauschAntraege) ? tauschAntraege : [];
   const abList = Array.isArray(absagenList) ? absagenList : [];
@@ -4068,6 +4068,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           antraege={antraege}
           setAntraege={setAntraege}
           tauschAntraege={tauschAntraege}
+          setTauschAntraege={setTauschAntraege}
           absagenList={absagenList}
           setAbsagenList={setAbsagenList}
           records={records}
@@ -4076,6 +4077,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           setATab={setATab}
           openAId={openAId}
           setOpenAId={setOpenAId}
+          userKey={userKey}
         />
       )}
 
