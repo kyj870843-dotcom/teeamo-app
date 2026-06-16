@@ -183,6 +183,7 @@ function TimeInput({ value, onChange, placeholder, style }) {
   return (
     <input
       type="time"
+      lang="de-DE"
       value={value}
       onChange={e=>onChange(e.target.value)}
       style={style}
@@ -1523,7 +1524,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
               <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:6}}>
                 {isEin?"Tatsächliche Einstempelzeit":"Tatsächliche Ausstempelzeit"}
               </div>
-              <input type="text" inputMode="numeric" value={manualTime} onChange={e=>setManualTime(e.target.value)} placeholder="HH:MM" maxLength={5}
+              <TimeInput value={manualTime} onChange={setManualTime}
                 style={{...S.input,width:"80%",display:"block",margin:"0 auto",fontSize:20,fontWeight:700,textAlign:"center",borderColor:ausInvalid?C.red:C.yellow}}/>
               {!isEin&&clockInTime&&(()=>{
                 const [ah,am]=manualTime.split(":").map(Number);
