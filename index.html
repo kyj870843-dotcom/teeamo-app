@@ -2886,84 +2886,152 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
               Kein Dienstplan vorhanden. Bitte erst hochladen & analysieren.
             </div>
           )}
-          {allDates.map(d=>{
-            const isOpen=openDate===d;
-            //      
-            const dayEmps = empList.filter(emp=>
-              norm(schedule[emp.vorname]||[]).some(s=>(s.date||s.d)===d)
-            );
-            return(
-              <div key={d} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden"}}>
-                <button onClick={()=>setOpenDate(isOpen?null:d)}
-                  style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
-                    display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div style={{fontSize:14,fontWeight:800,color:C.text}}>
-                    {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+          {(()=>{
+            // KW  
+            function getKW(dateStr) {
+              const d=new Date(dateStr);
+              const jan1=new Date(d.getFullYear(),0,1);
+              const dayOfYear=Math.floor((d-jan1)/86400000)+1;
+              const dayOfWeek=jan1.getDay()||7;
+              return Math.ceil((dayOfYear+dayOfWeek-1)/7);
+            }
+            function getMonthYear(dateStr) {
+              const d=new Date(dateStr);
+              return d.toLocaleDateString("de-DE",{month:"long",year:"numeric"});
+            }
+            // allDates  KW  
+            const weeks={};
+            allDates.forEach(d=>{
+              const kw=getKW(d);
+              const yr=new Date(d).getFullYear();
+              const key=`${yr}-KW${String(kw).padStart(2,"0")}`;
+              if(!weeks[key]) weeks[key]={kw,yr,dates:[]};
+              weeks[key].dates.push(d);
+            });
+            const weekKeys=Object.keys(weeks).sort();
+            const WOCHENTAGE=["So","Mo","Di","Mi","Do","Fr","Sa"];
+            const WOCHENTAGE_LONG=["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
+            const todayStr=today();
+            let lastMonth="";
+            return weekKeys.map(wk=>{
+              const {kw,yr,dates}=weeks[wk];
+              const monthLabel=getMonthYear(dates[0]);
+              const showMonth=monthLabel!==lastMonth;
+              if(showMonth) lastMonth=monthLabel;
+              return(
+                <div key={wk}>
+                  {showMonth&&(
+                    <div style={{fontSize:18,fontWeight:800,color:C.navy,marginBottom:4,marginTop:showMonth&&wk!==weekKeys[0]?16:0}}>
+                      {monthLabel}
+                    </div>
+                  )}
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,marginTop:8}}>
+                    <div style={{flex:1,height:1,background:C.border}}/>
+                    <span style={{fontSize:11,fontWeight:800,color:C.muted,whiteSpace:"nowrap"}}>KW {kw}</span>
+                    <div style={{flex:1,height:1,background:C.border}}/>
                   </div>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{dayEmps.length} Personen geplant</span>
-                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "A" : "V"}</span>
-                  </div>
-                </button>
-                {isOpen&&(
-                  <div style={{borderTop:`1px solid ${C.border}`}}>
-                    {/*    */}
-                    {FILIALEN.map(fil=>{
-                      const filEmps=dayEmps.filter(emp=>{
-                        const s=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===d);
-                        return s&&(s.filiale||s.f)===fil;
-                      });
-                      if(filEmps.length===0) return null;
-                      return(
-                        <div key={fil}>
-                          <div style={{padding:"7px 14px",background:C.bg,fontSize:10,fontWeight:700,color:C.muted}}>
-                            {filialInit(fil)} · {fil}
-                          </div>
-                          {filEmps.map((emp,i)=>{
-                            const shift=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===d);
-                            const rec=records.find(r=>r.user===emp.vorname&&r.date===d);
-                            const status=rec?.aus?"Feierabend":rec?.ein?"Im Dienst":"Nicht erschienen";
-                            const statusColor=rec?.aus?C.mintDark:rec?.ein?C.yellow:C.red;
-                            const statusBg=rec?.aus?C.mintLight:rec?.ein?C.yellowLight:C.redLight;
-                            const shiftDateStr=d;
-                            const todayStr2=today();
-                            const statusLabel=rec?.aus?"Feierabend":rec?.ein?"Aktiv":shiftDateStr<todayStr2?"Nicht erschienen":"Ausstehend";
-                            return(
-                              <div key={emp.key} style={{display:"flex",justifyContent:"space-between",
-                                alignItems:"center",padding:"10px 14px",
-                                borderBottom:i<filEmps.length-1?`1px solid ${C.border}`:"none"}}>
-                                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                                  <div style={{width:32,height:32,borderRadius:"50%",background:C.navy,
-                                    display:"flex",alignItems:"center",justifyContent:"center",
-                                    fontSize:11,fontWeight:800,color:"#fff",flexShrink:0}}>
-                                    {emp.kuerzel}
-                                  </div>
-                                  <div>
-                                    <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}</div>
-                                    {(shift?.time||shift?.t)&&(
-                                      <div style={{fontSize:10,color:C.muted}}>Geplant: {shift.time||shift.t}</div>
-                                    )}
-                                    {rec&&(
-                                      <div style={{fontSize:10,color:statusColor,fontWeight:600}}>
-                                        {rec.ein}{rec.aus?` – ${rec.aus}`:""} {rec.aus?`(${stdLabel(rec.ein,rec.aus)})`:""}</div>
-                                    )}
-                                  </div>
-                                </div>
-                                <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,
-                                  color:statusColor,background:statusBg}}>
-                                  {statusLabel}
-                                </span>
+                  {dates.map(d=>{
+                    const isOpen=openDate===d;
+                    const dow=new Date(d).getDay();
+                    const dayNum=new Date(d).getDate();
+                    // schedule  
+                    const allNamesForDay=Object.keys(schedule||{}).filter(name=>
+                      (()=>{const arr=!schedule[name]?[]:Array.isArray(schedule[name])?schedule[name]:Object.values(schedule[name]);return arr.some(s=>(s.date||s.d)===d);})()
+                    );
+                    return(
+                      <div key={d} style={{...S.card,marginBottom:6,padding:0,overflow:"hidden"}}>
+                        <button onClick={()=>setOpenDate(isOpen?null:d)}
+                          style={{width:"100%",padding:"11px 14px",background:"none",border:"none",cursor:"pointer",
+                            display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:10}}>
+                            <div style={{width:36,height:36,borderRadius:10,
+                              background:d===todayStr?C.navy:C.bg,
+                              display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                              <span style={{fontSize:8,fontWeight:700,color:d===todayStr?"rgba(255,255,255,.6)":C.muted}}>
+                                {WOCHENTAGE[dow]}
+                              </span>
+                              <span style={{fontSize:14,fontWeight:800,color:d===todayStr?"#fff":C.text}}>
+                                {dayNum}.
+                              </span>
+                            </div>
+                            <div>
+                              <div style={{fontSize:13,fontWeight:800,color:C.text}}>
+                                {WOCHENTAGE_LONG[dow]}
                               </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                              <div style={{fontSize:10,color:C.muted}}>{allNamesForDay.length} Personen geplant</div>
+                            </div>
+                          </div>
+                          <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
+                        </button>
+                        {isOpen&&(
+                          <div style={{borderTop:`1px solid ${C.border}`}}>
+                            {FILIALEN.map(fil=>{
+                              const filNames=allNamesForDay.filter(name=>{
+                                const arr=!schedule[name]?[]:Array.isArray(schedule[name])?schedule[name]:Object.values(schedule[name]);
+                                const sh=arr.find(s=>(s.date||s.d)===d);
+                                return sh&&(sh.filiale||sh.f)===fil;
+                              });
+                              if(filNames.length===0) return null;
+                              return(
+                                <div key={fil}>
+                                  <div style={{padding:"6px 14px",background:C.bg,fontSize:10,fontWeight:700,color:C.muted}}>
+                                    {filialInit(fil)} · {fil}
+                                  </div>
+                                  {filNames.map((name,i)=>{
+                                    const arr=!schedule[name]?[]:Array.isArray(schedule[name])?schedule[name]:Object.values(schedule[name]);
+                                    const shift=arr.find(s=>(s.date||s.d)===d);
+                                    const accountExists=Array.isArray(users)&&users.some(u=>u.vorname===name);
+                                    const emp=accountExists?(Array.isArray(users)?users:[]).find(u=>u.vorname===name):null;
+                                    const rec=accountExists?records.find(r=>r.user===name&&r.date===d):null;
+                                    let statusLabel,statusColor,statusBg;
+                                    if(!accountExists){
+                                      statusLabel="Ausstehend";statusColor=C.muted;statusBg=C.border;
+                                    } else if(rec?.aus){
+                                      statusLabel="Feierabend";statusColor=C.mintDark;statusBg=C.mintLight;
+                                    } else if(rec?.ein){
+                                      statusLabel="Aktiv";statusColor=C.yellow;statusBg=C.yellowLight;
+                                    } else if(d<todayStr){
+                                      statusLabel="Nicht erschienen";statusColor=C.red;statusBg=C.redLight;
+                                    } else {
+                                      statusLabel="Ausstehend";statusColor=C.muted;statusBg=C.border;
+                                    }
+                                    return(
+                                      <div key={name+i} style={{display:"flex",justifyContent:"space-between",
+                                        alignItems:"center",padding:"10px 14px",
+                                        borderBottom:i<filNames.length-1?`1px solid ${C.border}`:"none"}}>
+                                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                                          <div style={{width:30,height:30,borderRadius:"50%",
+                                            background:accountExists?C.navy:C.border,
+                                            display:"flex",alignItems:"center",justifyContent:"center",
+                                            fontSize:10,fontWeight:800,color:"#fff",flexShrink:0}}>
+                                            {emp?emp.kuerzel:name.slice(0,2)}
+                                          </div>
+                                          <div>
+                                            <div style={{fontSize:13,fontWeight:700,color:C.text}}>{name}</div>
+                                            {(shift?.time||shift?.t)&&(
+                                              <div style={{fontSize:10,color:C.muted}}>{shift.time||shift.t}</div>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,
+                                          color:statusColor,background:statusBg}}>
+                                          {statusLabel}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            });
+          })()}
         </div>
       )}
     </div>
