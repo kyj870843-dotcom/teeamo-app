@@ -2805,7 +2805,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
               .sort((a,b)=>(a.date||a.d).localeCompare(b.date||b.d));
             const isOpen = openEmp===(emp?emp.key:name);
             return (
-              <div key={emp.key} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden"}}>
+              <div key={emp?emp.key:name} style={{...S.card,marginBottom:8,padding:0,overflow:"hidden"}}>
                 <button onClick={()=>setOpenEmp(isOpen?null:(emp?emp.key:name))}
                   style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
                     display:"flex",justifyContent:"space-between",alignItems:"center"}}>
