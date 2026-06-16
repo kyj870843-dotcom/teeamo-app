@@ -2354,6 +2354,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
 
 function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab, userKey, safeUsers }) {
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
+  const todayStr = today();
   
   const todayEmps = empList.filter(emp=>{
     const shifts = norm(schedule[emp.vorname]||[]);
