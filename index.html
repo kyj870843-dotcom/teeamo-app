@@ -804,6 +804,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
 }
 //  MEINE SCHICHTEN SECTION 
 function MeineSchichtenSection({ userName, myShifts, records, users }) {
+  const todayStr = today();
   const [showTausch, setShowTausch] = useState(false);
   const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
   const [antraege] = useFirebase("antraege", []);
