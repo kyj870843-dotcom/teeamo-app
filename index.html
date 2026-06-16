@@ -2564,18 +2564,25 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                   </div>
                   {sorted.map(({emp,time,fil:f})=>{
                     const st=getStatus(emp.vorname);
+                    const rec=todayRecs.find(r=>r.user===emp.vorname);
                     return(
-                      <div key={emp.key} style={{...S.card,display:"flex",alignItems:"center",gap:11,padding:"11px 14px",marginBottom:7}}>
+                      <div key={emp.key} style={{...S.card,padding:"11px 14px",marginBottom:7}}>
                         <button onClick={()=>setDetailKey(emp.key)}
-                          style={{flex:1,border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
+                          style={{width:"100%",border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
                           <div style={{width:38,height:38,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff",flexShrink:0}}>
                             {emp.kuerzel}
                           </div>
                           <div style={{flex:1}}>
                             <div style={{fontSize:13,fontWeight:700,color:C.text}}>{emp.vorname}</div>
-                            {time&&<div style={{fontSize:10,color:C.muted,marginTop:1}}>{time}</div>}
+                            {time&&<div style={{fontSize:10,color:C.muted,marginTop:1}}>{"Geplant: "}{time}</div>}
+                            {rec?.ein&&(
+                              <div style={{fontSize:10,fontWeight:600,color:st==="Feierabend"?C.mintDark:C.yellow,marginTop:2}}>
+                                {rec.ein}{rec.aus?` – ${rec.aus}`:" (läuft)"}
+                                {rec.aus&&<span style={{color:C.muted,fontWeight:400}}>{" · "}{stdLabel(rec.ein,rec.aus)}</span>}
+                              </div>
+                            )}
                           </div>
-                          <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:99,color:sColor(st),background:sBg(st)}}>{st}</span>
+                          <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:99,color:sColor(st),background:sBg(st),flexShrink:0}}>{st}</span>
                         </button>
                       </div>
                     );
@@ -3562,19 +3569,26 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
                     statusColor=C.mintDark; statusBg=C.mintLight;
                   }
                   return (
-                    <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",
-                      padding:"8px 10px",borderRadius:9,marginBottom:5,
+                    <div key={i} style={{padding:"8px 10px",borderRadius:9,marginBottom:5,
                       background:status==="erledigt"?C.mintLight:status==="aktiv"?"#FFF9E6":C.bg}}>
-                      <div>
-                        <div style={{fontSize:11,fontWeight:700,color:C.text}}>
-                          {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                        <div>
+                          <div style={{fontSize:11,fontWeight:700,color:C.text}}>
+                            {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
+                          </div>
+                          <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                          {actualRec&&actualRec.ein&&(
+                            <div style={{fontSize:10,color:status==="erledigt"?C.mintDark:C.yellow,fontWeight:600,marginTop:2}}>
+                              {actualRec.ein}{actualRec.aus?` – ${actualRec.aus}`:" (läuft)"}
+                              {actualRec.aus&&<span style={{color:C.muted,fontWeight:400}}>{" · "}{stdLabel(actualRec.ein,actualRec.aus)}</span>}
+                            </div>
+                          )}
                         </div>
-                        <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                        <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
+                          color:statusColor, background:statusBg,flexShrink:0,marginLeft:8}}>
+                          {statusLabel}
+                        </span>
                       </div>
-                      <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
-                        color:statusColor, background:statusBg}}>
-                        {statusLabel}
-                      </span>
                     </div>
                   );
                 })}
