@@ -133,15 +133,31 @@ function usePersist(lsKey, init) {
 
 // PIN   
 function usePinStore() {
-  // PIN  localStorage  
-  function getPin(userKey) { return lsGet(`pin_${userKey}`, null); }
-  function setPin(userKey, pin) { lsSet(`pin_${userKey}`, pin); }
+  const [pins, setPins] = useFirebase("pins", {});
+
+  function getPin(userKey) {
+    // Firebase 우선, 없으면 localStorage fallback
+    if (pins && pins[userKey]) return pins[userKey];
+    return lsGet(`pin_${userKey}`, null);
+  }
+
+  function setPin(userKey, pin) {
+    lsSet(`pin_${userKey}`, pin);
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      window._fbSet(window._fbRef(window._fbDb, `pins/${userKey}`), pin)
+        .catch(e => console.error("PIN save error:", e));
+    }
+    setPins(prev => ({...(prev||{}), [userKey]: pin}));
+  }
+
   function initPins(users) {
-    // INIT_USERS PIN LS  ( 1)
-    users.forEach(u => {
-      if (!lsGet(`pin_${u.key}`, null)) lsSet(`pin_${u.key}`, u.pin);
+    (Array.isArray(users)?users:[]).forEach(u => {
+      if (!lsGet(`pin_${u.key}`, null) && u.pin) {
+        lsSet(`pin_${u.key}`, u.pin);
+      }
     });
   }
+
   return { getPin, setPin, initPins };
 }
 
@@ -296,6 +312,26 @@ function KalenderView({ csvCtx, userName, records, users }) {
 
   const [schedule] = useFirebase("schedule", {});
   const [planImg] = useFirebase("planImage", null);
+  
+  // 현재 독일 월 기준 월별 schedule도 로드
+  const currentMonthKey = React.useMemo(()=>{
+    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+    return "schedule_"+d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
+  },[]);
+  const [monthSchedule] = useFirebase(currentMonthKey, {});
+  
+  // 두 schedule 합치기 (월별 우선)
+  const combinedSchedule = React.useMemo(()=>{
+    const base = schedule||{};
+    const monthly = monthSchedule||{};
+    const result = {...base};
+    for(const [name, shifts] of Object.entries(monthly)){
+      if(shifts && (Array.isArray(shifts)?shifts:Object.values(shifts)).length>0){
+        result[name] = Array.isArray(shifts)?shifts:Object.values(shifts);
+      }
+    }
+    return result;
+  },[schedule, monthSchedule]);
 
   // Firebase  schedule   
   function normalizeShifts(val) {
@@ -307,23 +343,20 @@ function KalenderView({ csvCtx, userName, records, users }) {
 
   // schedule  :   
   const myShifts = React.useMemo(() => {
-    if (!userName || !schedule) return [];
-    const keys = Object.keys(schedule);
-    // 1.  
-    if (schedule[userName]) return normalizeShifts(schedule[userName]);
-    // 2.  
+    if (!userName || !combinedSchedule) return [];
+    const keys = Object.keys(combinedSchedule);
+    if (combinedSchedule[userName]) return normalizeShifts(combinedSchedule[userName]);
     const lower = userName.toLowerCase();
     const k2 = keys.find(k => k.toLowerCase() === lower);
-    if (k2) return normalizeShifts(schedule[k2]);
-    // 3.     (firstName) 
+    if (k2) return normalizeShifts(combinedSchedule[k2]);
     const firstName = userName.split(" ")[0];
     if (firstName !== userName) {
-      if (schedule[firstName]) return normalizeShifts(schedule[firstName]);
+      if (combinedSchedule[firstName]) return normalizeShifts(combinedSchedule[firstName]);
       const k3 = keys.find(k => k.toLowerCase() === firstName.toLowerCase());
-      if (k3) return normalizeShifts(schedule[k3]);
+      if (k3) return normalizeShifts(combinedSchedule[k3]);
     }
     return [];
-  }, [schedule, userName]);
+  }, [combinedSchedule, userName]);
 
   // viewport   (    )
 
