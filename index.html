@@ -1171,7 +1171,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
     const baseKey=vn.toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,12)||"user";
     const key=baseKey+"_"+Date.now();
     const isAdmin=isAdminName&&regRole==="Admin";
-    const newUser={key,vorname:vn,nachname:nn,emoji:em,kuerzel:vn.slice(0,2),role:isAdmin?"Admin":"Staff",isAdmin,infektionsschutz:null,contractHours:0};
+    const newUser={key,vorname:vn,nachname:nn,kuerzel:vn.slice(0,2),role:isAdmin?"Admin":"Staff",isAdmin,infektionsschutz:null,contractHours:0};
     savePinFn(key, regP);
     setUsers(prev=>[...(Array.isArray(prev)?prev:[]),newUser]);
     setRegV("");setRegN("");setRegP("");setRegP2("");setRegErr("");setRegRole("Staff");setPage("list");
