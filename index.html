@@ -1058,10 +1058,21 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const t = s.t || s.time;
   const actualRec = (Array.isArray(records)?records:[]).find(r => r.user === userName && r.date === d);
   const status = getShiftStatus({ time: t }, actualRec);
-  const [showAbsagen, setShowAbsagen] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [modalTab, setModalTab] = useState("absagen"); // "absagen" | "nachtrag"
   const [absagenList, setAbsagenList] = useFirebase("absagen", []);
+  const [antraege, setAntraege] = useFirebase("antraege", []);
   const [tauschAntraege] = useFirebase("schichttausch", []);
   const [, setNotif] = useFirebase("notifications", {});
+  // Nachtrag state
+  const [nEin, setNEin] = useState("09:00");
+  const [nAus, setNAus] = useState("17:00");
+  const [nGrund, setNGrund] = useState("");
+  const [nMsg, setNMsg] = useState("");
+  const now = new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+  const todayStr = today();
+  // 근무시간이 지났는지 (당일 포함)
+  const shiftPassed = d < todayStr || (d === todayStr && t && now.getHours()*60+now.getMinutes() > parseMinutes((t.split("-")[1]||"23:59")));
 
   useEffect(() => {
     if (status === "prüfen" && actualRec) {
@@ -1130,18 +1141,23 @@ function ShiftRow({ s, userName, records, setNotifications }) {
         border:`1px solid ${alreadyAbgesagt?C.red:status==="aktiv"||status==="gearbeitet"?C.mint:C.border}`}}>
 
         {/*    */}
-        <div onClick={()=>{ if(status==="ausstehend"&&!alreadyAbgesagt) setShowAbsagen(true); }}
+        <div onClick={()=>{
+            if(alreadyAbgesagt) return;
+            if(status==="ausstehend") { setModalTab("absagen"); setShowModal(true); }
+            else if(shiftPassed && !actualRec) { setModalTab("nachtrag"); setShowModal(true); }
+            else if(shiftPassed && actualRec) { setModalTab("nachtrag"); setShowModal(true); }
+          }}
           style={{display:"flex",alignItems:"center",justifyContent:"space-between",
             padding:"10px 12px",
             background:alreadyAbgesagt?C.redLight:C.card,
-            cursor:status==="ausstehend"&&!alreadyAbgesagt?"pointer":"default"}}>
+            cursor:(!alreadyAbgesagt&&(status==="ausstehend"||shiftPassed))?"pointer":"default"}}>
           <div style={{fontSize:12,fontWeight:600,color:alreadyAbgesagt?C.red:C.text}}>
             {f}{t ? ` · ${t}` : ""}
             {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>{"🚫 Absage "}{alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
           {tauschLabel && <div style={{fontSize:9,color:C.mintDark,marginTop:3,fontWeight:600}}>{tauschLabel}</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
-            {status==="ausstehend"&&!alreadyAbgesagt&&(
+            {!alreadyAbgesagt&&(status==="ausstehend"||shiftPassed)&&(
               <span style={{fontSize:8,color:C.muted}}>tippen</span>
             )}
             <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
@@ -1169,9 +1185,97 @@ function ShiftRow({ s, userName, records, setNotifications }) {
         )}
       </div>
 
-      {showAbsagen&&(
-        <AbsagenModal shift={s} userName={userName}
-          onClose={()=>setShowAbsagen(false)} onSubmit={handleAbsagen}/>
+      {showModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center"}}
+          onClick={e=>{if(e.target===e.currentTarget){setShowModal(false);setNMsg("");}}}>
+          <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,
+            padding:"20px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))"}}>
+            <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 16px"}}/>
+            {/* 날짜 헤더 */}
+            <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:12}}>
+              {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+              <span style={{fontSize:11,color:C.muted,fontWeight:400,marginLeft:8}}>{f}{t?` · ${t}`:""}</span>
+            </div>
+            {/* 탭 */}
+            <div style={{display:"flex",gap:0,marginBottom:16,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`}}>
+              {(status==="ausstehend"?[{id:"absagen",l:"🚫 Absagen"}]:[])
+                .concat(shiftPassed?[{id:"nachtrag",l:"🕐 Nachtragen"}]:[])
+                .map(({id,l})=>(
+                <button key={id} onClick={()=>setModalTab(id)}
+                  style={{flex:1,padding:"9px",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,
+                    background:modalTab===id?C.navy:"#fff",color:modalTab===id?"#fff":C.muted}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            {/* Absagen 탭 */}
+            {modalTab==="absagen"&&(()=>{
+              const [grund2,setGrund2]=React.useState("");
+              const [err2,setErr2]=React.useState("");
+              function doAbsagen(){
+                if(!grund2.trim()){setErr2("Bitte einen Grund angeben.");return;}
+                const antrag={id:Date.now(),userName,date:d,filiale:f,time:t,grund:grund2,status:"offen"};
+                handleAbsagen(antrag);
+                setShowModal(false);
+              }
+              return(
+                <div>
+                  <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>{"Grund "}<span style={{color:C.red}}>*</span></div>
+                  <textarea value={grund2} onChange={e=>{setGrund2(e.target.value);setErr2("");}}
+                    placeholder="z. B. Ich bin krank und kann nicht kommen…"
+                    style={{...S.input,width:"100%",minHeight:70,resize:"none",fontFamily:"inherit",marginBottom:8}}/>
+                  {err2&&<div style={{fontSize:11,color:C.red,marginBottom:8,fontWeight:600}}>{"⚠ "}{err2}</div>}
+                  <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{"ℹ️ Der Manager wird benachrichtigt."}</div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>setShowModal(false)} style={{flex:1,padding:"11px",borderRadius:10,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
+                    <button onClick={doAbsagen} style={{flex:2,padding:"11px",borderRadius:10,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>Absagen & senden</button>
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Nachtragen 탭 */}
+            {modalTab==="nachtrag"&&(()=>{
+              return(
+                <div>
+                  <div style={{display:"flex",gap:10,marginBottom:12}}>
+                    {[["Einstempeln",nEin,setNEin],["Ausstempeln",nAus,setNAus]].map(([lbl,val,set])=>(
+                      <div key={lbl} style={{flex:1}}>
+                        <div style={{fontSize:10,color:C.muted,marginBottom:4,fontWeight:700}}>{lbl}</div>
+                        <TimeInput value={val} onChange={set} style={{...S.input,width:"100%",textAlign:"center",fontSize:14}}/>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>{"Grund "}<span style={{color:C.red}}>*</span></div>
+                  <textarea value={nGrund} onChange={e=>setNGrund(e.target.value)}
+                    placeholder="z. B. Vergessen einzustempeln…"
+                    style={{...S.input,width:"100%",minHeight:60,resize:"none",fontFamily:"inherit",marginBottom:8}}/>
+                  {nMsg&&<div style={{fontSize:11,color:nMsg.includes("gesendet")?C.mintDark:C.red,marginBottom:8,fontWeight:600}}>{nMsg}</div>}
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>setShowModal(false)} style={{flex:1,padding:"11px",borderRadius:10,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
+                    <button onClick={()=>{
+                      if(!nGrund.trim()){setNMsg("Bitte einen Grund angeben.");return;}
+                      const id=Date.now();
+                      const antrag={id,user:userName,date:d,filiale:f,ein:nEin,aus:nAus,grund:nGrund,status:"offen",zustaendig:"all"};
+                      setAntraege(prev=>[...(Array.isArray(prev)?prev:[]),antrag]);
+                      if(window._fbDb&&window._fbRef&&window._fbSet){
+                        ["teddy","yeaji"].forEach(mgr=>{
+                          window._fbSet(window._fbRef(window._fbDb,`notifications/nachtrag_${id}_${mgr}`),{
+                            type:"nachtrag",kategorie:"Nachtrag",user:userName,date:d,filiale:f,
+                            ein:nEin,aus:nAus,grund:nGrund,antragId:id,zustaendig:mgr,gelesen:false,ts:Date.now()
+                          }).catch(()=>{});
+                        });
+                      }
+                      setNMsg("Nachtrag gesendet!");
+                      setTimeout(()=>{setShowModal(false);setNMsg("");setNGrund("");},1500);
+                    }} style={{flex:2,padding:"11px",borderRadius:10,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
+                      Nachtrag senden
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
       )}
     </>
   );
@@ -2056,60 +2160,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
         </div>
       )}
 
-      {tab==="nachtrag"&&(
-        <div style={{padding:"14px"}}>
-          <div style={{...S.card,padding:"16px",marginBottom:12}}>
-            <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:12}}>{"Nachträgliche Zeiterfassung"}</div>
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Datum</div>
-              <div style={{display:"flex"}}>
-                <input type="date" value={nDatum} onChange={e=>setNDatum(e.target.value)} style={{...S.input, flex:1}}/>
-              </div>
-            </div>
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Filiale</div>
-              <div style={{display:"flex",gap:7}}>
-                {FILIALEN.map(f=>(
-                  <button key={f} onClick={()=>setNFiliale(f)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${nFiliale===f?C.mint:C.border}`,background:nFiliale===f?C.mintLight:"#fff",color:nFiliale===f?C.mintDark:C.muted}}>{f}</button>
-                ))}
-              </div>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
-              {[["Einstempeln",nEin,setNEin],["Ausstempeln",nAus,setNAus]].map(([lbl,val,set])=>(
-                <div key={lbl} style={{display:"flex",flexDirection:"column"}}>
-                  <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>{lbl}</div>
-                  <TimeInput value={val} onChange={set} style={{...S.input, width:"50%", display:"block", margin:"0 auto", minWidth:0, boxSizing:"border-box", textAlign:"center"}}/>
-                </div>
-              ))}
-            </div>
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4}}>Grund <span style={{color:C.red}}>*</span></div>
-              <textarea value={nGrund} onChange={e=>{setNGrund(e.target.value);setNMsg("");}} placeholder="z. B. Vergessen einzustempeln…" style={{width:"100%",height:66,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
-            </div>
-            {nMsg&&<div style={{fontSize:11,color:nMsg.startsWith("Bitte")?C.red:C.mintDark,marginBottom:9,fontWeight:600}}>{nMsg}</div>}
-            <button onClick={submitNachtrag} style={{width:"100%",padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer"}}>Antrag einreichen</button>
-          </div>
 
-          {/* Meine Antrge - Nachtrag    */}
-          {myAntraege.length>0&&(
-            <div style={S.card}>
-              <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>{"Meine Anträge"}</div>
-              {myAntraege.map((a,i)=>(
-                <div key={a.id} style={{paddingBottom:i<myAntraege.length-1?9:0,marginBottom:i<myAntraege.length-1?9:0,borderBottom:i<myAntraege.length-1?`1px solid ${C.border}`:"none"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                    <div>
-                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{a.date} · {a.filiale}</div>
-                      <div style={{fontSize:10,color:C.muted}}>{a.ein} – {a.aus}</div>
-                      {a.grund&&<div style={{fontSize:9,color:C.muted,marginTop:2}}>{"📌 "}{a.grund}</div>}
-                    </div>
-                    <span style={S.pill(a.status)}>{a.status==="offen"?"Offen":a.status==="genehmigt"?"Genehmigt":"Abgelehnt"}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {tab==="einspringen"&&(
         <EinspringenView userName={user.vorname} users={users}/>
@@ -2120,7 +2171,6 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           {id:"home",       icon:"🏠", lbl:"Startseite"},
           {id:"dienstplan", icon:"📋", lbl:"Dienstplan", badge: pendingTauschCount},
           {id:"einspringen",icon:"🙋", lbl:"Einspringen"},
-          {id:"nachtrag",   icon:"🕐", lbl:"Nachtrag"},
         ].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
             <div style={{position:"relative",display:"inline-block"}}>
