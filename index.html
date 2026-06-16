@@ -929,16 +929,31 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
         const antr = myAntraege.filter(a => a.date === d);
         const status = shift ? getShiftStatus({ time: shift.t||shift.time }, rec) : null;
 
+        const isToday = d === todayStr;
         return (
           <div key={d} style={{marginBottom:14}}>
             {/*   */}
-            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:6}}>
+            <div style={{
+              fontSize:isToday?13:11,
+              fontWeight:isToday?900:700,
+              color:isToday?C.mintDark:C.muted,
+              marginBottom:6,
+              display:"flex",alignItems:"center",gap:6
+            }}>
+              {isToday&&<span style={{width:6,height:6,borderRadius:"50%",background:C.mintDark,display:"inline-block"}}/>}
               {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"2-digit"})}
+              {isToday&&<span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:C.mintDark,color:"#fff",marginLeft:2}}>Heute</span>}
             </div>
 
             {/*   */}
             {shift && (
-              <ShiftRow s={shift} userName={userName} records={records} setNotifications={setNotifications}/>
+              <div style={{
+                borderRadius:12,
+                border:isToday?`2px solid ${C.mintDark}`:"none",
+                boxShadow:isToday?"0 2px 12px rgba(92,199,148,.25)":"none"
+              }}>
+                <ShiftRow s={shift} userName={userName} records={records} setNotifications={setNotifications}/>
+              </div>
             )}
 
             {/* shift    */}
