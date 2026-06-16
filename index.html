@@ -2610,10 +2610,29 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
 
   function decideNachtrag(a, ok) {
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:ok?"genehmigt":"abgelehnt"}:x));
-    if (ok && !records.find(r=>r.user===a.user&&r.date===a.date&&r.typ==="nachtrag")) {
-      setRecords(prev=>[...(Array.isArray(prev)?prev:[]),{id:Date.now(),user:a.user,date:a.date,filiale:a.filiale,ein:a.ein,aus:a.aus,note:a.grund||"",typ:"nachtrag"}]);
+    if (ok) {
+      const existing = records.find(r=>r.user===a.user&&r.date===a.date&&r.typ==="nachtrag");
+      if (!existing) {
+        const newRec = {id:Date.now(),user:a.user,date:a.date,filiale:a.filiale,ein:a.ein,aus:a.aus,note:a.grund||"",typ:"nachtrag"};
+        // Firebase에 직접 저장
+        if (window._fbDb && window._fbRef && window._fbPush) {
+          window._fbPush(window._fbRef(window._fbDb, "records"), newRec)
+            .catch(e=>console.error("record save error:", e));
+        }
+        setRecords(prev=>[...(Array.isArray(prev)?prev:[]), newRec]);
+      }
     }
     if (!ok) {
+      // Firebase에서도 삭제
+      if (window._fbDb && window._fbRef && window._fbGet && window._fbRemove) {
+        window._fbGet(window._fbRef(window._fbDb, "records")).then(snap=>{
+          const data=snap.val()||{};
+          Object.entries(data).forEach(([k,v])=>{
+            if(v&&v.user===a.user&&v.date===a.date&&v.typ==="nachtrag")
+              window._fbRemove(window._fbRef(window._fbDb,`records/${k}`)).catch(()=>{});
+          });
+        });
+      }
       setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>!(r.user===a.user&&r.date===a.date&&r.typ==="nachtrag")));
     }
     setOpenAId(null);
@@ -3689,11 +3708,11 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           sched[antrag.initiator] = (sched[antrag.initiator]||[])
             .filter(s => (s.d||s.date) !== antrag.initiatorDate);
           sched[antrag.initiator] = [...(sched[antrag.initiator]||[]),
-            {d: antrag.partnerDate, f: antrag.partnerFiliale, t: antrag.partnerTime||null}];
+            {d: antrag.partnerDate, f: antrag.partnerFiliale, t: antrag.partnerTime||null, tauschMit: antrag.partner}];
           sched[antrag.partner] = (sched[antrag.partner]||[])
             .filter(s => (s.d||s.date) !== antrag.partnerDate);
           sched[antrag.partner] = [...(sched[antrag.partner]||[]),
-            {d: antrag.initiatorDate, f: antrag.initiatorFiliale, t: antrag.initiatorTime||null}];
+            {d: antrag.initiatorDate, f: antrag.initiatorFiliale, t: antrag.initiatorTime||null, tauschMit: antrag.initiator}];
           window._fbSet(window._fbRef(window._fbDb, "schedule"), sched).catch(e=>console.error(e));
         }, {onlyOnce:true});
       }
