@@ -457,9 +457,15 @@ function calcShiftMinutes(timeRange) {
   if (s == null || e == null) return null;
   return e > s ? e - s : null;
 }
-function getShiftStatus(shift, actualRec) {
-  if (!actualRec) return "ausstehend";
-  if (!actualRec.aus) return "aktiv";
+function getShiftStatus(shift, actualRec, date) {
+  const todayStr = today();
+  const shiftDate = date || todayStr;
+  if (!actualRec) {
+    // 날짜 기준: 과거면 nicht erschienen, 오늘 이후면 ausstehend
+    if (shiftDate < todayStr) return "nicht erschienen";
+    return "ausstehend";
+  }
+  if (!actualRec.aus || actualRec.aus === "") return "aktiv";
   const planned = calcShiftMinutes(shift.time || shift.t);
   const actual = calcShiftMinutes(`${actualRec.ein}-${actualRec.aus}`);
   if (planned == null || actual == null) return "gearbeitet";
@@ -985,7 +991,8 @@ function ShiftRow({ s, userName, records, setNotifications }) {
     prüfen:     { color: C.yellow,   bg: C.yellowLight,label: "Prüfen"    },
     aktiv:      { color: C.yellow,   bg: "#FFF9E6",    label: "Im Dienst" },
     ausstehend: { color: C.muted,    bg: C.bg,         label: "Ausstehend"},
-  }[alreadyAbgesagt ? "ausstehend" : status] || { color: C.muted, bg: C.bg, label: "Ausstehend" };
+    "nicht erschienen": { color: C.red, bg: C.redLight, label: "Nicht erschienen"},
+  }[alreadyAbgesagt ? "ausstehend" : status] || { color: C.red, bg: C.redLight, label: "Nicht erschienen" };
 
   return (
     <>
@@ -2892,7 +2899,9 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                             const status=rec?.aus?"Feierabend":rec?.ein?"Im Dienst":"Nicht erschienen";
                             const statusColor=rec?.aus?C.mintDark:rec?.ein?C.yellow:C.red;
                             const statusBg=rec?.aus?C.mintLight:rec?.ein?C.yellowLight:C.redLight;
-                            const statusLabel=rec?.aus?"Feierabend ✓":rec?.ein?"Im Dienst ●":"Nicht erschienen";
+                            const shiftDateStr=d;
+                            const todayStr2=today();
+                            const statusLabel=rec?.aus?"Feierabend":rec?.ein?"Aktiv":shiftDateStr<todayStr2?"Nicht erschienen":"Ausstehend";
                             return(
                               <div key={emp.key} style={{display:"flex",justifyContent:"space-between",
                                 alignItems:"center",padding:"10px 14px",
@@ -3172,7 +3181,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
     </div>
   );
 }
-function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx}){
+function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx}){
   const [tab,setTab]=useState("uebersicht");
   const [detailKey,setDetailKey]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
@@ -3983,7 +3992,7 @@ function App(){
     <div style={{maxWidth:500,margin:"0 auto",minHeight:"100vh",background:C.bg}}>
       {screen==="login"&&<LoginView onLogin={handleLogin} users={users} setUsers={setUsersFirebase} getPin={getPin} setPin={setPin} csvCtx={csvCtx}/>}
       {screen==="mitarbeiter"&&<MitarbeiterView userKey={userKey} users={users} setUsers={setUsersFirebase} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx}/>}
-      {screen==="manager"&&<ManagerView records={records} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsersFirebase} csvCtx={csvCtx}/>}
+      {screen==="manager"&&<ManagerView records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsersFirebase} csvCtx={csvCtx}/>}
     </div>
   );
 }
