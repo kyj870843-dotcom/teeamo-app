@@ -2735,7 +2735,11 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
   const [viewMode, setViewMode] = useState("plan");
   const [openEmp, setOpenEmp] = useState(null);
   const [openDate, setOpenDate] = useState(null);
-  const [selMonth, setSelMonth] = useState(null); // null = current schedule
+  const currentMonth=(()=>{
+    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+    return d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
+  })();
+  const [selMonth, setSelMonth] = useState(currentMonth);
   const empList = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key))
     .sort((a,b)=>a.vorname.localeCompare(b.vorname));
 
@@ -2821,7 +2825,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
             {availableMonths.map(m=>{
               const [yr,mo]=m.split("_");
               const label=new Date(yr+"-"+mo+"-01").toLocaleDateString("de-DE",{month:"long",year:"numeric"});
-              const isActive=selMonth===m||(selMonth===null&&m===availableMonths[0]);
+              const isActive=selMonth===m;
               return(
                 <button key={m} onClick={()=>setSelMonth(m===availableMonths[0]&&!selMonth?null:m)}
                   style={{flexShrink:0,padding:"8px 14px",borderRadius:10,border:`1.5px solid ${isActive?C.navy:C.border}`,
