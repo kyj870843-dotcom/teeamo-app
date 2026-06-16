@@ -132,6 +132,40 @@ function usePersist(lsKey, init) {
 }
 
 // PIN   
+// 계정 삭제 시 관련 Firebase 데이터 모두 삭제
+function deleteUserData(userKey, vorname) {
+  if (!window._fbDb || !window._fbRef || !window._fbRemove) return;
+  const fb = window._fbRef;
+  const db = window._fbDb;
+  const rm = window._fbRemove;
+  // PIN 삭제
+  rm(fb(db, `pins/${userKey}`)).catch(()=>{});
+  // records 삭제 (해당 유저)
+  if (window._fbGet) {
+    window._fbGet(fb(db, "records")).then(snap=>{
+      const data = snap.val();
+      if (!data) return;
+      Object.entries(data).forEach(([k,v])=>{
+        if (v && v.user === vorname) rm(fb(db, `records/${k}`)).catch(()=>{});
+      });
+    }).catch(()=>{});
+  }
+  // notifications 삭제 (해당 유저)
+  if (window._fbGet) {
+    window._fbGet(fb(db, "notifications")).then(snap=>{
+      const data = snap.val();
+      if (!data) return;
+      Object.entries(data).forEach(([k,v])=>{
+        if (v && (v.user === vorname || k.includes(userKey) || k.toLowerCase().includes((vorname||"").toLowerCase()))) {
+          rm(fb(db, `notifications/${k}`)).catch(()=>{});
+        }
+      });
+    }).catch(()=>{});
+  }
+  // localStorage PIN 삭제
+  localStorage.removeItem(`pin_${userKey}`);
+}
+
 // PIN cache (Firebase에서 로드)
 const _pinCache = {};
 
@@ -1535,6 +1569,8 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   }
 
   function deleteAccount() {
+    const me = (Array.isArray(users)?users:[]).find(u=>u.key===userKey);
+    deleteUserData(userKey, me?.vorname);
     setUsers(prev => (Array.isArray(prev)?prev:[]).filter(u => u.key !== userKey));
     onLogout();
   }
@@ -4078,7 +4114,11 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
               </div>
               <div style={{display:"flex",gap:9}}>
                 <button onClick={()=>setDeleteConfirm(null)} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
-                <button onClick={()=>{setUsers(prev=>(Array.isArray(prev)?prev:[]).filter(u=>u.key!==deleteConfirm));setDeleteConfirm(null);setDetailKey(null);}}
+                <button onClick={()=>{
+                  const toDel=safeUsers.find(u=>u.key===deleteConfirm);
+                  deleteUserData(deleteConfirm, toDel?.vorname);
+                  setUsers(prev=>(Array.isArray(prev)?prev:[]).filter(u=>u.key!==deleteConfirm));
+                  setDeleteConfirm(null);setDetailKey(null);}}
                   style={{flex:1,padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>{"Löschen"}</button>
               </div>
             </div>
