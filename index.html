@@ -49,12 +49,12 @@
 
   window.dispatchEvent(new Event("firebase-ready"));
 </script>
-<script src="https://unpkg.com/babel-standalone@6.26.0/babel.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.0/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel" data-presets="react">
+<script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
 const C = {
@@ -397,7 +397,7 @@ function KalenderView({ csvCtx, userName, records, users }) {
           display: "flex", flexDirection: "column", alignItems: "center",
           justifyContent: "center", padding: "48px 24px", gap: 12, textAlign: "center",
         }}>
-          <span style={{fontSize: 36}}>{"\uD83D\uDCCB"}</span>
+          <span style={{fontSize: 36}}>{"\u1F4CB"}</span>
           <div style={{fontSize: 13, fontWeight: 700, color: C.text}}>Kein Dienstplan vorhanden</div>
           <div style={{fontSize: 11, color: C.muted, lineHeight: 1.5}}>
             Der Manager hat noch keinen Dienstplan hochgeladen.
@@ -574,7 +574,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                 background:i+1<=step?C.mint:C.border,transition:"background .2s"}}/>
             ))}
           </div>
-          <div style={{fontSize:14,fontWeight:800,color:C.text}}>{"\uD83D\uDD04 Schichttausch"}</div>
+          <div style={{fontSize:14,fontWeight:800,color:C.text}}>{"\u1F504 Schichttausch"}</div>
           <div style={{fontSize:11,color:C.muted,marginTop:2}}>
             {step===1&&"Welche Schicht m\u00F6chtest du tauschen?"}
             {step===2&&"Mit wem m\u00F6chtest du tauschen?"}
@@ -921,7 +921,7 @@ function ShiftRow({ s, userName, records, setNotifications }) {
   const f = s.f || s.filiale;
   const t = s.t || s.time;
   const actualRec = (Array.isArray(records)?records:[]).find(r => r.user === userName && r.date === d);
-  const status = getShiftStatus({ time: t }, actualRec) || "ausstehend";
+  const status = getShiftStatus({ time: t }, actualRec);
   const [showAbsagen, setShowAbsagen] = useState(false);
   const [absagenList, setAbsagenList] = useFirebase("absagen", []);
   const [tauschAntraege] = useFirebase("schichttausch", []);
@@ -1077,7 +1077,7 @@ function EinspringenView({ userName }) {
   return (
     <div style={{padding:"14px"}}>
       <div style={{...S.card,marginBottom:12,background:`linear-gradient(135deg,${C.mintLight},#f0f7fa)`,border:`1.5px solid ${C.mint}`}}>
-        <div style={{fontSize:14,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"\uD83D\uDE4B Freie Schichten"}</div>
+        <div style={{fontSize:14,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"\u1F64B Freie Schichten"}</div>
         <div style={{fontSize:11,color:C.muted}}>{"Hier kannst du offene Schichten \u00FCbernehmen."}</div>
       </div>
 
@@ -1090,6 +1090,7 @@ function EinspringenView({ userName }) {
 
       {offene.length === 0 ? (
         <div style={{...S.card,textAlign:"center",padding:"32px 16px"}}>
+          <div style={{fontSize:28,marginBottom:8}}>{"\u1F389"}</div>
           <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Keine offenen Schichten</div>
           <div style={{fontSize:11,color:C.muted}}>Aktuell sind alle Schichten besetzt.</div>
         </div>
@@ -1156,20 +1157,11 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   }
   function doRegister(){
     if(!regV.trim()){setRegErr("Vorname ist Pflichtfeld.");return;}
-    if(regP.length!==4){setRegErr("PIN muss genau 4 Ziffern sein.");return;}
-    if(!/^[0-9]{4}$/.test(regP)){setRegErr("PIN nur Ziffern (0-9).");return;}
+    if(!/^\d{4}$/.test(regP)){setRegErr("PIN muss 4 Ziffern sein.");return;}
     if(regP!==regP2){setRegErr("PINs stimmen nicht \u00FCberein.");return;}
-    const vn=regV.trim();
-    const nn=regN.trim();
-    // Firebase-safe key: nur a-z, 0-9, _
-    const safeBase=vn.toLowerCase()
-      .replace(/[^a-z0-9]/g,"")
-      .replace(/_+/g,"_")
-      .slice(0,12)||"user";
-    const key=safeBase+"_"+Date.now();
+    const vn=regV.trim(),nn=regN.trim(),key=vn.toLowerCase().replace(/[^a-z0-9\uAC00-\uD7A3]/g,"_").replace(/_+/g,"_").slice(0,20)+"_"+Date.now();
     const isAdmin=isAdminName&&regRole==="Admin";
-    const kuerzel=(vn.replace(/[^ -]/g,"").trim()||vn).slice(0,2)||"??";
-    const newUser={key,vorname:vn,nachname:nn,kuerzel,role:isAdmin?"Admin":"Staff",isAdmin,infektionsschutz:null,contractHours:0};
+    const newUser={key,vorname:vn,nachname:nn,emoji:em,kuerzel:vn.slice(0,2),role:isAdmin?"Admin":"Staff",isAdmin,infektionsschutz:null,contractHours:0};
     savePinFn(key, regP);
     setUsers(prev=>[...(Array.isArray(prev)?prev:[]),newUser]);
     setRegV("");setRegN("");setRegP("");setRegP2("");setRegErr("");setRegRole("Staff");setPage("list");
@@ -1205,11 +1197,11 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           </div>
           <div style={{minHeight:28,marginBottom:8,fontSize:12,color:C.red,fontWeight:600}}>{err}</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,maxWidth:260,margin:"0 auto"}}>
-            {["1","2","3","4","5","6","7","8","9","","0","DEL"].map((k,i)=>(
+            {["1","2","3","4","5","6","7","8","9","","0","\u232B"].map((k,i)=>(
               k===""?<div key={i}/>:
-              <button key={i} onClick={()=>{k==="DEL"?setPin(p=>p.slice(0,-1)):pinKey(k)}}
-                style={{height:56,borderRadius:14,border:`1px solid ${C.border}`,background:C.card,fontSize:k==="DEL"?20:22,fontWeight:600,color:C.text,cursor:"pointer"}}
-                onTouchStart={e=>e.currentTarget.style.background="#eee"} onTouchEnd={e=>e.currentTarget.style.background=C.card}>{k==="DEL"?"<":k}</button>
+              <button key={i} onClick={()=>k==="\u232B"?setPin(p=>p.slice(0,-1)):pinKey(k)}
+                style={{height:56,borderRadius:14,border:`1px solid ${C.border}`,background:C.card,fontSize:k==="\u232B"?20:22,fontWeight:600,color:C.text,cursor:"pointer"}}
+                onTouchStart={e=>e.currentTarget.style.background="#eee"} onTouchEnd={e=>e.currentTarget.style.background=C.card}>{k}</button>
             ))}
           </div>
         </div>
@@ -1232,7 +1224,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
               Vorname <span style={{color:C.red}}>*</span>
             </div>
             <div style={{fontSize:9,color:C.muted,marginBottom:5}}>
-              Tipp: Emoji erlaubt! z.B. <strong>{"Lena \uD83C\uDF53"}</strong> oder <strong>{"Alex \uD83D\uDC3B"}</strong>
+              Tipp: Emoji erlaubt! z.B. <strong>{"Lena \u1F353"}</strong> oder <strong>{"Alex \u1F43B"}</strong>
             </div>
             <input value={regV} onChange={e=>setRegV(e.target.value)}
               placeholder="z.B. Lena \uD83C\uDF53"
@@ -1293,7 +1285,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           <div style={{fontSize:13,fontWeight:700,color:C.text}}>{displayLabel}</div>
           <div style={{fontSize:10,color:C.muted,marginTop:1}}>{u.role==="Admin"?"Admin":"Staff"}</div>
         </div>
-        <span style={{fontSize:14,color:C.muted}}>{"\uD83D\uDD12"}</span>
+        <span style={{fontSize:14,color:C.muted}}>{"\u1F512"}</span>
       </button>
     );
   };
@@ -1446,24 +1438,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [impfDoc, setImpfDoc] = useState(user.infektionsschutz || null);
   const [impfViewer, setImpfViewer] = useState(false);
-  const [showPinChange, setShowPinChange] = useState(false);
-  const [oldPin, setOldPin] = useState("");
-  const [newPin1, setNewPin1] = useState("");
-  const [newPin2, setNewPin2] = useState("");
-  const [pinMsg, setPinMsg] = useState("");
   const fileRef = useRef(null);
-  const { getPin, setPin: setPinStore } = usePinStore();
-
-  function changePIN() {
-    const current = getPin(userKey);
-    if (oldPin !== current) { setPinMsg("\u274C Aktuelle PIN falsch."); return; }
-    if (!/^\d{4}$/.test(newPin1)) { setPinMsg("\u274C PIN muss 4 Ziffern sein."); return; }
-    if (newPin1 !== newPin2) { setPinMsg("\u274C PINs stimmen nicht \u00FCberein."); return; }
-    setPinStore(userKey, newPin1);
-    setPinMsg("\u2705 PIN ge\u00E4ndert!");
-    setOldPin(""); setNewPin1(""); setNewPin2("");
-    setTimeout(() => { setPinMsg(""); setShowPinChange(false); }, 2000);
-  }
 
   function saveName() {
     if (!vorname.trim()) return;
@@ -1538,7 +1513,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         <div style={{...S.card,marginBottom:12}}>
           <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"\u270F\uFE0F Name \u00E4ndern"}</div>
           <div style={{fontSize:9,color:C.muted,marginBottom:6}}>
-            Tipp: Emoji erlaubt! z.B. <strong>{"Lena \uD83C\uDF53"}</strong> oder <strong>{"Alex \uD83D\uDC3B"}</strong>
+            Tipp: Emoji erlaubt! z.B. <strong>{"Lena \u1F353"}</strong> oder <strong>{"Alex \u1F43B"}</strong>
           </div>
           <input value={vorname} onChange={e=>setVorname(e.target.value)}
             placeholder="Vorname (mit Emoji)"
@@ -1556,46 +1531,9 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           {saveMsg&&<div style={{fontSize:11,color:C.mintDark,marginTop:8,fontWeight:600,textAlign:"center"}}>{saveMsg}</div>}
         </div>
 
-        {/* PIN */}
-        <div style={{...S.card,marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>{"\uD83D\uDD11 PIN \u00E4ndern"}</div>
-          {!showPinChange ? (
-            <button onClick={()=>setShowPinChange(true)}
-              style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.text,fontWeight:700,fontSize:12,cursor:"pointer"}}>
-              PIN \u00E4ndern
-            </button>
-          ) : (
-            <div>
-              {[
-                {label:"Aktuelle PIN",val:oldPin,set:setOldPin},
-                {label:"Neue PIN",val:newPin1,set:setNewPin1},
-                {label:"Neue PIN best\u00E4tigen",val:newPin2,set:setNewPin2},
-              ].map(({label,val,set})=>(
-                <div key={label} style={{marginBottom:8}}>
-                  <div style={{fontSize:10,color:C.muted,marginBottom:3}}>{label}</div>
-                  <input type="password" maxLength={4} value={val} onChange={e=>set(e.target.value)}
-                    placeholder="\u2022\u2022\u2022\u2022"
-                    style={{...S.input,textAlign:"center",fontSize:18,letterSpacing:6}}/>
-                </div>
-              ))}
-              <div style={{display:"flex",gap:8,marginTop:4}}>
-                <button onClick={()=>{setShowPinChange(false);setOldPin("");setNewPin1("");setNewPin2("");setPinMsg("");}}
-                  style={{flex:1,padding:"9px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                  Abbrechen
-                </button>
-                <button onClick={changePIN}
-                  style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
-                  PIN speichern
-                </button>
-              </div>
-              {pinMsg&&<div style={{fontSize:11,color:pinMsg.startsWith("\u2705")?C.mintDark:C.red,marginTop:8,textAlign:"center",fontWeight:600}}>{pinMsg}</div>}
-            </div>
-          )}
-        </div>
-
         {/*     */}
         <div style={{...S.card,marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"\uD83D\uDEE1\uFE0F Bescheinigung von Infektionsschutzgesetz"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"\u1F6E1\uFE0F Bescheinigung von Infektionsschutzgesetz"}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:12}}>
             Wird bei Hygienekontrollen direkt auf dem Handy vorgezeigt.
           </div>
@@ -1607,7 +1545,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
                 style={{width:"100%",padding:"18px",borderRadius:12,border:`2px solid ${C.mint}`,
                   background:C.mintLight,cursor:"pointer",display:"flex",flexDirection:"column",
                   alignItems:"center",gap:6,marginBottom:10}}>
-                <span style={{fontSize:32}}>{"\uD83D\uDEE1\uFE0F"}</span>
+                <span style={{fontSize:32}}>{"\u1F6E1\uFE0F"}</span>
                 <span style={{fontSize:13,fontWeight:800,color:C.mintDark}}>Bescheinigung anzeigen</span>
                 <span style={{fontSize:10,color:C.muted}}>{"Tippen zum Vergr\u00F6\u00DFern \u00B7 "}{isPdf?"PDF":"Bild"}</span>
               </button>
@@ -1646,7 +1584,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 
         {/*    */}
         <div style={{...S.card,marginBottom:12,border:`1px solid ${C.redLight}`}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"\uD83D\uDDD1 Konto l\u00F6schen"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"\u1F5D1 Konto l\u00F6schen"}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:10}}>
             Diese Aktion kann nicht r\u00FCckg\u00E4ngig gemacht werden.
           </div>
@@ -2134,7 +2072,7 @@ function StatistikTab({records,users}){
         })}
       </div>
       <div style={{background:C.navy,borderRadius:14,padding:"16px",marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>{"\uD83D\uDCE5 Daten exportieren"}</div>
+        <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>{"\u1F4E5 Daten exportieren"}</div>
         <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV \u2013 \u00F6ffnet direkt in Excel"}</div>
         {[
           {title:"Stundennachweis (Details)",sub:"Jeder Tag \u00B7 Name \u00B7 Datum \u00B7 Filiale \u00B7 Ein/Aus \u00B7 Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
@@ -2257,7 +2195,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 {mDiff!==null&&<span style={{fontSize:11,fontWeight:700,color:mDiff>=0?C.mintDark:C.red}}>{(mDiff>=0?"+":"")+mDiff.toFixed(1)+"h"}</span>}
-                <span style={{fontSize:11,color:C.muted}}>{isOpen?"\u25B2":"\u25BC"}</span>
+                <span style={{fontSize:11,color:C.muted}}>{isOpen?"[-]":"[+]"}</span>
               </div>
             </button>
             {isOpen&&(
@@ -2302,7 +2240,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
   );
 }
 
-function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab, userKey, safeUsers }) {
+function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab }) {
 
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
   const todayStr = today();
@@ -2340,14 +2278,12 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                   </div>
                   <div style={{fontSize:10,color:C.muted,marginTop:2}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
                 </div>
-                
+                <span style={{fontSize:14,color:C.muted}}>{">"}</span>
               </button>
-              {(emp.role!=="Admin" || userKey==="yeaji") && (
-                <button onClick={()=>setDeleteConfirm(emp.key)}
-                  style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
-                  <span style={{fontSize:13,color:C.red,fontWeight:700}}>del</span>
-                </button>
-              )}
+              <button onClick={()=>setDeleteConfirm(emp.key)}
+                style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
+                <span style={{fontSize:13,color:C.red,fontWeight:700}}>del</span>
+              </button>
             </div>
           ))}
         </div>
@@ -2442,7 +2378,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
 
 //  ADMIN ANTRGE VIEW 
 //  ANTRGE CARD ( ) 
-function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege, absagenList, setAbsagenList, records, setRecords, aTab, setATab, openAId, setOpenAId, userKey }) {
+function AntraegeTab({ antraege, setAntraege, tauschAntraege, absagenList, setAbsagenList, records, setRecords, aTab, setATab, openAId, setOpenAId }) {
   const nList = Array.isArray(antraege) ? antraege : [];
   const tList = Array.isArray(tauschAntraege) ? tauschAntraege : [];
   const abList = Array.isArray(absagenList) ? absagenList : [];
@@ -2499,24 +2435,12 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
           ))}
           {nList.filter(a=>a.status!=="offen").length>0&&(
             <div style={{marginTop:12}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <div style={{fontSize:10,fontWeight:700,color:C.muted}}>Bearbeitet</div>
-                {userKey==="yeaji"&&<button onClick={()=>setAntraege([])}
-                  style={{fontSize:9,padding:"3px 8px",borderRadius:6,border:"1px solid "+C.red,background:C.redLight,color:C.red,cursor:"pointer",fontWeight:700}}>
-                  Alle l\u00F6schen
-                </button>}
-              </div>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>Bearbeitet</div>
               {nList.filter(a=>a.status!=="offen").map(a=>(
-                <div key={a.id} style={{position:"relative"}}>
-                  <NachtragCard a={a} isOpen={openAId===a.id}
-                    onToggle={()=>setOpenAId(openAId===a.id?null:a.id)}
-                    onDecide={(ok)=>decideNachtrag(a,ok)}
-                    onReopen={()=>reopenNachtrag(a.id)}/>
-                  {userKey==="yeaji"&&<button onClick={()=>setAntraege(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==a.id))}
-                    style={{position:"absolute",top:8,right:8,fontSize:10,padding:"2px 7px",borderRadius:6,border:"1px solid "+C.border,background:C.redLight,color:C.red,cursor:"pointer"}}>
-                    del
-                  </button>}
-                </div>
+                <NachtragCard key={a.id} a={a} isOpen={openAId===a.id}
+                  onToggle={()=>setOpenAId(openAId===a.id?null:a.id)}
+                  onDecide={(ok)=>decideNachtrag(a,ok)}
+                  onReopen={()=>reopenNachtrag(a.id)}/>
               ))}
             </div>
           )}
@@ -2526,10 +2450,6 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
       {aTab==="tausch"&&(
         <div>
           {tList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Schichttausch-Antraege</div>}
-          {userKey==="yeaji"&&tList.length>0&&<button onClick={()=>setTauschAntraege([])}
-            style={{fontSize:9,padding:"3px 8px",borderRadius:6,border:"1px solid "+C.red,background:C.redLight,color:C.red,cursor:"pointer",fontWeight:700,marginBottom:8,display:"block"}}>
-            Alle Tausch-Antr\u00E4ge l\u00F6schen
-          </button>}
           {tList.map(a=>{
             const isOpen=openAId==="t_"+a.id;
             const offen=a.status==="ausstehend_manager"||a.status==="partner_ok";
@@ -2546,7 +2466,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:sc,background:sb}}>{sl}</span>
-                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"\u25B2":"\u25BC"}</span>
+                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"[-]":"[+]"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -2567,10 +2487,6 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
       {aTab==="absage"&&(
         <div>
           {abList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Absagen</div>}
-          {userKey==="yeaji"&&abList.length>0&&<button onClick={()=>setAbsagenList([])}
-            style={{fontSize:9,padding:"3px 8px",borderRadius:6,border:"1px solid "+C.red,background:C.redLight,color:C.red,cursor:"pointer",fontWeight:700,marginBottom:8,display:"block"}}>
-            Alle Absagen l\u00F6schen
-          </button>}
           {abList.filter(a=>a.status==="offen").map(a=>{
             const isOpen=openAId==="ab_"+a.id;
             return(
@@ -2583,7 +2499,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,color:C.red,background:C.redLight}}>Offen</span>
-                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"\u25B2":"\u25BC"}</span>
+                    <span style={{fontSize:10,color:C.muted}}>{isOpen?"[-]":"[+]"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -2880,7 +2796,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{shifts.length} Schichten</span>
-                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "\u25B2" : "\u25BC"}</span>
+                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "A" : "V"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -2954,7 +2870,7 @@ function AdminDienstplanView({ records, users, userKey, manager, csvCtx, schedul
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{dayEmps.length} Personen geplant</span>
-                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "\u25B2" : "\u25BC"}</span>
+                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "A" : "V"}</span>
                   </div>
                 </button>
                 {isOpen&&(
@@ -3166,7 +3082,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       {/* API   */}
       {showKeyInput && (
         <div style={{...S.card, marginBottom:12, border:`1.5px solid ${C.yellow}`}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>{"\uD83D\uDD11 Anthropic API-Schl\u00FCssel"}</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>{"\u1F511 Anthropic API-Schl\u00FCssel"}</div>
           <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
             placeholder="sk-ant-..."
             style={{...S.input, width:"100%", fontSize:11, marginBottom:8}}/>
@@ -3179,7 +3095,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
 
       {/*   */}
       <div style={{...S.card, marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"\uD83D\uDCCB Dienstplan hochladen"}</div>
+        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"\u1F4CB Dienstplan hochladen"}</div>
         <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{"Bild hochladen \u2192 KI analysiert automatisch die Schichten"}</div>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" onChange={handleFile} style={{display:"none"}}/>
         <button onClick={()=>fileRef.current.click()} disabled={analyzing}
@@ -3257,7 +3173,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
     </div>
   );
 }
-function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx}){
+function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx}){
   const [tab,setTab]=useState("uebersicht");
   const [detailKey,setDetailKey]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
@@ -3503,7 +3419,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
           <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
-          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC "}{n.grund}</div>
+          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC ""}{n.grund}"</div>
           <div style={{fontSize:9,color:C.muted,marginBottom:8}}>{"\u2139\uFE0F Bei Genehmigung wird die Schicht als freie Schicht ver\u00F6ffentlicht."}</div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>handleAbsagenNotif(key,n,false)}
@@ -3515,7 +3431,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
         {/* Schichttausch */}
         {isTausch && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:6}}>{"\uD83D\uDD04 Schichttausch \u00B7 Partner best\u00E4tigt"}</div>
+          <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:6}}>{"\u1F504 Schichttausch \u00B7 Partner best\u00E4tigt"}</div>
           <div style={{display:"flex",gap:6,marginBottom:8}}>
             <div style={{flex:1,padding:"7px 9px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
               <div style={{fontSize:9,color:C.muted}}>{n.initiator}</div>
@@ -3560,7 +3476,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
           <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{n.filiale} \u00B7 {n.ein} \u2013 {n.aus}</div>
-          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC "}{n.grund}</div>
+          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC ""}{n.grund}"</div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>handleNachtragNotif(key,n,false)}
               style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
@@ -3602,7 +3518,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           </div>
           <div style={{display:"flex",alignItems:"center",gap:7}}>
             <span style={{fontSize:9,fontWeight:700,color:eColor}}>{eLabel}</span>
-            <span style={{fontSize:10,color:C.muted}}>{isOpen ? "\u25B2" : "\u25BC"}</span>
+            <span style={{fontSize:10,color:C.muted}}>{isOpen ? "A" : "V"}</span>
           </div>
         </button>
         {isOpen && (
@@ -3698,8 +3614,6 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           setDeleteConfirm={setDeleteConfirm}
           uTab={uTab}
           setUTab={setUTab}
-          userKey={userKey}
-          safeUsers={safeUsers}
         />
       )}
 
@@ -3718,7 +3632,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           setMonthAccordion={setMonthAccordion}
           delRecordConfirm={delRecordConfirm}
           setDelRecordConfirm={setDelRecordConfirm}
-        />
+        />}
       )}
 
 
@@ -3740,7 +3654,6 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           antraege={antraege}
           setAntraege={setAntraege}
           tauschAntraege={tauschAntraege}
-          setTauschAntraege={setTauschAntraege}
           absagenList={absagenList}
           setAbsagenList={setAbsagenList}
           records={records}
@@ -3749,7 +3662,6 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           setATab={setATab}
           openAId={openAId}
           setOpenAId={setOpenAId}
-          userKey={userKey}
         />
       )}
 
@@ -3834,7 +3746,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
                     {new Date(a.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
                   </div>
                   <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} \u00B7 {a.ein} \u2013 {a.aus}</div>
-                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC "}{a.grund}"</div>
+                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC ""}{a.grund}"</div>
                   <div style={{display:"flex",gap:8}}>
                     <button onClick={()=>approveNachtrag(a.id,false)}
                       style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
@@ -3849,6 +3761,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             </div>
           ) : (
             <div style={{...S.card,textAlign:"center",padding:"24px 16px",marginBottom:14}}>
+              <div style={{fontSize:24,marginBottom:6}}>{"\u2705"}</div>
               <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Alles erledigt!</div>
               <div style={{fontSize:11,color:C.muted}}>{"Keine offenen Vorg\u00E4nge."}</div>
             </div>
@@ -3895,7 +3808,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
         return(
           <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:"24px"}}>
             <div style={{background:C.card,borderRadius:18,padding:"24px 22px",width:"100%",maxWidth:340,boxShadow:"0 8px 32px rgba(0,0,0,.18)"}}>
-              <div style={{width:48,height:48,borderRadius:"50%",background:C.redLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 14px"}}>{"\uD83D\uDDD1"}</div>
+              <div style={{width:48,height:48,borderRadius:"50%",background:C.redLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 14px"}}>{"\u1F5D1"}</div>
               <div style={{fontSize:16,fontWeight:800,color:C.text,textAlign:"center",marginBottom:6}}>{"Konto l\u00F6schen?"}</div>
               <div style={{fontSize:12,color:C.muted,textAlign:"center",marginBottom:20}}>
                 Das Konto von <strong style={{color:C.text}}>{empToDel?.vorname}</strong>{" wird dauerhaft gel\u00F6scht. Diese Aktion kann nicht r\u00FCckg\u00E4ngig gemacht werden."}
@@ -3911,7 +3824,6 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       })()}
     </div>
   );
-}
 
 //  APP ROOT 
 function App(){
@@ -4071,7 +3983,7 @@ function App(){
     <div style={{maxWidth:500,margin:"0 auto",minHeight:"100vh",background:C.bg}}>
       {screen==="login"&&<LoginView onLogin={handleLogin} users={users} setUsers={setUsersFirebase} getPin={getPin} setPin={setPin} csvCtx={csvCtx}/>}
       {screen==="mitarbeiter"&&<MitarbeiterView userKey={userKey} users={users} setUsers={setUsersFirebase} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx}/>}
-      {screen==="manager"&&<ManagerView records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsersFirebase} csvCtx={csvCtx}/>}
+      {screen==="manager"&&<ManagerView records={records} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsersFirebase} csvCtx={csvCtx}/>}
     </div>
   );
 }
