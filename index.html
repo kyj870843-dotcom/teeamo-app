@@ -3419,7 +3419,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
           <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
-          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC ""}{n.grund}"</div>
+          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"📌"}{n.grund}</div>
           <div style={{fontSize:9,color:C.muted,marginBottom:8}}>{"\u2139\uFE0F Bei Genehmigung wird die Schicht als freie Schicht ver\u00F6ffentlicht."}</div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>handleAbsagenNotif(key,n,false)}
@@ -3476,7 +3476,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
           </div>
           <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{n.filiale} \u00B7 {n.ein} \u2013 {n.aus}</div>
-          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC ""}{n.grund}"</div>
+          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"📌"}{n.grund}</div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>handleNachtragNotif(key,n,false)}
               style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
@@ -3746,7 +3746,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
                     {new Date(a.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
                   </div>
                   <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} \u00B7 {a.ein} \u2013 {a.aus}</div>
-                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"\uD83D\uDCCC ""}{a.grund}"</div>
+                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"📌"}{a.grund}"</div>
                   <div style={{display:"flex",gap:8}}>
                     <button onClick={()=>approveNachtrag(a.id,false)}
                       style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
