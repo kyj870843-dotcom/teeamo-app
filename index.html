@@ -435,7 +435,7 @@ function KalenderView({ csvCtx, userName, records, users }) {
       {userName && myShifts.length === 0 && (
         <div style={{padding:"14px",textAlign:"center"}}>
           <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>
-            📋 Für <strong>{userName}</strong> sind noch keine Schichten im Dienstplan eingetragen.
+            {"\uD83D\uDCCB F\u00FCr <strong>{userName}</strong> sind noch keine Schichten im Dienstplan eingetragen."}
             <div style={{fontSize:9,marginTop:4,opacity:.6}}>Der Manager muss den Plan hochladen und analysieren.</div>
           </div>
         </div>
@@ -658,7 +658,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose }) {
                   </div>
                 </div>
                 <div style={{fontSize:10,color:C.mintDark,textAlign:"center"}}>
-                  ⏳ {targetUser?.vorname} muss zuerst bestätigen.
+                  {"\u23F3 {targetUser?.vorname} muss zuerst best\u00E4tigen."}
                 </div>
               </div>
               <div style={{marginBottom:12}}>
@@ -783,7 +783,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
         <button onClick={()=>setShowTausch(true)}
           style={{fontSize:10,fontWeight:700,padding:"5px 10px",borderRadius:8,
             border:`1.5px solid ${C.mint}`,background:C.mintLight,color:C.mintDark,cursor:"pointer"}}>
-          🔄 Schichttausch
+          {"\uD83D\uDD04 Schichttausch"}
         </button>
       </div>
 
@@ -791,7 +791,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
       {pendingTausch.map(([key, n]) => (
         <div key={key} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.mint}`,background:C.mintLight}}>
           <div style={{fontSize:12,fontWeight:800,color:C.mintDark,marginBottom:4}}>
-            🔄 Tausch-Anfrage von {n.initiator}
+            {"\uD83D\uDD04 Tausch-Anfrage von {n.initiator}"}
           </div>
           <div style={{fontSize:10,color:C.text,marginBottom:2}}>
             Du gibst ab: <strong>{new Date(n.myDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})} · {n.myFiliale}</strong>
@@ -809,7 +809,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
               style={{flex:2,padding:"8px",borderRadius:8,border:"none",
                 background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
                 color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
-              ✅ Bestätigen
+              {"\u2705 Best\u00E4tigen"}
             </button>
           </div>
         </div>
@@ -905,7 +905,7 @@ function AbsagenModal({ shift, userName, onClose, onSubmit }) {
         </div>
         {err&&<div style={{fontSize:11,color:C.red,marginBottom:10,fontWeight:600}}>{"⚠ "}{err}</div>}
         <div style={{fontSize:10,color:C.muted,marginBottom:14}}>
-          ℹ️ Der Manager wird benachrichtigt. Nach Genehmigung wird deine Schicht als freie Schicht veröffentlicht.
+          {"\u2139\uFE0F Der Manager wird benachrichtigt. Nach Genehmigung wird deine Schicht als freie Schicht ver\u00F6ffentlicht."}
         </div>
         <div style={{display:"flex",gap:9}}>
           <button onClick={onClose} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
@@ -1115,7 +1115,7 @@ function EinspringenView({ userName }) {
               style={{width:"100%",padding:"11px",borderRadius:10,border:"none",
                 background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
                 color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
-              🙋 Ich springe ein!
+              {"\uD83D\uDE4B Ich springe ein!"}
             </button>
           </div>
         ))
@@ -1242,7 +1242,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           </div>
           {/*    */}
           <div style={{fontSize:10,color:C.muted,marginBottom:12,padding:"7px 10px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
-            ℹ️ Der Name kann nach der Registrierung jederzeit in den Einstellungen geändert werden.
+            {"\u2139\uFE0F Der Name kann nach der Registrierung jederzeit in den Einstellungen ge\u00E4ndert werden."}
           </div>
           {isAdminName&&(
             <div style={{marginBottom:12}}>
@@ -1308,7 +1308,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
       <div style={{padding:"16px 16px 40px"}}>
         <button onClick={()=>setPage("kalender")} style={{width:"100%",padding:"14px 16px",borderRadius:14,border:`1.5px solid ${C.mint}`,background:C.mintLight,color:C.mintDark,fontSize:14,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:6}}
           onTouchStart={e=>{e.currentTarget.style.background=C.mint;e.currentTarget.style.color="#fff";}} onTouchEnd={e=>{e.currentTarget.style.background=C.mintLight;e.currentTarget.style.color=C.mintDark;}}>
-          📋 Dienstplan anzeigen
+          {"\uD83D\uDCCB Dienstplan anzeigen"}
         </button>
         <div style={{textAlign:"center",fontSize:10,color:C.muted,marginBottom:18}}>{"Ohne Anmeldung – nur Leseansicht"}</div>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
@@ -1370,14 +1370,14 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 border:`2px solid ${!manualMode?C.mint:C.border}`,
                 background:!manualMode?C.mintLight:"#fff",
                 color:!manualMode?C.mintDark:C.muted}}>
-              🕐 Jetzt ({nowStr})
+              {"\uD83D\uDD50 Jetzt ({nowStr})"}
             </button>
             <button onClick={()=>setManualMode(true)}
               style={{flex:1,padding:"9px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",
                 border:`2px solid ${manualMode?C.yellow:C.border}`,
                 background:manualMode?C.yellowLight:"#fff",
                 color:manualMode?C.yellow:C.muted}}>
-              ✏️ Zeit eingeben
+              {"\u270F\uFE0F Zeit eingeben"}
             </button>
           </div>
           {manualMode&&(
@@ -1392,12 +1392,12 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 const diff=(ah*60+am)-(clockInTime.getHours()*60+clockInTime.getMinutes());
                 if(diff<=0) return(
                   <div style={{fontSize:11,color:C.red,fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    ⚠ Die Zeit liegt vor der Einstempelzeit ({pad(clockInTime.getHours())}:{pad(clockInTime.getMinutes())} Uhr)
+                    {"\u26A0 Die Zeit liegt vor der Einstempelzeit ({pad(clockInTime.getHours())}:{pad(clockInTime.getMinutes())} Uhr)"}
                   </div>
                 );
                 return(
                   <div style={{fontSize:11,color:"#3a7a55",fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    ⏱ {Math.floor(diff/60)}h {diff%60}min Arbeitszeit
+                    {"\u23F1 {Math.floor(diff/60)}h {diff%60}min Arbeitszeit"}
                   </div>
                 );
               })()}
@@ -1407,7 +1407,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 if(diff<=0) return null;
                 return(
                   <div style={{fontSize:11,color:C.yellow,fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    ⏱ {Math.floor(diff/60)}h {diff%60}min bereits vergangen
+                    {"\u23F1 {Math.floor(diff/60)}h {diff%60}min bereits vergangen"}
                   </div>
                 );
               })()}
@@ -1483,7 +1483,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:600,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
           <button onClick={()=>setImpfViewer(false)}
             style={{position:"absolute",top:20,right:20,background:"rgba(255,255,255,.15)",border:"none",borderRadius:10,padding:"8px 14px",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>
-            ✕ Schließen
+            {"\u2715 Schlie\u00DFen"}
           </button>
           {isPdf ? (
             <iframe src={impfDoc} style={{width:"92vw",height:"82vh",borderRadius:12,border:"none"}}/>
@@ -1498,7 +1498,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <button onClick={onClose}
             style={{background:"rgba(255,255,255,.12)",border:"none",borderRadius:10,padding:"7px 12px",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-            ← Zurück
+            {"\u2190 Zur\u00FCck"}
           </button>
           <div>
             <div style={{fontSize:18,fontWeight:800}}>Einstellungen</div>
@@ -1520,7 +1520,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             style={{...S.input,fontSize:15,marginBottom:10}}/>
           {vorname&&<div style={{fontSize:11,color:C.mintDark,marginBottom:10}}>Vorschau: Hallo, {vorname}!</div>}
           <div style={{fontSize:9,color:C.muted,marginBottom:10}}>
-            ℹ️ Der Name kann jederzeit hier geändert werden.
+            {"\u2139\uFE0F Der Name kann jederzeit hier ge\u00E4ndert werden."}
           </div>
           <button onClick={saveName}
             style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
@@ -1624,7 +1624,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             Abmelden
           </button>
           <div style={{fontSize:9,color:C.muted,textAlign:"center",lineHeight:1.5}}>
-            ℹ️ Aktive Schichten bleiben bis zum Ausstempeln gespeichert.
+            {"\u2139\uFE0F Aktive Schichten bleiben bis zum Ausstempeln gespeichert."}
           </div>
         </div>
 
@@ -1768,14 +1768,14 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             <div style={{fontSize:11,opacity:.5,marginTop:1}}>{user.role}</div>
             {!user.infektionsschutz&&(
               <div style={{fontSize:10,color:"#ffb347",fontWeight:700,marginTop:4}}>
-                ⚠️ Bitte Bescheinigung von Infektionsschutzgesetz hochladen
+                {"\u26A0\uFE0F Bitte Bescheinigung von Infektionsschutzgesetz hochladen"}
               </div>
             )}
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
             <button onClick={()=>setShowSettings(true)}
               style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
-              ⚙️
+              {"\u2699\uFE0F"}
             </button>
             <button onClick={onLogout}
               style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
@@ -3107,13 +3107,13 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         {!apiKey&&(
           <button onClick={()=>setShowKeyInput(true)}
             style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
-            🔑 API-Schlüssel eingeben
+            {"\uD83D\uDD11 API-Schl\u00FCssel eingeben"}
           </button>
         )}
         {apiKey&&(
           <button onClick={()=>setShowKeyInput(v=>!v)}
             style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
-            🔑 API-Schlüssel ändern
+            {"\uD83D\uDD11 API-Schl\u00FCssel \u00E4ndern"}
           </button>
         )}
         {msg&&(
@@ -3543,7 +3543,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
             <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
               <button onClick={()=>deleteArchiv(key)}
                 style={{fontSize:9,color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:"3px 8px",background:C.redLight,cursor:"pointer"}}>
-                🗑 Löschen
+                {"\uD83D\uDDD1 L\u00F6schen"}
               </button>
             </div>
           </div>
@@ -3575,7 +3575,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
             <button onClick={()=>setShowMgrSettings(true)}
               style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
-              ⚙️
+              {"\u2699\uFE0F"}
             </button>
             <button onClick={onLogout}
               style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
@@ -3586,7 +3586,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
         {/* Admin   */}
         {!manager?.infektionsschutz&&(
           <div style={{fontSize:10,color:"#ffb347",fontWeight:700,marginTop:8}}>
-            ⚠️ Bitte Bescheinigung von Infektionsschutzgesetz hochladen
+            {"\u26A0\uFE0F Bitte Bescheinigung von Infektionsschutzgesetz hochladen"}
           </div>
         )}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginTop:14}}>
@@ -3735,7 +3735,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           {(pendingNotifs.length>0||offeneNachtraege.length>0) ? (
             <div style={{marginBottom:14}}>
               <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>
-                🔔 Offene Vorgänge ({pendingNotifs.length+offeneNachtraege.length})
+                {"\uD83D\uDD14 Offene Vorg\u00E4nge ({pendingNotifs.length+offeneNachtraege.length})"}
               </div>
 
               {/* Nachtrag (antraege ) */}
@@ -3771,7 +3771,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           {myArchiv.length>0&&(
             <div style={{marginBottom:14}}>
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
-                ✅ Erledigt ({myArchiv.length})
+                {"\u2705 Erledigt ({myArchiv.length})"}
               </div>
               {myArchiv.map(([key,a])=>renderErledigtCard(key,a))}
             </div>
