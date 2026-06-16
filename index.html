@@ -950,8 +950,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
             {shift && (
               <div style={{
                 borderRadius:12,
-                border:isToday?`2px solid ${C.mintDark}`:"none",
-                boxShadow:isToday?"0 2px 12px rgba(92,199,148,.25)":"none"
+                outline:isToday?`2px solid ${C.mintDark}`:"none"
               }}>
                 <ShiftRow s={shift} userName={userName} records={records} setNotifications={setNotifications}/>
               </div>
