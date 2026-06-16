@@ -3167,7 +3167,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
               <KalenderView csvCtx={csvCtx} userName={manager.vorname} records={records} users={users}/>
             </div>
           )}
-          <DienstplanUploadView records={records} users={users}/>
+          <DienstplanUploadView records={records} users={users} antraege={antraege} setAntraege={setAntraege} absagenList={absagenList} setAbsagenList={setAbsagenList} setRecords={setRecords} approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag} approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}/>
         </div>
       )}
 
@@ -3416,7 +3416,9 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 }
 
 //  DIENSTPLAN UPLOAD + AI ANALYSE 
-function DienstplanUploadView({ records, users }) {
+function DienstplanUploadView({ records, users, antraege, setAntraege, absagenList, setAbsagenList, setRecords, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage }) {
+  const nList = Array.isArray(antraege) ? antraege : [];
+  const abList = Array.isArray(absagenList) ? absagenList : [];
   const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
   const [schedule, setSchedule, scheduleReady] = useFirebase("schedule", {});
   const [imgSrc, setImgSrc] = useState(null);
