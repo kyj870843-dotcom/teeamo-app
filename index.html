@@ -1481,7 +1481,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 border:`2px solid ${!manualMode?C.mint:C.border}`,
                 background:!manualMode?C.mintLight:"#fff",
                 color:!manualMode?C.mintDark:C.muted}}>
-              {"🕐 Jetzt ({nowStr})"}
+              {"🕐 Jetzt"}
             </button>
             <button onClick={()=>setManualMode(true)}
               style={{flex:1,padding:"9px",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",
@@ -1496,19 +1496,19 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
               <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:6}}>
                 {isEin?"Tatsächliche Einstempelzeit":"Tatsächliche Ausstempelzeit"}
               </div>
-              <input type="text" value={manualTime} onChange={e=>setManualTime(e.target.value)} placeholder="HH:MM" maxLength={5}
+              <input type="text" inputMode="numeric" value={manualTime} onChange={e=>setManualTime(e.target.value)} placeholder="HH:MM" maxLength={5}
                 style={{...S.input,width:"80%",display:"block",margin:"0 auto",fontSize:20,fontWeight:700,textAlign:"center",borderColor:ausInvalid?C.red:C.yellow}}/>
               {!isEin&&clockInTime&&(()=>{
                 const [ah,am]=manualTime.split(":").map(Number);
                 const diff=(ah*60+am)-(clockInTime.getHours()*60+clockInTime.getMinutes());
                 if(diff<=0) return(
                   <div style={{fontSize:11,color:C.red,fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    {"⚠ Die Zeit liegt vor der Einstempelzeit ({pad(clockInTime.getHours())}:{pad(clockInTime.getMinutes())} Uhr)"}
+                    <>{"⚠ Die Zeit liegt vor der Einstempelzeit ("}{pad(clockInTime.getHours())}:{pad(clockInTime.getMinutes())}{"  Uhr)"}</>
                   </div>
                 );
                 return(
                   <div style={{fontSize:11,color:"#3a7a55",fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    {"⏱ {Math.floor(diff/60)}h {diff%60}min Arbeitszeit"}
+                    <>{"⏱ "}{Math.floor(diff/60)}{"h "}{diff%60}{"min Arbeitszeit"}</>
                   </div>
                 );
               })()}
@@ -1518,7 +1518,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
                 if(diff<=0) return null;
                 return(
                   <div style={{fontSize:11,color:C.yellow,fontWeight:700,marginTop:7,textAlign:"center"}}>
-                    {"⏱ {Math.floor(diff/60)}h {diff%60}min bereits vergangen"}
+                    <>{"⏱ "}{Math.floor(diff/60)}{"h "}{diff%60}{"min bereits vergangen"}</>
                   </div>
                 );
               })()}
