@@ -1758,8 +1758,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           userKey={userKey}
           onLogout={onLogout}
           onClose={()=>setShowSettings(false)}
-        />
-      )}
+        />)}
       <div style={S.hdr}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
@@ -3632,7 +3631,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
           setMonthAccordion={setMonthAccordion}
           delRecordConfirm={delRecordConfirm}
           setDelRecordConfirm={setDelRecordConfirm}
-        />)}
+        />
       )}
 
 
@@ -3824,6 +3823,7 @@ function ManagerView({records,antraege,setAntraege,onLogout,userKey,users,setUse
       })()}
     </div>
   );
+}
 
 //  APP ROOT 
 function App(){
