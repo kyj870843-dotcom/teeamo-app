@@ -1578,6 +1578,23 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   const [impfDoc, setImpfDoc] = useState(user.infektionsschutz || null);
   const [impfViewer, setImpfViewer] = useState(false);
   const fileRef = useRef(null);
+  const { getPin, setPin: savePinFn } = usePinStore();
+  const [showPinChange, setShowPinChange] = useState(false);
+  const [oldPin, setOldPin] = useState("");
+  const [newPin1, setNewPin1] = useState("");
+  const [newPin2, setNewPin2] = useState("");
+  const [pinMsg, setPinMsg] = useState("");
+
+  function changePIN() {
+    const current = getPin(userKey);
+    if (oldPin !== current) { setPinMsg("Aktuelle PIN falsch."); return; }
+    if (!/^[0-9]{4}$/.test(newPin1)) { setPinMsg("PIN muss 4 Ziffern sein."); return; }
+    if (newPin1 !== newPin2) { setPinMsg("PINs stimmen nicht überein."); return; }
+    savePinFn(userKey, newPin1);
+    setPinMsg("PIN geändert!");
+    setOldPin(""); setNewPin1(""); setNewPin2("");
+    setTimeout(() => { setPinMsg(""); setShowPinChange(false); }, 2000);
+  }
 
   function saveName() {
     if (!vorname.trim()) return;
@@ -1670,6 +1687,43 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             Speichern
           </button>
           {saveMsg&&<div style={{fontSize:11,color:C.mintDark,marginTop:8,fontWeight:600,textAlign:"center"}}>{saveMsg}</div>}
+        </div>
+
+        {/* PIN */}
+        <div style={{...S.card,marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>{"🔑 PIN ändern"}</div>
+          {!showPinChange ? (
+            <button onClick={()=>setShowPinChange(true)}
+              style={{width:"100%",padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.text,fontWeight:700,fontSize:12,cursor:"pointer"}}>
+              PIN ändern
+            </button>
+          ) : (
+            <div>
+              {[
+                {label:"Aktuelle PIN",val:oldPin,set:setOldPin},
+                {label:"Neue PIN",val:newPin1,set:setNewPin1},
+                {label:"Neue PIN bestätigen",val:newPin2,set:setNewPin2},
+              ].map(({label,val,set})=>(
+                <div key={label} style={{marginBottom:8}}>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:3}}>{label}</div>
+                  <input type="password" maxLength={4} value={val} onChange={e=>set(e.target.value)}
+                    placeholder="••••"
+                    style={{...S.input,textAlign:"center",fontSize:18,letterSpacing:6,width:"100%"}}/>
+                </div>
+              ))}
+              <div style={{display:"flex",gap:8,marginTop:4}}>
+                <button onClick={()=>{setShowPinChange(false);setOldPin("");setNewPin1("");setNewPin2("");setPinMsg("");}}
+                  style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                  Abbrechen
+                </button>
+                <button onClick={changePIN}
+                  style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>
+                  PIN speichern
+                </button>
+              </div>
+              {pinMsg&&<div style={{fontSize:11,color:pinMsg.includes("geändert")?C.mintDark:C.red,marginTop:8,textAlign:"center",fontWeight:600}}>{pinMsg}</div>}
+            </div>
+          )}
         </div>
 
         {/*     */}
