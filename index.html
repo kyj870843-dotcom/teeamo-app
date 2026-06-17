@@ -2977,6 +2977,51 @@ function RecStatusBadge({rec, t}) {
   );
 }
 
+// Nach Datum - 지점별 직원 행 컴포넌트
+function NachDatumFilRow({name, d, t, schedule, users, records, todayStr, C, S}) {
+  const arr = !schedule[name]?[]:Array.isArray(schedule[name])?schedule[name]:Object.values(schedule[name]);
+  const shift = arr.find(s=>(s.date||s.d)===d);
+  const accountExists = Array.isArray(users)&&users.some(u=>u.vorname===name);
+  const emp = accountExists?(Array.isArray(users)?users:[]).find(u=>u.vorname===name):null;
+  const rec = accountExists?records.find(r=>r.user===name&&r.date===d):null;
+  let statusLabel, statusColor, statusBg;
+  if(!accountExists){
+    statusLabel="Ausstehend"; statusColor=C.muted; statusBg=C.border;
+  } else if(rec?.aus){
+    statusLabel="Feierabend"; statusColor=C.mintDark; statusBg=C.mintLight;
+  } else if(rec?.ein){
+    statusLabel="Aktiv"; statusColor=C.yellow; statusBg=C.yellowLight;
+  } else if(d<todayStr){
+    statusLabel="Nicht erschienen"; statusColor=C.red; statusBg=C.redLight;
+  } else {
+    statusLabel="Ausstehend"; statusColor=C.muted; statusBg=C.border;
+  }
+  return(
+    <div style={{display:"flex",justifyContent:"space-between",
+      alignItems:"center",padding:"10px 14px",
+      borderBottom:`1px solid ${C.border}`}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <div style={{width:30,height:30,borderRadius:"50%",
+          background:accountExists?C.navy:C.border,
+          display:"flex",alignItems:"center",justifyContent:"center",
+          fontSize:10,fontWeight:800,color:"#fff",flexShrink:0}}>
+          {emp?emp.kuerzel:name.slice(0,2)}
+        </div>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:C.text}}>{name}</div>
+          {(shift?.time||shift?.t)&&(
+            <div style={{fontSize:10,color:C.muted}}>{shift.time||shift.t}</div>
+          )}
+        </div>
+      </div>
+      <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,
+        color:statusColor,background:statusBg}}>
+        {statusLabel}
+      </span>
+    </div>
+  );
+}
+
 function NachMitarbeiterAntrag({name, d, nList, abList, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage}) {
   const [exp, setExp] = useState(false);
   const pN = nList.find(a=>a.user===name&&a.date===d&&a.status==="offen");
@@ -3372,49 +3417,11 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                                   <div style={{padding:"6px 14px",background:C.bg,fontSize:10,fontWeight:700,color:C.muted}}>
                                     {filialInit(fil)} · {fil}
                                   </div>
-                                  {filNames.map((name,i)=>{
-                                    const arr=!schedule[name]?[]:Array.isArray(schedule[name])?schedule[name]:Object.values(schedule[name]);
-                                    const shift=arr.find(s=>(s.date||s.d)===d);
-                                    const accountExists=Array.isArray(users)&&users.some(u=>u.vorname===name);
-                                    const emp=accountExists?(Array.isArray(users)?users:[]).find(u=>u.vorname===name):null;
-                                    const rec=accountExists?records.find(r=>r.user===name&&r.date===d):null;
-                                    let statusLabel,statusColor,statusBg;
-                                    if(!accountExists){
-                                      statusLabel="Ausstehend";statusColor=C.muted;statusBg=C.border;
-                                    } else if(rec?.aus){
-                                      statusLabel="Feierabend";statusColor=C.mintDark;statusBg=C.mintLight;
-                                    } else if(rec?.ein){
-                                      statusLabel="Aktiv";statusColor=C.yellow;statusBg=C.yellowLight;
-                                    } else if(d<todayStr){
-                                      statusLabel="Nicht erschienen";statusColor=C.red;statusBg=C.redLight;
-                                    } else {
-                                      statusLabel="Ausstehend";statusColor=C.muted;statusBg=C.border;
-                                    }
-                                    return(
-                                      <div key={name+i} style={{display:"flex",justifyContent:"space-between",
-                                        alignItems:"center",padding:"10px 14px",
-                                        borderBottom:i<filNames.length-1?`1px solid ${C.border}`:"none"}}>
-                                        <div style={{display:"flex",alignItems:"center",gap:10}}>
-                                          <div style={{width:30,height:30,borderRadius:"50%",
-                                            background:accountExists?C.navy:C.border,
-                                            display:"flex",alignItems:"center",justifyContent:"center",
-                                            fontSize:10,fontWeight:800,color:"#fff",flexShrink:0}}>
-                                            {emp?emp.kuerzel:name.slice(0,2)}
-                                          </div>
-                                          <div>
-                                            <div style={{fontSize:13,fontWeight:700,color:C.text}}>{name}</div>
-                                            {(shift?.time||shift?.t)&&(
-                                              <div style={{fontSize:10,color:C.muted}}>{shift.time||shift.t}</div>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,
-                                          color:statusColor,background:statusBg}}>
-                                          {statusLabel}
-                                        </span>
-                                      </div>
-                                    );
-                                  })}
+                                  {filNames.map((name,i)=>(
+                                    <NachDatumFilRow key={name+i} name={name} d={d} t={t}
+                                      schedule={schedule} users={users} records={records}
+                                      todayStr={todayStr} C={C} S={S}/>
+                                  ))}
                                 </div>
                               );
                             })}
