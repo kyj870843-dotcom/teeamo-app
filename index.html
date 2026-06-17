@@ -2711,42 +2711,18 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
 
   return (
     <div style={{padding:"14px"}}>
-      <div style={{display:"flex",gap:0,marginBottom:14,borderRadius:10,overflow:"hidden",border:"1px solid "+C.border}}>
-        {tabs.map(({id,l,n})=>(
-          <button key={id} onClick={()=>setATab(id)}
-            style={{flex:1,padding:"10px 2px",border:"none",cursor:"pointer",fontSize:10,fontWeight:700,
-              background:aTab===id?C.navy:"#fff",color:aTab===id?"#fff":C.muted,position:"relative"}}>
-            {l}
-            {n>0&&<span style={{position:"absolute",top:4,right:4,minWidth:14,height:14,borderRadius:99,background:C.red,color:"#fff",fontSize:8,fontWeight:800,display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{n}</span>}
-          </button>
-        ))}
-      </div>
-
-      {aTab==="nachtrag"&&(
-        <div>
-          {nList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Nachtraege</div>}
-          {nList.filter(a=>a.status==="offen").map(a=>(
-            <NachtragCard key={a.id} a={a} isOpen={openAId===a.id}
-              onToggle={()=>setOpenAId(openAId===a.id?null:a.id)}
-              onDecide={(ok)=>decideNachtrag(a,ok)}
-              onReopen={()=>reopenNachtrag(a.id)}/>
-          ))}
-          {nList.filter(a=>a.status!=="offen").length>0&&(
-            <div style={{marginTop:12}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8}}>Bearbeitet</div>
-              {nList.filter(a=>a.status!=="offen").map(a=>(
-                <NachtragCard key={a.id} a={a} isOpen={openAId===a.id}
-                  onToggle={()=>setOpenAId(openAId===a.id?null:a.id)}
-                  onDecide={(ok)=>decideNachtrag(a,ok)}
-                  onReopen={()=>reopenNachtrag(a.id)}/>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {aTab==="tausch"&&(
-        <div>
+      {/* Schichttausch 바로 표시 - 탭 없음 */}
+      {(()=>{
+        const pendingCount = tList.filter(a=>a.status==="ausstehend_manager"||a.status==="partner_ok").length;
+        return(
+          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+            {"🔄 Schichttausch"}
+            {pendingCount>0&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:99,background:C.red,color:"#fff",fontWeight:700}}>{pendingCount}</span>}
+          </div>
+        );
+      })()}
+      {(()=>{
+        return(<div>
           {tList.length===0&&<div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted}}>Keine Schichttausch-Antraege</div>}
           {tList.map(a=>{
             const isOpen=openAId==="t_"+a.id;
@@ -2826,8 +2802,8 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
               ))}
             </div>
           )}
-        </div>
-      )}
+        </div>);
+      })()}
     </div>
   );
 }
@@ -3728,13 +3704,38 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
                           </div>
                         </div>
                       )}
-                      {/* Nachtrag 처리 완료 */}
+                      {/* Nachtrag 처리 완료 - 펼치기/결정 변경 가능 */}
                       {!pendingNachtrag&&doneNachtrag&&(
-                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.border}`,background:doneNachtrag.status==="genehmigt"?C.mintLight:C.redLight}}>
-                          <span style={{fontSize:9,fontWeight:700,color:doneNachtrag.status==="genehmigt"?C.mintDark:C.red}}>
-                            {"🕐 Nachtrag "}{doneNachtrag.status==="genehmigt"?"genehmigt ✓":"abgelehnt ✕"}
-                            {" · "}{doneNachtrag.ein}{" – "}{doneNachtrag.aus}
-                          </span>
+                        <div style={{borderTop:`1px solid ${C.border}`}}>
+                          <button onClick={()=>{
+                            const key=`nachtrag_done_${name}_${d}`;
+                            window._openNachtrag=window._openNachtrag||{};
+                            window._openNachtrag[key]=!window._openNachtrag[key];
+                            // force re-render
+                            setAntraege(prev=>[...(Array.isArray(prev)?prev:[])]);
+                          }} style={{width:"100%",padding:"6px 10px",border:"none",background:doneNachtrag.status==="genehmigt"?C.mintLight:C.redLight,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+                            <span style={{fontSize:9,fontWeight:700,color:doneNachtrag.status==="genehmigt"?C.mintDark:C.red}}>
+                              {"🕐 "}{doneNachtrag.status==="genehmigt"?"Nachtrag genehmigt ✓":"Nachtrag abgelehnt ✕"}
+                              {" · "}{doneNachtrag.ein}{" – "}{doneNachtrag.aus}
+                            </span>
+                            <span style={{fontSize:9,color:C.muted}}>{(window._openNachtrag||{})[`nachtrag_done_${name}_${d}`]?"▲":"▼"}</span>
+                          </button>
+                          {(window._openNachtrag||{})[`nachtrag_done_${name}_${d}`]&&(
+                            <div style={{padding:"8px 10px",background:C.bg}}>
+                              {doneNachtrag.grund&&<div style={{fontSize:9,color:C.muted,marginBottom:8}}>{"📝 "}{doneNachtrag.grund}</div>}
+                              <div style={{fontSize:9,color:C.muted,marginBottom:6}}>{"Eingereichte Zeit: "}{doneNachtrag.ein}{" – "}{doneNachtrag.aus}</div>
+                              <div style={{display:"flex",gap:6}}>
+                                <button onClick={()=>rejectNachtrag(doneNachtrag)}
+                                  style={{flex:1,padding:"5px",borderRadius:7,border:`1px solid ${C.red}`,background:"#fff",color:C.red,fontWeight:700,fontSize:10,cursor:"pointer"}}>
+                                  ✕ Ablehnen
+                                </button>
+                                <button onClick={()=>approveNachtrag(doneNachtrag)}
+                                  style={{flex:1,padding:"5px",borderRadius:7,border:"none",background:C.mintDark,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}}>
+                                  ✓ Genehmigen
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                       {/* Absage 대기 중 */}
