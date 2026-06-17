@@ -3185,9 +3185,9 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                               );
                             })():(
                               <span style={{fontSize:9,padding:"3px 7px",borderRadius:99,
-                                background:d<today()?C.redLight:C.bg,
-                                color:d<today()?C.red:C.muted,fontWeight:600}}>
-                                {d<today()?"Nicht erschienen":"Ausstehend"}
+                                background:d<todayStr?C.redLight:C.bg,
+                                color:d<todayStr?C.red:C.muted,fontWeight:600}}>
+                                {d<todayStr?"Nicht erschienen":"Ausstehend"}
                               </span>
                             )}
                           </div>
@@ -3350,6 +3350,59 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                           </div>
                         )}
                       </div>
+                      {/* Nachtrag/Absage */}
+                      {(()=>{
+                        const pN=nList.find(a=>a.user===name&&a.date===d&&a.status==="offen");
+                        const dN=nList.find(a=>a.user===name&&a.date===d&&a.status!=="offen");
+                        const pA=abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status==="offen");
+                        const dA=abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status!=="offen");
+                        if(!pN&&!dN&&!pA&&!dA) return null;
+                        return(
+                          <div style={{borderTop:`1px solid ${pN||pA?C.yellow:C.border}`,marginTop:4}}>
+                            {pN&&(
+                              <div style={{padding:"8px 10px",background:C.yellowLight}}>
+                                <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:3}}>{"🕐 Nachtrag · "}{pN.ein}{" – "}{pN.aus}</div>
+                                {pN.grund&&<div style={{fontSize:9,color:C.muted,marginBottom:6}}>{"📝 "}{pN.grund}</div>}
+                                <div style={{display:"flex",gap:6}}>
+                                  <button onClick={()=>rejectNachtrag(pN)} style={{flex:1,padding:"5px",borderRadius:7,border:`1px solid ${C.red}`,background:"#fff",color:C.red,fontWeight:700,fontSize:10,cursor:"pointer"}}>{"✕ Ablehnen"}</button>
+                                  <button onClick={()=>approveNachtrag(pN)} style={{flex:1,padding:"5px",borderRadius:7,border:"none",background:C.mintDark,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}}>{"✓ Genehmigen"}</button>
+                                </div>
+                              </div>
+                            )}
+                            {!pN&&dN&&(
+                              <div style={{padding:"6px 10px",background:dN.status==="genehmigt"?C.mintLight:C.redLight}}>
+                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                                  <span style={{fontSize:9,fontWeight:700,color:dN.status==="genehmigt"?C.mintDark:C.red}}>
+                                    {"🕐 Nachtrag "}{dN.status==="genehmigt"?"genehmigt ✓":"abgelehnt ✕"}{" · "}{dN.ein}{" – "}{dN.aus}
+                                  </span>
+                                </div>
+                                {dN.grund&&<div style={{fontSize:9,color:C.muted,marginBottom:6}}>{"📝 "}{dN.grund}</div>}
+                                <div style={{display:"flex",gap:6}}>
+                                  <button onClick={()=>rejectNachtrag(dN)} style={{flex:1,padding:"5px",borderRadius:7,border:`1px solid ${C.red}`,background:"#fff",color:C.red,fontWeight:700,fontSize:10,cursor:"pointer"}}>{"✕ Ablehnen"}</button>
+                                  <button onClick={()=>approveNachtrag(dN)} style={{flex:1,padding:"5px",borderRadius:7,border:"none",background:C.mintDark,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}}>{"✓ Genehmigen"}</button>
+                                </div>
+                              </div>
+                            )}
+                            {pA&&(
+                              <div style={{padding:"8px 10px",background:C.yellowLight,borderTop:pN?`1px solid ${C.yellow}`:"none"}}>
+                                <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:3}}>{"🚫 Absage beantragt"}</div>
+                                {pA.grund&&<div style={{fontSize:9,color:C.muted,marginBottom:6}}>{"📝 "}{pA.grund}</div>}
+                                <div style={{display:"flex",gap:6}}>
+                                  <button onClick={()=>rejectAbsage(pA)} style={{flex:1,padding:"5px",borderRadius:7,border:`1px solid ${C.red}`,background:"#fff",color:C.red,fontWeight:700,fontSize:10,cursor:"pointer"}}>{"✕ Ablehnen"}</button>
+                                  <button onClick={()=>approveAbsage(pA)} style={{flex:1,padding:"5px",borderRadius:7,border:"none",background:C.mintDark,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}}>{"✓ Genehmigen"}</button>
+                                </div>
+                              </div>
+                            )}
+                            {!pA&&dA&&(
+                              <div style={{padding:"6px 10px",background:dA.status==="genehmigt"?C.redLight:C.bg}}>
+                                <span style={{fontSize:9,fontWeight:700,color:dA.status==="genehmigt"?C.red:C.muted}}>
+                                  {"🚫 Absage "}{dA.status==="genehmigt"?"genehmigt ✓":"abgelehnt ✕"}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     );
                   })}
                 </div>
@@ -3640,72 +3693,27 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
                           {statusLabel}
                         </span>
                       </div>
-                      {/* Nachtrag 대기 중 */}
+                      {/* Nachtrag 대기 중 - Nach Mitarbeiter에서 처리 */}
                       {pendingNachtrag&&(
-                        <div style={{padding:"8px 10px",borderTop:`1px solid ${C.yellow}`,background:C.yellowLight}}>
-                          <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:4}}>{"🕐 Nachtrag: "}{pendingNachtrag.ein}{" – "}{pendingNachtrag.aus}</div>
-                          <div style={{fontSize:9,color:C.muted,marginBottom:6}}>{pendingNachtrag.grund}</div>
-                          <div style={{display:"flex",gap:6}}>
-                            <button onClick={()=>rejectNachtrag(pendingNachtrag)}
-                              style={{flex:1,padding:"5px",borderRadius:7,border:`1px solid ${C.red}`,background:"#fff",color:C.red,fontWeight:700,fontSize:10,cursor:"pointer"}}>
-                              ✕ Ablehnen
-                            </button>
-                            <button onClick={()=>approveNachtrag(pendingNachtrag)}
-                              style={{flex:1,padding:"5px",borderRadius:7,border:"none",background:C.mintDark,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}}>
-                              ✓ Genehmigen
-                            </button>
-                          </div>
+                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.yellow}`,background:C.yellowLight}}>
+                          <span style={{fontSize:9,fontWeight:700,color:C.yellow}}>
+                            {"🕐 Nachtrag ausstehend · "}{pendingNachtrag.ein}{" – "}{pendingNachtrag.aus}
+                          </span>
                         </div>
                       )}
-                      {/* Nachtrag 처리 완료 - 펼치기/결정 변경 가능 */}
+                      {/* Nachtrag 처리 완료 */}
                       {!pendingNachtrag&&doneNachtrag&&(
-                        <div style={{borderTop:`1px solid ${C.border}`}}>
-                          <button onClick={()=>{
-                            const key=`nachtrag_done_${name}_${d}`;
-                            window._openNachtrag=window._openNachtrag||{};
-                            window._openNachtrag[key]=!window._openNachtrag[key];
-                            // force re-render
-                            setAntraege(prev=>[...(Array.isArray(prev)?prev:[])]);
-                          }} style={{width:"100%",padding:"6px 10px",border:"none",background:doneNachtrag.status==="genehmigt"?C.mintLight:C.redLight,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
-                            <span style={{fontSize:9,fontWeight:700,color:doneNachtrag.status==="genehmigt"?C.mintDark:C.red}}>
-                              {"🕐 "}{doneNachtrag.status==="genehmigt"?"Nachtrag genehmigt ✓":"Nachtrag abgelehnt ✕"}
-                              {" · "}{doneNachtrag.ein}{" – "}{doneNachtrag.aus}
-                            </span>
-                            <span style={{fontSize:9,color:C.muted}}>{(window._openNachtrag||{})[`nachtrag_done_${name}_${d}`]?"▲":"▼"}</span>
-                          </button>
-                          {(window._openNachtrag||{})[`nachtrag_done_${name}_${d}`]&&(
-                            <div style={{padding:"8px 10px",background:C.bg}}>
-                              {doneNachtrag.grund&&<div style={{fontSize:9,color:C.muted,marginBottom:8}}>{"📝 "}{doneNachtrag.grund}</div>}
-                              <div style={{fontSize:9,color:C.muted,marginBottom:6}}>{"Eingereichte Zeit: "}{doneNachtrag.ein}{" – "}{doneNachtrag.aus}</div>
-                              <div style={{display:"flex",gap:6}}>
-                                <button onClick={()=>rejectNachtrag(doneNachtrag)}
-                                  style={{flex:1,padding:"5px",borderRadius:7,border:`1px solid ${C.red}`,background:"#fff",color:C.red,fontWeight:700,fontSize:10,cursor:"pointer"}}>
-                                  ✕ Ablehnen
-                                </button>
-                                <button onClick={()=>approveNachtrag(doneNachtrag)}
-                                  style={{flex:1,padding:"5px",borderRadius:7,border:"none",background:C.mintDark,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}}>
-                                  ✓ Genehmigen
-                                </button>
-                              </div>
-                            </div>
-                          )}
+                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.border}`,background:doneNachtrag.status==="genehmigt"?C.mintLight:C.redLight}}>
+                          <span style={{fontSize:9,fontWeight:700,color:doneNachtrag.status==="genehmigt"?C.mintDark:C.red}}>
+                            {"🕐 "}{doneNachtrag.status==="genehmigt"?"Nachtrag genehmigt ✓":"Nachtrag abgelehnt ✕"}
+                            {" · "}{doneNachtrag.ein}{" – "}{doneNachtrag.aus}
+                          </span>
                         </div>
                       )}
-                      {/* Absage 대기 중 */}
+                      {/* Absage 대기 중 - Nach Mitarbeiter에서 처리 */}
                       {pendingAbsage&&(
-                        <div style={{padding:"8px 10px",borderTop:`1px solid ${C.yellow}`,background:C.yellowLight}}>
-                          <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:4}}>{"🚫 Absage beantragt"}</div>
-                          <div style={{fontSize:9,color:C.muted,marginBottom:6}}>{pendingAbsage.grund}</div>
-                          <div style={{display:"flex",gap:6}}>
-                            <button onClick={()=>rejectAbsage(pendingAbsage)}
-                              style={{flex:1,padding:"5px",borderRadius:7,border:`1px solid ${C.red}`,background:"#fff",color:C.red,fontWeight:700,fontSize:10,cursor:"pointer"}}>
-                              ✕ Ablehnen
-                            </button>
-                            <button onClick={()=>approveAbsage(pendingAbsage)}
-                              style={{flex:1,padding:"5px",borderRadius:7,border:"none",background:C.mintDark,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}}>
-                              ✓ Genehmigen
-                            </button>
-                          </div>
+                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.yellow}`,background:C.yellowLight}}>
+                          <span style={{fontSize:9,fontWeight:700,color:C.yellow}}>{"🚫 Absage ausstehend"}</span>
                         </div>
                       )}
                       {/* Absage 처리 완료 */}
