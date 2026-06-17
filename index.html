@@ -3351,12 +3351,11 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                         )}
                       </div>
                       {/* Nachtrag/Absage */}
-                      {(()=>{
-                        const pN=nList.find(a=>a.user===name&&a.date===d&&a.status==="offen");
-                        const dN=nList.find(a=>a.user===name&&a.date===d&&a.status!=="offen");
-                        const pA=abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status==="offen");
-                        const dA=abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status!=="offen");
-                        if(!pN&&!dN&&!pA&&!dA) return null;
+                      {(nList.find(a=>a.user===name&&a.date===d)||abList.find(a=>(a.userName===name||a.user===name)&&a.date===d))&&(()=>{
+                        let pN=nList.find(a=>a.user===name&&a.date===d&&a.status==="offen");
+                        let dN=nList.find(a=>a.user===name&&a.date===d&&a.status!=="offen");
+                        let pA=abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status==="offen");
+                        let dA=abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status!=="offen");
                         return(
                           <div style={{borderTop:`1px solid ${pN||pA?C.yellow:C.border}`,marginTop:4}}>
                             {pN&&(
