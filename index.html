@@ -2952,6 +2952,31 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
 
 //  ADMIN DIENSTPLAN VIEW 
 // Nach Mitarbeiter - Nachtrag/Absage 처리 컴포넌트
+// 근무 기록 상태 배지 컴포넌트
+function RecStatusBadge({rec, t}) {
+  if(!rec) return null;
+  const pln=calcShiftMinutes(t);
+  const act=rec.aus?calcShiftMinutes(`${rec.ein}-${rec.aus}`):null;
+  const st=!rec.aus?"aktiv":(!pln||!act||act>=pln)?"gearbeitet":"prüfen";
+  const sc=st==="gearbeitet"?C.mintDark:C.yellow;
+  return(
+    <div style={{textAlign:"right"}}>
+      <div style={{fontSize:10,fontWeight:700,color:sc}}>
+        {rec.ein}{rec.aus?` – ${rec.aus}`:" (läuft)"}
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end",marginTop:2}}>
+        <span style={{fontSize:9,color:C.muted}}>{rec.aus?stdLabel(rec.ein,rec.aus):""}</span>
+        <span style={{fontSize:8,padding:"1px 5px",borderRadius:99,fontWeight:700,
+          background:st==="gearbeitet"?C.mintLight:C.yellowLight,
+          color:sc}}>
+          {st==="gearbeitet"?"Gearbeitet":st==="aktiv"?"Aktiv":"Prüfen"}
+        </span>
+      </div>
+      {st==="prüfen"&&rec.note&&<div style={{fontSize:8,color:C.muted,marginTop:1}}>{"📝 "}{rec.note}</div>}
+    </div>
+  );
+}
+
 function NachMitarbeiterAntrag({name, d, nList, abList, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage}) {
   const [exp, setExp] = useState(false);
   const pN = nList.find(a=>a.user===name&&a.date===d&&a.status==="offen");
@@ -3223,28 +3248,9 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                           <div style={{textAlign:"right"}}>
                             {!accountExists?(
                               <span style={{fontSize:9,padding:"3px 7px",borderRadius:99,background:C.bg,color:C.muted,fontWeight:600}}>Ausstehend</span>
-                            ):rec?(()=>{
-                              const pln=calcShiftMinutes(t);
-                              const act=rec.aus?calcShiftMinutes(`${rec.ein}-${rec.aus}`):null;
-                              const st=!rec.aus?"aktiv":(!pln||!act||act>=pln)?"gearbeitet":"prüfen";
-                              const sc=st==="gearbeitet"?C.mintDark:C.yellow;
-                              return(
-                                <div style={{textAlign:"right"}}>
-                                  <div style={{fontSize:10,fontWeight:700,color:sc}}>
-                                    {rec.ein}{rec.aus?` – ${rec.aus}`:" (läuft)"}
-                                  </div>
-                                  <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end",marginTop:2}}>
-                                    <span style={{fontSize:9,color:C.muted}}>{rec.aus?stdLabel(rec.ein,rec.aus):""}</span>
-                                    <span style={{fontSize:8,padding:"1px 5px",borderRadius:99,fontWeight:700,
-                                      background:st==="gearbeitet"?C.mintLight:C.yellowLight,
-                                      color:sc}}>
-                                      {st==="gearbeitet"?"Gearbeitet":st==="aktiv"?"Aktiv":"Prüfen"}
-                                    </span>
-                                  </div>
-                                  {st==="prüfen"&&rec.note&&<div style={{fontSize:8,color:C.muted,marginTop:1}}>{"📝 "}{rec.note}</div>}
-                                </div>
-                              );
-                            })():(
+                            ):rec?(
+                              <RecStatusBadge rec={rec} t={t}/>
+                            ):(
                               <span style={{fontSize:9,padding:"3px 7px",borderRadius:99,
                                 background:d<todayStr?C.redLight:C.bg,
                                 color:d<todayStr?C.red:C.muted,fontWeight:600}}>
