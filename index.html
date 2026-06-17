@@ -3259,6 +3259,9 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                             )}
                           </div>
                         </div>
+                        <NachMitarbeiterAntrag name={name} d={d} nList={nList} abList={abList}
+                          approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag}
+                          approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}/>
                       );
                     })}
                   </div>
