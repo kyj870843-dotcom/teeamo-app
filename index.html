@@ -3330,7 +3330,8 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                       (()=>{const arr=!schedule[name]?[]:Array.isArray(schedule[name])?schedule[name]:Object.values(schedule[name]);return arr.some(s=>(s.date||s.d)===d);})()
                     );
                     return(
-                      <div key={d} style={{...S.card,marginBottom:6,padding:0,overflow:"hidden"}}>
+                      <React.Fragment key={d}>
+                      <div style={{...S.card,marginBottom:6,padding:0,overflow:"hidden",marginBottom:6}}>
                         <button onClick={()=>setOpenDate(isOpen?null:d)}
                           style={{width:"100%",padding:"11px 14px",background:"none",border:"none",cursor:"pointer",
                             display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -3417,10 +3418,11 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                           </div>
                         )}
                       </div>
-                      {/* Nachtrag/Absage */}
+                      </div>
                       <NachMitarbeiterAntrag name={name} d={d} nList={nList} abList={abList}
                         approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag}
                         approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}/>
+                      </React.Fragment>
                     );
                   })}
                 </div>
