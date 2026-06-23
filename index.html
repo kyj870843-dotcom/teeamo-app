@@ -3275,7 +3275,8 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                       const d=s.date||s.d, f=s.filiale||s.f, t=s.time||s.t;
                       const rec=accountExists?records.find(r=>r.user===name&&r.date===d):null;
                       return(
-                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                        <React.Fragment key={i}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                           padding:"10px 14px",borderBottom:i<shifts.length-1?`1px solid ${C.border}`:"none",
                           background:rec?.aus?C.mintLight:rec?.ein?C.yellowLight:"#fff"}}>
                           <div style={{display:"flex",gap:10,alignItems:"center"}}>
