@@ -3753,14 +3753,16 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
 
       {/*   */}
       {displayImg && (
-        <div style={{marginBottom:12,borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`}}>
+        <div style={{marginBottom:12,borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,background:"#f0f0f0"}}>
           {displayImg.startsWith("data:application/pdf") ? (
             <iframe src={displayImg}
               style={{width:"100%",height:480,border:"none",display:"block"}}
               title="Dienstplan PDF"/>
           ) : (
-            <img src={displayImg} alt="Dienstplan"
-              style={{width:"100%",height:"auto",maxHeight:520,objectFit:"contain",display:"block",background:"#f8f8f8"}}/>
+            <div style={{display:"flex",justifyContent:"center",padding:"8px 0"}}>
+              <img src={displayImg} alt="Dienstplan"
+                style={{width:"80%",height:"auto",display:"block",borderRadius:8}}/>
+            </div>
           )}
         </div>
       )}
