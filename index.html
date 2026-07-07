@@ -387,23 +387,28 @@ function useDienstplanCSV() {
 
 //  KALENDER VIEW (plan.png   +  ) 
 function KalenderView({ csvCtx, userName, records, users }) {
-  const [imgErr, setImgErr] = useState(false);
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
   const containerRef = useRef(null);
   const lastTouchRef = useRef(null);
   const lastDistRef = useRef(null);
   const lastScaleRef = useRef(1);
   const lastOffsetRef = useRef({ x: 0, y: 0 });
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
 
-  const [schedule] = useFirebase("schedule", {});
-  // 현재 독일 월 기준 plan 이미지 로드
+  // 현재 독일 월 계산
+  const currentMonthKey = React.useMemo(()=>{
+    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+    return d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
+  },[]);
+
+  // 선택된 월 (기본: 현재 독일 월)
+  const [selViewMonth, setSelViewMonth] = useState(currentMonthKey);
+
+  // Firebase에서 모든 월별 데이터 로드
+  const [allEmpMonthSchedules, setAllEmpMonthSchedules] = React.useState({});
   const [allEmpPlanImages, setAllEmpPlanImages] = React.useState({});
-  // planImage는 전체 fallback용
   const [planImgFallback] = useFirebase("planImage", null);
 
-  // 모든 월별 schedule 로드
-  const [allEmpMonthSchedules, setAllEmpMonthSchedules] = React.useState({});
   React.useEffect(()=>{
     if(!window._fbDb||!window._fbRef||!window._fbGet) return;
     const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
@@ -411,7 +416,6 @@ function KalenderView({ csvCtx, userName, records, users }) {
     const months=[yr+"_01",yr+"_02",yr+"_03",yr+"_04",yr+"_05",yr+"_06",
                   yr+"_07",yr+"_08",yr+"_09",yr+"_10",yr+"_11",yr+"_12",
                   (yr+1)+"_01",(yr+1)+"_02",(yr+1)+"_03"];
-    // 스케줄 로드
     Promise.all(months.map(m=>
       window._fbGet(window._fbRef(window._fbDb,"schedule_"+m))
         .then(snap=>({m,data:snap.val()})).catch(()=>({m,data:null}))
@@ -420,7 +424,6 @@ function KalenderView({ csvCtx, userName, records, users }) {
       results.forEach(({m,data})=>{ if(data) found[m]=data; });
       setAllEmpMonthSchedules(found);
     });
-    // 월별 plan 이미지 로드
     Promise.all(months.map(m=>
       window._fbGet(window._fbRef(window._fbDb,"planImage_"+m))
         .then(snap=>({m,data:snap.val()})).catch(()=>({m,data:null}))
@@ -431,170 +434,123 @@ function KalenderView({ csvCtx, userName, records, users }) {
     });
   },[]);
 
-  const combinedSchedule = React.useMemo(()=>{
-    const result={...(schedule||{})};
-    for(const [,monthData] of Object.entries(allEmpMonthSchedules)){
-      if(!monthData) continue;
-      for(const [name, shifts] of Object.entries(monthData)){
-        const arr=Array.isArray(shifts)?shifts:Object.values(shifts||{});
-        if(arr.length>0){
-          const existingDates=new Set((result[name]||[]).map(s=>s.date||s.d));
-          const newShifts=arr.filter(s=>!existingDates.has(s.date||s.d));
-          result[name]=[...(result[name]||[]),...newShifts];
-        }
-      }
-    }
-    return result;
-  },[schedule, allEmpMonthSchedules]);
+  // 탐색 가능한 월 목록 (현재 월 + 이미지/스케줄이 있는 월)
+  const availableMonths = React.useMemo(()=>{
+    const set=new Set([currentMonthKey]);
+    Object.keys(allEmpMonthSchedules).forEach(m=>set.add(m));
+    Object.keys(allEmpPlanImages).forEach(m=>set.add(m));
+    return [...set].sort();
+  },[currentMonthKey, allEmpMonthSchedules, allEmpPlanImages]);
 
-  // 현재 월에 맞는 plan 이미지 선택
-  const currentMonthForImg=(()=>{
-    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
-    return d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
-  })();
-  // 가장 최근 업로드된 월 이미지 또는 현재 월 이미지 (없으면 fallback)
-  const availableImgMonths=Object.keys(allEmpPlanImages).sort().reverse();
-  const planImg = allEmpPlanImages[currentMonthForImg]
-    || (availableImgMonths.length>0 ? allEmpPlanImages[availableImgMonths[0]] : null)
-    || planImgFallback;
+  const selIdx = availableMonths.indexOf(selViewMonth);
+  const canPrev = selIdx > 0;
+  const canNext = selIdx < availableMonths.length - 1;
 
-  // Firebase  schedule   
+  // 선택된 월의 이미지 + 분석 데이터
+  const planImg = allEmpPlanImages[selViewMonth] || planImgFallback;
+  const isPdfPlan = planImg && planImg.startsWith("data:application/pdf");
+
   function normalizeShifts(val) {
     if (!val) return [];
     if (Array.isArray(val)) return val;
-    // Firebase {0:{...}, 1:{...}}   
     return Object.values(val);
   }
 
-  // schedule  :   
-  const myShifts = React.useMemo(() => {
-    if (!userName || !combinedSchedule) return [];
-    const keys = Object.keys(combinedSchedule);
-    if (combinedSchedule[userName]) return normalizeShifts(combinedSchedule[userName]);
-    const lower = userName.toLowerCase();
-    const k2 = keys.find(k => k.toLowerCase() === lower);
-    if (k2) return normalizeShifts(combinedSchedule[k2]);
-    const firstName = userName.split(" ")[0];
-    if (firstName !== userName) {
-      if (combinedSchedule[firstName]) return normalizeShifts(combinedSchedule[firstName]);
-      const k3 = keys.find(k => k.toLowerCase() === firstName.toLowerCase());
-      if (k3) return normalizeShifts(combinedSchedule[k3]);
+  // 선택된 월의 내 근무 목록
+  const myShifts = React.useMemo(()=>{
+    const monthData = allEmpMonthSchedules[selViewMonth];
+    if(!monthData || !userName) return [];
+    const keys=Object.keys(monthData);
+    const find=(name)=>{
+      if(monthData[name]) return normalizeShifts(monthData[name]);
+      const k=keys.find(k=>k.toLowerCase()===name.toLowerCase());
+      return k ? normalizeShifts(monthData[k]) : [];
+    };
+    let shifts=find(userName);
+    if(!shifts.length){
+      const first=userName.split(" ")[0];
+      if(first!==userName) shifts=find(first);
     }
-    return [];
-  }, [combinedSchedule, userName]);
-
-  // viewport   (    )
+    return shifts;
+  },[allEmpMonthSchedules, selViewMonth, userName]);
 
   function clampOffset(ox, oy, sc, el) {
     if (!el) return { x: ox, y: oy };
-    const cw = el.clientWidth;
-    const ch = el.clientHeight;
-    const imgW = cw * sc;
-    const imgH = ch * sc; // height auto 
+    const cw = el.clientWidth, ch = el.clientHeight;
+    const imgW = cw * sc, imgH = ch * sc;
     const maxX = Math.max(0, (imgW - cw) / 2);
     const maxY = Math.max(0, (imgH - ch) / 2);
     return { x: Math.min(maxX, Math.max(-maxX, ox)), y: Math.min(maxY, Math.max(-maxY, oy)) };
   }
-
-  function getDist(t1, t2) {
-    const dx = t1.clientX - t2.clientX;
-    const dy = t1.clientY - t2.clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-  function getMid(t1, t2) {
-    return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
-  }
-
-  function onTouchStart(e) {
+  function getDist(t1,t2){return Math.sqrt((t1.clientX-t2.clientX)**2+(t1.clientY-t2.clientY)**2);}
+  function onTouchStart(e){
     e.stopPropagation();
-    if (e.touches.length === 2) {
-      lastDistRef.current = getDist(e.touches[0], e.touches[1]);
-      lastScaleRef.current = scale;
-      lastOffsetRef.current = offset;
-    } else if (e.touches.length === 1) {
-      lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      lastOffsetRef.current = offset;
-    }
+    if(e.touches.length===2){lastDistRef.current=getDist(e.touches[0],e.touches[1]);lastScaleRef.current=scale;lastOffsetRef.current=offset;}
+    else if(e.touches.length===1){lastTouchRef.current={x:e.touches[0].clientX,y:e.touches[0].clientY};lastOffsetRef.current=offset;}
   }
+  function onTouchMove(e){
+    e.preventDefault();e.stopPropagation();
+    const el=containerRef.current;
+    if(e.touches.length===2){const dist=getDist(e.touches[0],e.touches[1]);const ratio=dist/lastDistRef.current;const ns=Math.min(5,Math.max(1,lastScaleRef.current*ratio));setScale(ns);if(ns===1)setOffset({x:0,y:0});}
+    else if(e.touches.length===1&&scale>1){const dx=e.touches[0].clientX-lastTouchRef.current.x;const dy=e.touches[0].clientY-lastTouchRef.current.y;setOffset(clampOffset(lastOffsetRef.current.x+dx,lastOffsetRef.current.y+dy,scale,el));}
+  }
+  function onTouchEnd(e){e.stopPropagation();lastDistRef.current=null;if(e.touches.length===1){lastTouchRef.current={x:e.touches[0].clientX,y:e.touches[0].clientY};lastOffsetRef.current=offset;}}
+  function onDoubleClick(){setScale(1);setOffset({x:0,y:0});}
 
-  function onTouchMove(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    const el = containerRef.current;
-    if (e.touches.length === 2) {
-      const dist = getDist(e.touches[0], e.touches[1]);
-      const ratio = dist / lastDistRef.current;
-      const newScale = Math.min(5, Math.max(1, lastScaleRef.current * ratio));
-      setScale(newScale);
-      if (newScale === 1) setOffset({ x: 0, y: 0 });
-    } else if (e.touches.length === 1 && scale > 1) {
-      const dx = e.touches[0].clientX - lastTouchRef.current.x;
-      const dy = e.touches[0].clientY - lastTouchRef.current.y;
-      const raw = { x: lastOffsetRef.current.x + dx, y: lastOffsetRef.current.y + dy };
-      setOffset(clampOffset(raw.x, raw.y, scale, el));
-    }
-  }
-
-  function onTouchEnd(e) {
-    e.stopPropagation();
-    lastDistRef.current = null;
-    if (e.touches.length === 1) {
-      lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      lastOffsetRef.current = offset;
-    }
-  }
-
-  function onDoubleClick() {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
-  }
+  // 월 이름 표시 (독일어)
+  const [yr,mo]=selViewMonth.split("_");
+  const monthName=new Date(yr+"-"+mo+"-01").toLocaleDateString("de-DE",{month:"long",year:"numeric"});
+  const isCurrentMonth=selViewMonth===currentMonthKey;
 
   return (
-    <div style={{ width: "100%", background: C.card, borderRadius: 14, overflow: "hidden" }}>
-      {(imgErr && !planImg) ? (
-        <div style={{
-          display: "flex", flexDirection: "column", alignItems: "center",
-          justifyContent: "center", padding: "48px 24px", gap: 12, textAlign: "center",
-        }}>
-          <span style={{fontSize: 36}}>{"📋"}</span>
-          <div style={{fontSize: 13, fontWeight: 700, color: C.text}}>Kein Dienstplan vorhanden</div>
-          <div style={{fontSize: 11, color: C.muted, lineHeight: 1.5}}>
-            Der Manager hat noch keinen Dienstplan hochgeladen.
-          </div>
+    <div style={{width:"100%",background:C.card,borderRadius:14,overflow:"hidden"}}>
+      {/* 월 네비게이션 헤더 */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderBottom:`1px solid ${C.border}`}}>
+        <button onClick={()=>{if(canPrev){setSelViewMonth(availableMonths[selIdx-1]);setScale(1);setOffset({x:0,y:0});}}}
+          disabled={!canPrev}
+          style={{width:32,height:32,borderRadius:8,border:`1px solid ${canPrev?C.border:"transparent"}`,background:canPrev?"#fff":"transparent",color:canPrev?C.text:C.border,fontSize:16,cursor:canPrev?"pointer":"default",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {"‹"}
+        </button>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.text}}>{monthName}</div>
+          {isCurrentMonth&&<div style={{fontSize:9,color:C.mint,fontWeight:700}}>Aktueller Monat</div>}
+        </div>
+        <button onClick={()=>{if(canNext){setSelViewMonth(availableMonths[selIdx+1]);setScale(1);setOffset({x:0,y:0});}}}
+          disabled={!canNext}
+          style={{width:32,height:32,borderRadius:8,border:`1px solid ${canNext?C.border:"transparent"}`,background:canNext?"#fff":"transparent",color:canNext?C.text:C.border,fontSize:16,cursor:canNext?"pointer":"default",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {"›"}
+        </button>
+      </div>
+
+      {/* 근무표 이미지/PDF */}
+      {!planImg ? (
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"36px 24px",gap:10,textAlign:"center"}}>
+          <span style={{fontSize:32}}>{"📋"}</span>
+          <div style={{fontSize:13,fontWeight:700,color:C.text}}>Kein Dienstplan vorhanden</div>
+          <div style={{fontSize:11,color:C.muted}}>Der Manager hat noch keinen Dienstplan hochgeladen.</div>
+        </div>
+      ) : isPdfPlan ? (
+        <div style={{width:"100%",height:320,position:"relative"}}>
+          <iframe src={planImg} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan PDF"/>
         </div>
       ) : (
-        <div>
-          <div
-            ref={containerRef}
-            onTouchStart={onTouchStart}
-            onTouchMove={onTouchMove}
-            onTouchEnd={onTouchEnd}
-            onDoubleClick={onDoubleClick}
-            style={{ overflow: "hidden", touchAction: "none", cursor: scale > 1 ? "grab" : "default" }}
-          >
-            <img
-              src={planImg || "plan.png"}
-              alt="Dienstplan"
-              onError={() => setImgErr(true)}
-              style={{
-                display: "block", width: "100%", height: "auto",
-                transform: `scale(${scale}) translate(${offset.x / scale}px, ${offset.y / scale}px)`,
-                transformOrigin: "center center", transition: "none",
-                userSelect: "none", pointerEvents: "none",
-              }}
-            />
-          </div>
+        <div ref={containerRef} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onDoubleClick={onDoubleClick}
+          style={{overflow:"hidden",touchAction:"none",cursor:scale>1?"grab":"default"}}>
+          <img src={planImg} alt="Dienstplan"
+            style={{display:"block",width:"100%",height:"auto",
+              transform:`scale(${scale}) translate(${offset.x/scale}px,${offset.y/scale}px)`,
+              transformOrigin:"center center",transition:"none",userSelect:"none",pointerEvents:"none"}}/>
         </div>
       )}
 
-      {/*   */}
+      {/* 해당 월 내 근무 목록 */}
       {userName && myShifts.length > 0 && (
         <MeineSchichtenSection userName={userName} myShifts={myShifts} records={records} users={users}/>
       )}
       {userName && myShifts.length === 0 && (
         <div style={{padding:"14px",textAlign:"center"}}>
           <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>
-            {"📋 Für <strong>{userName}</strong> sind noch keine Schichten im Dienstplan eingetragen."}
+            {"📋 Keine Schichten für diesen Monat eingetragen."}
             <div style={{fontSize:9,marginTop:4,opacity:.6}}>Der Manager muss den Plan hochladen und analysieren.</div>
           </div>
         </div>
@@ -3591,8 +3547,9 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
       r.readAsDataURL(file);
     });
     const dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
-    // 미리보기: 분석 전에도 이미지 표시
-    if (!isPdf) setLocalImg({src: dataUrl, month: selMonth});
+    // 미리보기: 분석 전에도 표시 (PDF면 data URL 생성)
+    const previewUrl = isPdf ? `data:application/pdf;base64,${b64}` : dataUrl;
+    if (previewUrl) setLocalImg({src: previewUrl, month: selMonth, isPdf});
 
     const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
     const promptText = `Du bist ein Assistent, der Dienstpläne analysiert. Analysiere diesen Dienstplan sehr sorgfältig.
@@ -3679,11 +3636,12 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         window._fbSet(window._fbRef(window._fbDb, monthKey), parsedForFb)
           .then(()=>console.log("✅ schedule saved to", monthKey, Object.keys(parsedForFb)))
           .catch(e=>console.error("schedule save error:", e));
-        // 월별 이미지 저장 (planImgKey = planImage_YYYY_MM)
-        if (!isPdf && b64.length < 4000000) {
+        // 월별 파일 저장 (이미지+PDF 모두) - base64 dataUrl로 저장
+        const fileDataUrl = isPdf ? `data:application/pdf;base64,${b64}` : dataUrl;
+        if (b64.length < 6000000) {  // 6MB 이하만 저장
           const imgKey = "planImage_" + detectedMonth.replace("-","_");
-          window._fbSet(window._fbRef(window._fbDb, imgKey), dataUrl).catch(()=>{});
-          window._fbSet(window._fbRef(window._fbDb, "planImage"), dataUrl).catch(()=>{});
+          window._fbSet(window._fbRef(window._fbDb, imgKey), fileDataUrl).catch(()=>{});
+          window._fbSet(window._fbRef(window._fbDb, "planImage"), fileDataUrl).catch(()=>{});
         }
       }
       const savedMonth = detectedMonth.replace("-","_");
