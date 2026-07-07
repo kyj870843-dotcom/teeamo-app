@@ -530,7 +530,7 @@ function KalenderView({ csvCtx, userName, records, users }) {
           <div style={{fontSize:11,color:C.muted}}>Der Manager hat noch keinen Dienstplan hochgeladen.</div>
         </div>
       ) : isPdfPlan ? (
-        <div style={{width:"100%",height:"80vh",minHeight:400,position:"relative"}}>
+        <div style={{width:"100%",height:"70vh",position:"relative",background:"#f0f0f0"}}>
           <iframe src={planImg} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan PDF"/>
         </div>
       ) : (
@@ -3759,12 +3759,13 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         <div style={{marginBottom:12,borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,background:"#f0f0f0"}}>
           {displayImg.startsWith("data:application/pdf") ? (
             <iframe src={displayImg}
-              style={{width:"100%",height:480,border:"none",display:"block"}}
+              style={{width:"100%",height:"70vh",border:"none",display:"block"}}
               title="Dienstplan PDF"/>
           ) : (
-            <div style={{display:"flex",justifyContent:"center",padding:"8px 0"}}>
+            <div style={{height:"70vh",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
               <img src={displayImg} alt="Dienstplan"
-                style={{width:"80%",height:"auto",display:"block",borderRadius:8}}/>
+                style={{maxWidth:"100%",maxHeight:"100%",width:"auto",height:"auto",
+                  objectFit:"contain",display:"block"}}/>
             </div>
           )}
         </div>
