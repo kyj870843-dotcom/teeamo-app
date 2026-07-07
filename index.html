@@ -3286,7 +3286,11 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
               <KalenderView csvCtx={csvCtx} userName={manager.vorname} records={records} users={users}/>
             </div>
           )}
-          <DienstplanUploadView records={records} users={users} antraege={antraege} setAntraege={setAntraege} absagenList={absagenList} setAbsagenList={setAbsagenList} setRecords={setRecords} approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag} approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}/>
+          <DienstplanUploadView records={records} users={users} antraege={antraege} setAntraege={setAntraege} absagenList={absagenList} setAbsagenList={setAbsagenList} setRecords={setRecords} approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag} approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}
+            onScheduleSaved={(monthKey, parsedData)=>{
+              setAllMonthSchedules(prev=>({...prev, [monthKey]: Object.fromEntries(Object.entries(parsedData).map(([name,shifts])=>[name,Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]))]))}));
+              setSelMonth(monthKey);
+            }}/>
         </div>
       )}
 
@@ -3504,7 +3508,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 }
 
 //  DIENSTPLAN UPLOAD + AI ANALYSE 
-function DienstplanUploadView({ records, users, antraege, setAntraege, absagenList, setAbsagenList, setRecords, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage }) {
+function DienstplanUploadView({ records, users, antraege, setAntraege, absagenList, setAbsagenList, setRecords, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage, onScheduleSaved }) {
   const nList = Array.isArray(antraege) ? antraege : [];
   const abList = Array.isArray(absagenList) ? absagenList : [];
   const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
@@ -3643,6 +3647,8 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         }
       }
       setSchedule(parsed);
+      // 부모에게 새 월 데이터 알려서 즉시 반영
+      if (onScheduleSaved) onScheduleSaved(monthKey.replace("schedule_",""), parsed);
       //  Firebase  (PDF   )
       if (!isPdf && b64.length < 4000000) {
         setPlanImg(dataUrl);
