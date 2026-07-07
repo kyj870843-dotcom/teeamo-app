@@ -3821,114 +3821,15 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         </div>
       )}
 
-      {/*   */}
+      {/* 분석 완료 메시지만 표시 - 상세 내용은 "Nach Mitarbeiter" 탭에서 확인 */}
       {schedule && Object.keys(schedule).length > 0 && (
-        <div>
-          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>
-            Extrahierte Schichten
+        <div style={{...S.card, marginTop:4, background:C.mintLight, border:`1px solid ${C.mint}`}}>
+          <div style={{fontSize:12, fontWeight:700, color:C.mintDark}}>
+            ✅ {Object.keys(schedule).length} Mitarbeiter analysiert
           </div>
-          {Object.entries(schedule).map(([name, rawShifts]) => {
-            const normShifts = !rawShifts?[]:Array.isArray(rawShifts)?rawShifts:Object.values(rawShifts);
-            if (normShifts.length === 0) return null;
-            const accountExists = Array.isArray(users) && users.some(u=>u.vorname===name);
-            const todayStr = today();
-            return (
-              <div key={name} style={{...S.card, marginBottom:10}}>
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.text}}>{name}</div>
-                  {!accountExists&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:99,background:C.border,color:C.muted}}>Kein Konto</span>}
-                </div>
-                {normShifts.map((shift, i) => {
-                  const d = shift.date||shift.d;
-                  const f = shift.filiale||shift.f;
-                  const t = shift.time||shift.t;
-                  const actualRec = accountExists ? records.find(r => r.user === name && r.date === d) : null;
-                  let status, statusLabel, statusColor, statusBg;
-                  if (!accountExists) {
-                    status="ausstehend"; statusLabel="Ausstehend";
-                    statusColor=C.muted; statusBg=C.border;
-                  } else if (!actualRec) {
-                    if (d < todayStr) {
-                      status="nicht_erschienen"; statusLabel="Nicht erschienen";
-                      statusColor=C.red; statusBg=C.redLight;
-                    } else {
-                      status="ausstehend"; statusLabel="Ausstehend";
-                      statusColor=C.muted; statusBg=C.border;
-                    }
-                  } else if (!actualRec.aus||actualRec.aus==="") {
-                    status="aktiv"; statusLabel="Aktiv";
-                    statusColor=C.yellow; statusBg=C.yellowLight;
-                  } else {
-                    status="erledigt"; statusLabel="Gearbeitet";
-                    statusColor=C.mintDark; statusBg=C.mintLight;
-                  }
-                  // Nachtrag/Absage 찾기
-                  const pendingNachtrag = nList.find(a=>a.user===name&&a.date===d&&a.status==="offen");
-                  const doneNachtrag = nList.find(a=>a.user===name&&a.date===d&&a.status!=="offen");
-                  const pendingAbsage = abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status==="offen");
-                  const doneAbsage = abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status!=="offen");
-
-                  return (
-                    <div key={i} style={{borderRadius:9,marginBottom:5,overflow:"hidden",
-                      border:`1px solid ${pendingNachtrag||pendingAbsage?C.yellow:C.border}`}}>
-                      {/* 메인 카드 */}
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
-                        padding:"8px 10px",
-                        background:status==="erledigt"?C.mintLight:status==="aktiv"?"#FFF9E6":C.bg}}>
-                        <div>
-                          <div style={{fontSize:11,fontWeight:700,color:C.text}}>
-                            {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
-                          </div>
-                          <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
-                          {actualRec&&actualRec.ein&&(
-                            <div style={{fontSize:10,color:status==="erledigt"?C.mintDark:C.yellow,fontWeight:600,marginTop:2}}>
-                              {actualRec.ein}{actualRec.aus?` – ${actualRec.aus}`:" (läuft)"}
-                              {actualRec.aus&&<span style={{color:C.muted,fontWeight:400}}>{" · "}{stdLabel(actualRec.ein,actualRec.aus)}</span>}
-                            </div>
-                          )}
-                        </div>
-                        <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
-                          color:statusColor,background:statusBg,flexShrink:0,marginLeft:8}}>
-                          {statusLabel}
-                        </span>
-                      </div>
-                      {/* Nachtrag 대기 중 - Nach Mitarbeiter에서 처리 */}
-                      {pendingNachtrag&&(
-                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.yellow}`,background:C.yellowLight}}>
-                          <span style={{fontSize:9,fontWeight:700,color:C.yellow}}>
-                            {"🕐 Nachtrag ausstehend · "}{pendingNachtrag.ein}{" – "}{pendingNachtrag.aus}
-                          </span>
-                        </div>
-                      )}
-                      {/* Nachtrag 처리 완료 */}
-                      {!pendingNachtrag&&doneNachtrag&&(
-                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.border}`,background:doneNachtrag.status==="genehmigt"?C.mintLight:C.redLight}}>
-                          <span style={{fontSize:9,fontWeight:700,color:doneNachtrag.status==="genehmigt"?C.mintDark:C.red}}>
-                            {"🕐 "}{doneNachtrag.status==="genehmigt"?"Nachtrag genehmigt ✓":"Nachtrag abgelehnt ✕"}
-                            {" · "}{doneNachtrag.ein}{" – "}{doneNachtrag.aus}
-                          </span>
-                        </div>
-                      )}
-                      {/* Absage 대기 중 - Nach Mitarbeiter에서 처리 */}
-                      {pendingAbsage&&(
-                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.yellow}`,background:C.yellowLight}}>
-                          <span style={{fontSize:9,fontWeight:700,color:C.yellow}}>{"🚫 Absage ausstehend"}</span>
-                        </div>
-                      )}
-                      {/* Absage 처리 완료 */}
-                      {!pendingAbsage&&doneAbsage&&(
-                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.border}`,background:doneAbsage.status==="genehmigt"?C.redLight:C.bg}}>
-                          <span style={{fontSize:9,fontWeight:700,color:doneAbsage.status==="genehmigt"?C.red:C.muted}}>
-                            {"🚫 Absage "}{doneAbsage.status==="genehmigt"?"genehmigt ✓":"abgelehnt ✕"}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
+          <div style={{fontSize:10, color:C.mintDark, marginTop:3}}>
+            Details im Tab „Nach Mitarbeiter" einsehen
+          </div>
         </div>
       )}
     </div>
@@ -8747,114 +8648,15 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         </div>
       )}
 
-      {/*   */}
+      {/* 분석 완료 메시지만 표시 - 상세 내용은 "Nach Mitarbeiter" 탭에서 확인 */}
       {schedule && Object.keys(schedule).length > 0 && (
-        <div>
-          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:9,textTransform:"uppercase",letterSpacing:".05em"}}>
-            Extrahierte Schichten
+        <div style={{...S.card, marginTop:4, background:C.mintLight, border:`1px solid ${C.mint}`}}>
+          <div style={{fontSize:12, fontWeight:700, color:C.mintDark}}>
+            ✅ {Object.keys(schedule).length} Mitarbeiter analysiert
           </div>
-          {Object.entries(schedule).map(([name, rawShifts]) => {
-            const normShifts = !rawShifts?[]:Array.isArray(rawShifts)?rawShifts:Object.values(rawShifts);
-            if (normShifts.length === 0) return null;
-            const accountExists = Array.isArray(users) && users.some(u=>u.vorname===name);
-            const todayStr = today();
-            return (
-              <div key={name} style={{...S.card, marginBottom:10}}>
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.text}}>{name}</div>
-                  {!accountExists&&<span style={{fontSize:9,padding:"2px 6px",borderRadius:99,background:C.border,color:C.muted}}>Kein Konto</span>}
-                </div>
-                {normShifts.map((shift, i) => {
-                  const d = shift.date||shift.d;
-                  const f = shift.filiale||shift.f;
-                  const t = shift.time||shift.t;
-                  const actualRec = accountExists ? records.find(r => r.user === name && r.date === d) : null;
-                  let status, statusLabel, statusColor, statusBg;
-                  if (!accountExists) {
-                    status="ausstehend"; statusLabel="Ausstehend";
-                    statusColor=C.muted; statusBg=C.border;
-                  } else if (!actualRec) {
-                    if (d < todayStr) {
-                      status="nicht_erschienen"; statusLabel="Nicht erschienen";
-                      statusColor=C.red; statusBg=C.redLight;
-                    } else {
-                      status="ausstehend"; statusLabel="Ausstehend";
-                      statusColor=C.muted; statusBg=C.border;
-                    }
-                  } else if (!actualRec.aus||actualRec.aus==="") {
-                    status="aktiv"; statusLabel="Aktiv";
-                    statusColor=C.yellow; statusBg=C.yellowLight;
-                  } else {
-                    status="erledigt"; statusLabel="Gearbeitet";
-                    statusColor=C.mintDark; statusBg=C.mintLight;
-                  }
-                  // Nachtrag/Absage 찾기
-                  const pendingNachtrag = nList.find(a=>a.user===name&&a.date===d&&a.status==="offen");
-                  const doneNachtrag = nList.find(a=>a.user===name&&a.date===d&&a.status!=="offen");
-                  const pendingAbsage = abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status==="offen");
-                  const doneAbsage = abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status!=="offen");
-
-                  return (
-                    <div key={i} style={{borderRadius:9,marginBottom:5,overflow:"hidden",
-                      border:`1px solid ${pendingNachtrag||pendingAbsage?C.yellow:C.border}`}}>
-                      {/* 메인 카드 */}
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
-                        padding:"8px 10px",
-                        background:status==="erledigt"?C.mintLight:status==="aktiv"?"#FFF9E6":C.bg}}>
-                        <div>
-                          <div style={{fontSize:11,fontWeight:700,color:C.text}}>
-                            {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}
-                          </div>
-                          <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
-                          {actualRec&&actualRec.ein&&(
-                            <div style={{fontSize:10,color:status==="erledigt"?C.mintDark:C.yellow,fontWeight:600,marginTop:2}}>
-                              {actualRec.ein}{actualRec.aus?` – ${actualRec.aus}`:" (läuft)"}
-                              {actualRec.aus&&<span style={{color:C.muted,fontWeight:400}}>{" · "}{stdLabel(actualRec.ein,actualRec.aus)}</span>}
-                            </div>
-                          )}
-                        </div>
-                        <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
-                          color:statusColor,background:statusBg,flexShrink:0,marginLeft:8}}>
-                          {statusLabel}
-                        </span>
-                      </div>
-                      {/* Nachtrag 대기 중 - Nach Mitarbeiter에서 처리 */}
-                      {pendingNachtrag&&(
-                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.yellow}`,background:C.yellowLight}}>
-                          <span style={{fontSize:9,fontWeight:700,color:C.yellow}}>
-                            {"🕐 Nachtrag ausstehend · "}{pendingNachtrag.ein}{" – "}{pendingNachtrag.aus}
-                          </span>
-                        </div>
-                      )}
-                      {/* Nachtrag 처리 완료 */}
-                      {!pendingNachtrag&&doneNachtrag&&(
-                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.border}`,background:doneNachtrag.status==="genehmigt"?C.mintLight:C.redLight}}>
-                          <span style={{fontSize:9,fontWeight:700,color:doneNachtrag.status==="genehmigt"?C.mintDark:C.red}}>
-                            {"🕐 "}{doneNachtrag.status==="genehmigt"?"Nachtrag genehmigt ✓":"Nachtrag abgelehnt ✕"}
-                            {" · "}{doneNachtrag.ein}{" – "}{doneNachtrag.aus}
-                          </span>
-                        </div>
-                      )}
-                      {/* Absage 대기 중 - Nach Mitarbeiter에서 처리 */}
-                      {pendingAbsage&&(
-                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.yellow}`,background:C.yellowLight}}>
-                          <span style={{fontSize:9,fontWeight:700,color:C.yellow}}>{"🚫 Absage ausstehend"}</span>
-                        </div>
-                      )}
-                      {/* Absage 처리 완료 */}
-                      {!pendingAbsage&&doneAbsage&&(
-                        <div style={{padding:"6px 10px",borderTop:`1px solid ${C.border}`,background:doneAbsage.status==="genehmigt"?C.redLight:C.bg}}>
-                          <span style={{fontSize:9,fontWeight:700,color:doneAbsage.status==="genehmigt"?C.red:C.muted}}>
-                            {"🚫 Absage "}{doneAbsage.status==="genehmigt"?"genehmigt ✓":"abgelehnt ✕"}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
+          <div style={{fontSize:10, color:C.mintDark, marginTop:3}}>
+            Details im Tab „Nach Mitarbeiter" einsehen
+          </div>
         </div>
       )}
     </div>
