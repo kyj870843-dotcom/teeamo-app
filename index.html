@@ -530,16 +530,22 @@ function KalenderView({ csvCtx, userName, records, users }) {
           <div style={{fontSize:11,color:C.muted}}>Der Manager hat noch keinen Dienstplan hochgeladen.</div>
         </div>
       ) : isPdfPlan ? (
-        <div style={{width:"100%",height:320,position:"relative"}}>
+        <div style={{width:"100%",height:"80vh",minHeight:400,position:"relative"}}>
           <iframe src={planImg} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan PDF"/>
         </div>
       ) : (
         <div ref={containerRef} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onDoubleClick={onDoubleClick}
-          style={{overflow:"hidden",touchAction:"none",cursor:scale>1?"grab":"default"}}>
+          style={{overflow:"hidden",touchAction:"none",cursor:scale>1?"grab":"default",position:"relative"}}>
           <img src={planImg} alt="Dienstplan"
-            style={{display:"block",width:"100%",height:"auto",maxHeight:480,objectFit:"contain",
+            style={{display:"block",width:"100%",height:"auto",
               transform:`scale(${scale}) translate(${offset.x/scale}px,${offset.y/scale}px)`,
-              transformOrigin:"center center",transition:"none",userSelect:"none",pointerEvents:"none"}}/>
+              transformOrigin:"top center",transition:"none",userSelect:"none",pointerEvents:"none"}}/>
+          {scale===1&&(
+            <div style={{position:"absolute",bottom:8,right:8,background:"rgba(0,0,0,.35)",color:"#fff",
+              fontSize:9,padding:"3px 8px",borderRadius:99,pointerEvents:"none"}}>
+              👆 Zum Zoomen zusammendrücken
+            </div>
+          )}
         </div>
       )}
 
