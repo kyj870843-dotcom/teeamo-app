@@ -3537,7 +3537,7 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
   const nList = Array.isArray(antraege) ? antraege : [];
   const abList = Array.isArray(absagenList) ? absagenList : [];
   const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
-  const [imgSrc, setImgSrc] = useState(null);
+  // imgSrc: 업로드 직후 미리보기 (localImg로 통합 관리)
   const [analyzing, setAnalyzing] = useState(false);
   const [msg, setMsg] = useState(null);
   const [showKeyInput, setShowKeyInput] = useState(false);
@@ -3551,14 +3551,15 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
   const scheduleKey = selMonth ? "schedule_" + selMonth : "schedule";
   const [monthScheduleData, , scheduleDataReady] = useFirebase(scheduleKey, {});
 
-  // 업로드 후 로컬 상태로 즉시 보여줄 schedule (새로 분석한 것)
-  const [localSchedule, setLocalSchedule] = useState(null);
+  // 업로드된 로컬 데이터 + 어느 월인지 함께 저장
+  const [localSchedule, setLocalSchedule] = useState(null);     // {data, month}
+  const [localImg, setLocalImg] = useState(null);               // {src, month}
 
-  // 표시할 schedule: 방금 업로드한 게 있으면 그것, 없으면 Firebase 월별 데이터
-  const schedule = localSchedule || (scheduleDataReady ? monthScheduleData : {});
+  // 현재 selMonth에 맞는 데이터만 사용 (다른 월이면 무시 → Firebase 데이터 사용)
+  const localScheduleForMonth = (localSchedule && localSchedule.month === selMonth) ? localSchedule.data : null;
+  const localImgForMonth = (localImg && localImg.month === selMonth) ? localImg.src : null;
 
-  // selMonth 바뀌면 로컬 상태 초기화
-  React.useEffect(()=>{ setLocalSchedule(null); setImgSrc(null); }, [selMonth]);
+  const schedule = localScheduleForMonth || monthScheduleData || {};
 
   //    
   async function handleFile(e) {
@@ -3590,7 +3591,8 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
       r.readAsDataURL(file);
     });
     const dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
-    if (!isPdf) setImgSrc(dataUrl);
+    // 미리보기: 분석 전에도 이미지 표시
+    if (!isPdf) setLocalImg({src: dataUrl, month: selMonth});
 
     const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
     const promptText = `Du bist ein Assistent, der Dienstpläne analysiert. Analysiere diesen Dienstplan sehr sorgfältig.
@@ -3677,20 +3679,18 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         window._fbSet(window._fbRef(window._fbDb, monthKey), parsedForFb)
           .then(()=>console.log("✅ schedule saved to", monthKey, Object.keys(parsedForFb)))
           .catch(e=>console.error("schedule save error:", e));
-        // 월별 이미지 저장
+        // 월별 이미지 저장 (planImgKey = planImage_YYYY_MM)
         if (!isPdf && b64.length < 4000000) {
           const imgKey = "planImage_" + detectedMonth.replace("-","_");
           window._fbSet(window._fbRef(window._fbDb, imgKey), dataUrl).catch(()=>{});
           window._fbSet(window._fbRef(window._fbDb, "planImage"), dataUrl).catch(()=>{});
         }
       }
-      setLocalSchedule(parsed);  // 즉시 로컬 표시
+      const savedMonth = detectedMonth.replace("-","_");
+      setLocalSchedule({data: parsed, month: savedMonth});  // 즉시 로컬 표시
+      setLocalImg(prev => prev ? {...prev, month: savedMonth} : prev);  // 이미지도 정확한 월로 업데이트
       // 부모에게 새 월 데이터 알려서 즉시 반영
-      if (onScheduleSaved) onScheduleSaved(monthKey.replace("schedule_",""), parsed);
-      // Firebase에 월별 이미지 저장 (planImgKey = planImage_YYYY_MM)
-      if (!isPdf && b64.length < 4000000) {
-        setPlanImg(dataUrl);  // useFirebase가 planImage_YYYY_MM 에 저장
-      }
+      if (onScheduleSaved) onScheduleSaved(savedMonth, parsed);
       setMsg({ type: "ok", text: `✅ Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
     } catch (err) {
       setMsg({ type: "err", text: `❌ 오류: ${err.message}` });
@@ -3698,7 +3698,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
     setAnalyzing(false);
   }
 
-  const displayImg = imgSrc || planImg;
+  const displayImg = localImgForMonth || planImg;
 
   return (
     <div style={{padding:"14px"}}>
