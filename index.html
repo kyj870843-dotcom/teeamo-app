@@ -69,7 +69,12 @@ const C = {
 
 const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","Teenjoy"];
 const MONTHS     = ["2026-06","2026-05","2026-04"];
-const MONTH_LABELS = {"2026-06":"Juni 2026","2026-05":"Mai 2026","2026-04":"April 2026"};
+function monthLabel(m) {
+  if(!m) return "";
+  const parts = m.includes("_") ? m.split("_") : m.split("-");
+  const yr=parts[0], mo=parts[1];
+  return new Date(yr+"-"+mo+"-01").toLocaleDateString("de-DE",{month:"long",year:"numeric"});
+}
 const TAGE_DE    = ["So","Mo","Di","Mi","Do","Fr","Sa"];
 const MANAGERS   = ["tingting","teddy","yeaji"];
 
@@ -393,26 +398,41 @@ function KalenderView({ csvCtx, userName, records, users }) {
 
   const [schedule] = useFirebase("schedule", {});
   const [planImg] = useFirebase("planImage", null);
-  
-  // 현재 독일 월 기준 월별 schedule도 로드
-  const currentMonthKey = React.useMemo(()=>{
+
+  // 모든 월별 schedule 로드
+  const [allEmpMonthSchedules, setAllEmpMonthSchedules] = React.useState({});
+  React.useEffect(()=>{
+    if(!window._fbDb||!window._fbRef||!window._fbGet) return;
     const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
-    return "schedule_"+d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
+    const yr=d.getFullYear();
+    const months=[yr+"_01",yr+"_02",yr+"_03",yr+"_04",yr+"_05",yr+"_06",
+                  yr+"_07",yr+"_08",yr+"_09",yr+"_10",yr+"_11",yr+"_12",
+                  (yr+1)+"_01",(yr+1)+"_02",(yr+1)+"_03"];
+    Promise.all(months.map(m=>
+      window._fbGet(window._fbRef(window._fbDb,"schedule_"+m))
+        .then(snap=>({m,data:snap.val()})).catch(()=>({m,data:null}))
+    )).then(results=>{
+      const found={};
+      results.forEach(({m,data})=>{ if(data) found[m]=data; });
+      setAllEmpMonthSchedules(found);
+    });
   },[]);
-  const [monthSchedule] = useFirebase(currentMonthKey, {});
-  
-  // 두 schedule 합치기 (월별 우선)
+
   const combinedSchedule = React.useMemo(()=>{
-    const base = schedule||{};
-    const monthly = monthSchedule||{};
-    const result = {...base};
-    for(const [name, shifts] of Object.entries(monthly)){
-      if(shifts && (Array.isArray(shifts)?shifts:Object.values(shifts)).length>0){
-        result[name] = Array.isArray(shifts)?shifts:Object.values(shifts);
+    const result={...(schedule||{})};
+    for(const [,monthData] of Object.entries(allEmpMonthSchedules)){
+      if(!monthData) continue;
+      for(const [name, shifts] of Object.entries(monthData)){
+        const arr=Array.isArray(shifts)?shifts:Object.values(shifts||{});
+        if(arr.length>0){
+          const existingDates=new Set((result[name]||[]).map(s=>s.date||s.d));
+          const newShifts=arr.filter(s=>!existingDates.has(s.date||s.d));
+          result[name]=[...(result[name]||[]),...newShifts];
+        }
       }
     }
     return result;
-  },[schedule, monthSchedule]);
+  },[schedule, allEmpMonthSchedules]);
 
   // Firebase  schedule   
   function normalizeShifts(val) {
@@ -1684,8 +1704,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
 
 //  SETTINGS VIEW () 
 function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdmin }) {
-  if (!user) return null;
-  const [vorname, setVorname] = useState(user.vorname || "");
+  const [vorname, setVorname] = useState(user?.vorname || "");
   const [saveMsg, setSaveMsg] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [impfDoc, setImpfDoc] = useState(user.infektionsschutz || null);
@@ -1697,6 +1716,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   const [newPin1, setNewPin1] = useState("");
   const [newPin2, setNewPin2] = useState("");
   const [pinMsg, setPinMsg] = useState("");
+  if (!user) return null;
 
   function changePIN() {
     const current = getPin(userKey);
@@ -2003,7 +2023,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const displayName=user.vorname;
   const myRecs=records.filter(r=>r.user===user.vorname);
   const myAntraege=antraege.filter(a=>a.user===user.vorname);
-  const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
+  const curMo=(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");})();
+  const myMonthRecs=myRecs.filter(r=>r.date&&r.date.startsWith(curMo));
+  const monthSummary=FILIALEN.map(f=>({f,h:myMonthRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
 
   // Dienstplan  :   Tausch  
   const [_notifications] = useFirebase("notifications", {});
@@ -2290,7 +2312,7 @@ function StatistikTab({records,users}){
         <div style={{display:"flex",gap:7}}>
           {availMonths.map(m=>(
             <button key={m} onClick={()=>setSelMonth(m)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${selMonth===m?C.mint:C.border}`,background:selMonth===m?C.mintLight:"#fff",color:selMonth===m?C.mintDark:C.muted}}>
-              {MONTH_LABELS[m]}
+              {monthLabel(m)}
             </button>
           ))}
         </div>
@@ -2375,6 +2397,12 @@ function StatistikTab({records,users}){
 
 //  BERSICHT ALL TAB 
 function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sColor, sBg, setDetailKey, setUsers, monthAccordion, setMonthAccordion, delRecordConfirm, setDelRecordConfirm }) {
+  // Hook must be before early return
+  const [selEmpMonth, setSelEmpMonth] = useState(()=>{
+    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+  });
+
   const emp = safeUsers.find(u=>u.key===empKey);
   if (!emp) return null;
 
@@ -2387,6 +2415,16 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
   const DAY=["So","Mo","Di","Mi","Do","Fr","Sa"];
   const contract=emp.contractHours||0;
   const totalDiff=contract>0?total-contract:null;
+
+  const currentGermanMonth=(()=>{
+    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+    return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+  })();
+  const allMonthOptions=[...new Set([currentGermanMonth,...monthKeys])].sort((a,b)=>b.localeCompare(a));
+  const selRecs=byMonth[selEmpMonth]||[];
+  const selTotal=selRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+  const selDays=selRecs.filter(r=>r.aus).length;
+  const selDiff=contract>0?selTotal-contract:null;
 
   return (
     <div style={{padding:"14px"}}>
@@ -2420,9 +2458,24 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
           <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:4,display:"inline-block",color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>{getStatus(emp.vorname)}</span>
         </div>
       </div>
+      <div style={{...S.card,marginBottom:12,padding:"12px 14px"}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>Monat wählen</div>
+        <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
+          {allMonthOptions.map(m=>(
+            <button key={m} onClick={()=>setSelEmpMonth(m)}
+              style={{flexShrink:0,padding:"7px 12px",borderRadius:9,
+                border:`1.5px solid ${selEmpMonth===m?C.navy:C.border}`,
+                background:selEmpMonth===m?C.navy:"#fff",
+                color:selEmpMonth===m?"#fff":C.muted,
+                fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+              {monthLabel(m)}
+            </button>
+          ))}
+        </div>
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-        {[{l:"Std. gesamt",v:total.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
-          <div key={l} style={S.card}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div><div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div></div>
+        {[{l:"Std. gesamt",v:selTotal.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:selDays+"d",c:C.navy}].map(({l,v,c})=>(
+          <div key={l} style={S.card}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div><div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div>{selDiff!==null&&l==="Std. gesamt"&&<div style={{fontSize:10,color:selDiff>=0?C.mintDark:C.red,fontWeight:700,marginTop:2}}>{(selDiff>=0?"+":"")+selDiff.toFixed(1)+"h"}</div>}</div>
         ))}
       </div>
       <div style={{...S.card,marginBottom:12}}>
@@ -2447,7 +2500,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
         const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
         const mDays=mRecs.filter(r=>r.aus).length;
         const mDiff=contract>0?mTotal-contract:null;
-        const isOpen=monthAccordion[m]!==false;
+        const isOpen=m===selEmpMonth?(monthAccordion[m]!==false):(monthAccordion[m]===true);
         const [y,mo]=m.split("-");
         return(
           <div key={m} style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
@@ -3116,11 +3169,13 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
     });
   },[]);
 
-  // 선택된 월의 schedule 또는 현재 schedule
+  // 선택된 월의 schedule (월간 분리)
   const activeSchedule = React.useMemo(()=>{
-    if(!selMonth) return schedule||{};
+    const hasAnyMonthly = Object.keys(allMonthSchedules).length > 0;
+    if(!hasAnyMonthly) return schedule||{};
+    if(!selMonth) return {};
     const raw = allMonthSchedules[selMonth];
-    if(!raw) return schedule||{};
+    if(!raw) return {};
     // Firebase object → array 변환
     const result={};
     for(const [name,shifts] of Object.entries(raw)){
@@ -3580,9 +3635,12 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         window._fbSet(window._fbRef(window._fbDb, monthKey), parsedForFb)
           .then(()=>console.log("✅ schedule saved to", monthKey, Object.keys(parsedForFb)))
           .catch(e=>console.error("schedule save error:", e));
-        // 현재 schedule도 유지 (기존 호환성)
-        window._fbSet(window._fbRef(window._fbDb, "schedule"), parsedForFb)
-          .catch(e=>console.error(e));
+        // 월별 이미지 저장
+        if (!isPdf && b64.length < 4000000) {
+          const imgKey = "planImage_" + detectedMonth.replace("-","_");
+          window._fbSet(window._fbRef(window._fbDb, imgKey), dataUrl).catch(()=>{});
+          window._fbSet(window._fbRef(window._fbDb, "planImage"), dataUrl).catch(()=>{});
+        }
       }
       setSchedule(parsed);
       //  Firebase  (PDF   )
