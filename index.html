@@ -397,7 +397,10 @@ function KalenderView({ csvCtx, userName, records, users }) {
   const lastOffsetRef = useRef({ x: 0, y: 0 });
 
   const [schedule] = useFirebase("schedule", {});
-  const [planImg] = useFirebase("planImage", null);
+  // 현재 독일 월 기준 plan 이미지 로드
+  const [allEmpPlanImages, setAllEmpPlanImages] = React.useState({});
+  // planImage는 전체 fallback용
+  const [planImgFallback] = useFirebase("planImage", null);
 
   // 모든 월별 schedule 로드
   const [allEmpMonthSchedules, setAllEmpMonthSchedules] = React.useState({});
@@ -408,6 +411,7 @@ function KalenderView({ csvCtx, userName, records, users }) {
     const months=[yr+"_01",yr+"_02",yr+"_03",yr+"_04",yr+"_05",yr+"_06",
                   yr+"_07",yr+"_08",yr+"_09",yr+"_10",yr+"_11",yr+"_12",
                   (yr+1)+"_01",(yr+1)+"_02",(yr+1)+"_03"];
+    // 스케줄 로드
     Promise.all(months.map(m=>
       window._fbGet(window._fbRef(window._fbDb,"schedule_"+m))
         .then(snap=>({m,data:snap.val()})).catch(()=>({m,data:null}))
@@ -415,6 +419,15 @@ function KalenderView({ csvCtx, userName, records, users }) {
       const found={};
       results.forEach(({m,data})=>{ if(data) found[m]=data; });
       setAllEmpMonthSchedules(found);
+    });
+    // 월별 plan 이미지 로드
+    Promise.all(months.map(m=>
+      window._fbGet(window._fbRef(window._fbDb,"planImage_"+m))
+        .then(snap=>({m,data:snap.val()})).catch(()=>({m,data:null}))
+    )).then(results=>{
+      const imgs={};
+      results.forEach(({m,data})=>{ if(data) imgs[m]=data; });
+      setAllEmpPlanImages(imgs);
     });
   },[]);
 
@@ -433,6 +446,17 @@ function KalenderView({ csvCtx, userName, records, users }) {
     }
     return result;
   },[schedule, allEmpMonthSchedules]);
+
+  // 현재 월에 맞는 plan 이미지 선택
+  const currentMonthForImg=(()=>{
+    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+    return d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
+  })();
+  // 가장 최근 업로드된 월 이미지 또는 현재 월 이미지 (없으면 fallback)
+  const availableImgMonths=Object.keys(allEmpPlanImages).sort().reverse();
+  const planImg = allEmpPlanImages[currentMonthForImg]
+    || (availableImgMonths.length>0 ? allEmpPlanImages[availableImgMonths[0]] : null)
+    || planImgFallback;
 
   // Firebase  schedule   
   function normalizeShifts(val) {
@@ -3287,6 +3311,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
             </div>
           )}
           <DienstplanUploadView records={records} users={users} antraege={antraege} setAntraege={setAntraege} absagenList={absagenList} setAbsagenList={setAbsagenList} setRecords={setRecords} approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag} approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}
+            selMonth={selMonth}
             onScheduleSaved={(monthKey, parsedData)=>{
               setAllMonthSchedules(prev=>({...prev, [monthKey]: Object.fromEntries(Object.entries(parsedData).map(([name,shifts])=>[name,Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]))]))}));
               setSelMonth(monthKey);
@@ -3508,19 +3533,32 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 }
 
 //  DIENSTPLAN UPLOAD + AI ANALYSE 
-function DienstplanUploadView({ records, users, antraege, setAntraege, absagenList, setAbsagenList, setRecords, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage, onScheduleSaved }) {
+function DienstplanUploadView({ records, users, antraege, setAntraege, absagenList, setAbsagenList, setRecords, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage, onScheduleSaved, selMonth }) {
   const nList = Array.isArray(antraege) ? antraege : [];
   const abList = Array.isArray(absagenList) ? absagenList : [];
   const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
-  const [schedule, setSchedule, scheduleReady] = useFirebase("schedule", {});
   const [imgSrc, setImgSrc] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [msg, setMsg] = useState(null);
   const [showKeyInput, setShowKeyInput] = useState(false);
   const fileRef = useRef(null);
 
-  // plan.png Firebase Storage  base64 Firebase 
-  const [planImg, setPlanImg, planReady] = useFirebase("planImage", null);
+  // 선택된 월의 plan 이미지를 동적으로 로드 (selMonth 바뀌면 자동 재구독)
+  const planImgKey = selMonth ? "planImage_" + selMonth : "planImage";
+  const [planImg, setPlanImg] = useFirebase(planImgKey, null);
+
+  // 선택된 월의 분석 데이터를 동적으로 로드
+  const scheduleKey = selMonth ? "schedule_" + selMonth : "schedule";
+  const [monthScheduleData, , scheduleDataReady] = useFirebase(scheduleKey, {});
+
+  // 업로드 후 로컬 상태로 즉시 보여줄 schedule (새로 분석한 것)
+  const [localSchedule, setLocalSchedule] = useState(null);
+
+  // 표시할 schedule: 방금 업로드한 게 있으면 그것, 없으면 Firebase 월별 데이터
+  const schedule = localSchedule || (scheduleDataReady ? monthScheduleData : {});
+
+  // selMonth 바뀌면 로컬 상태 초기화
+  React.useEffect(()=>{ setLocalSchedule(null); setImgSrc(null); }, [selMonth]);
 
   //    
   async function handleFile(e) {
@@ -3646,12 +3684,12 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
           window._fbSet(window._fbRef(window._fbDb, "planImage"), dataUrl).catch(()=>{});
         }
       }
-      setSchedule(parsed);
+      setLocalSchedule(parsed);  // 즉시 로컬 표시
       // 부모에게 새 월 데이터 알려서 즉시 반영
       if (onScheduleSaved) onScheduleSaved(monthKey.replace("schedule_",""), parsed);
-      //  Firebase  (PDF   )
+      // Firebase에 월별 이미지 저장 (planImgKey = planImage_YYYY_MM)
       if (!isPdf && b64.length < 4000000) {
-        setPlanImg(dataUrl);
+        setPlanImg(dataUrl);  // useFirebase가 planImage_YYYY_MM 에 저장
       }
       setMsg({ type: "ok", text: `✅ Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
     } catch (err) {
