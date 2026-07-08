@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="theme-color" content="#2C2C2C"/>
@@ -380,179 +380,98 @@ function useDienstplanCSV() {
 
 
 
-//  KALENDER VIEW (plan.png   +  ) 
-function KalenderView({ csvCtx, userName, records, users }) {
-  const [imgErr, setImgErr] = useState(false);
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const containerRef = useRef(null);
-  const lastTouchRef = useRef(null);
-  const lastDistRef = useRef(null);
-  const lastScaleRef = useRef(1);
-  const lastOffsetRef = useRef({ x: 0, y: 0 });
-
-  const [schedule] = useFirebase("schedule", {});
-  const [planImg] = useFirebase("planImage", null);
-  
-  // 현재 독일 월 기준 월별 schedule도 로드
-  const currentMonthKey = React.useMemo(()=>{
-    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
-    return "schedule_"+d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
-  },[]);
-  const [monthSchedule] = useFirebase(currentMonthKey, {});
-  
-  // 두 schedule 합치기 (월별 우선)
-  const combinedSchedule = React.useMemo(()=>{
-    const base = schedule||{};
-    const monthly = monthSchedule||{};
-    const result = {...base};
-    for(const [name, shifts] of Object.entries(monthly)){
-      if(shifts && (Array.isArray(shifts)?shifts:Object.values(shifts)).length>0){
-        result[name] = Array.isArray(shifts)?shifts:Object.values(shifts);
+// KALENDER VIEW
+function PlanImage({src}) {
+  const ref = useRef(null);
+  const Z = useRef({s:1,x:0,y:0,s0:1,x0:0,y0:0,d0:0,tx:0,ty:0,tap:0});
+  const [tr, setTr] = useState("scale(1) translate(0px,0px)");
+  React.useEffect(()=>{
+    const el=ref.current; if(!el) return;
+    const z=Z.current;
+    const upd=()=>setTr("scale("+z.s+") translate("+(z.x/z.s)+"px,"+(z.y/z.s)+"px)");
+    const dist=ts=>Math.hypot(ts[0].clientX-ts[1].clientX,ts[0].clientY-ts[1].clientY);
+    const clamp=(v,l)=>Math.max(-l,Math.min(l,v));
+    function onStart(e){
+      if(e.touches.length===2){z.d0=dist(e.touches);z.s0=z.s;z.x0=z.x;z.y0=z.y;}
+      else{z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;
+        const now=Date.now();if(now-z.tap<280){z.s=1;z.x=0;z.y=0;upd();}z.tap=now;}
+    }
+    function onMove(e){
+      e.preventDefault();
+      if(e.touches.length===2){
+        const sc=Math.min(5,Math.max(1,z.s0*(dist(e.touches)/z.d0)));
+        z.s=sc;z.x=clamp(z.x0,el.clientWidth*(sc-1)/2);z.y=clamp(z.y0,el.clientHeight*(sc-1)/2);upd();
+      }else if(e.touches.length===1&&z.s>1){
+        z.x=clamp(z.x0+e.touches[0].clientX-z.tx,el.clientWidth*(z.s-1)/2);
+        z.y=clamp(z.y0+e.touches[0].clientY-z.ty,el.clientHeight*(z.s-1)/2);upd();
       }
     }
-    return result;
-  },[schedule, monthSchedule]);
+    function onEnd(e){if(e.touches.length===1){z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;}}
+    el.addEventListener("touchstart",onStart,{passive:true});
+    el.addEventListener("touchmove",onMove,{passive:false});
+    el.addEventListener("touchend",onEnd,{passive:true});
+    return()=>{el.removeEventListener("touchstart",onStart);el.removeEventListener("touchmove",onMove);el.removeEventListener("touchend",onEnd);};
+  },[]);
+  if(!src) return null;
+  if(src.startsWith("data:application/pdf")) return(
+    <div style={{width:"100%",height:"70vh"}}><iframe src={src} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan"/></div>
+  );
+  return(
+    <div ref={ref} style={{width:"100%",height:"70vh",overflow:"hidden",background:"#f0f0f0",display:"flex",alignItems:"center",justifyContent:"center",touchAction:"none",userSelect:"none"}}>
+      <img src={src} alt="Dienstplan" style={{maxWidth:"100%",maxHeight:"100%",width:"auto",height:"auto",objectFit:"contain",pointerEvents:"none",display:"block",transform:tr,transformOrigin:"center center",transition:"none"}}/>
+    </div>
+  );
+}
 
-  // Firebase  schedule   
-  function normalizeShifts(val) {
-    if (!val) return [];
-    if (Array.isArray(val)) return val;
-    // Firebase {0:{...}, 1:{...}}   
-    return Object.values(val);
-  }
-
-  // schedule  :   
-  const myShifts = React.useMemo(() => {
-    if (!userName || !combinedSchedule) return [];
-    const keys = Object.keys(combinedSchedule);
-    if (combinedSchedule[userName]) return normalizeShifts(combinedSchedule[userName]);
-    const lower = userName.toLowerCase();
-    const k2 = keys.find(k => k.toLowerCase() === lower);
-    if (k2) return normalizeShifts(combinedSchedule[k2]);
-    const firstName = userName.split(" ")[0];
-    if (firstName !== userName) {
-      if (combinedSchedule[firstName]) return normalizeShifts(combinedSchedule[firstName]);
-      const k3 = keys.find(k => k.toLowerCase() === firstName.toLowerCase());
-      if (k3) return normalizeShifts(combinedSchedule[k3]);
-    }
-    return [];
-  }, [combinedSchedule, userName]);
-
-  // viewport   (    )
-
-  function clampOffset(ox, oy, sc, el) {
-    if (!el) return { x: ox, y: oy };
-    const cw = el.clientWidth;
-    const ch = el.clientHeight;
-    const imgW = cw * sc;
-    const imgH = ch * sc; // height auto 
-    const maxX = Math.max(0, (imgW - cw) / 2);
-    const maxY = Math.max(0, (imgH - ch) / 2);
-    return { x: Math.min(maxX, Math.max(-maxX, ox)), y: Math.min(maxY, Math.max(-maxY, oy)) };
-  }
-
-  function getDist(t1, t2) {
-    const dx = t1.clientX - t2.clientX;
-    const dy = t1.clientY - t2.clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-  function getMid(t1, t2) {
-    return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
-  }
-
-  function onTouchStart(e) {
-    e.stopPropagation();
-    if (e.touches.length === 2) {
-      lastDistRef.current = getDist(e.touches[0], e.touches[1]);
-      lastScaleRef.current = scale;
-      lastOffsetRef.current = offset;
-    } else if (e.touches.length === 1) {
-      lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      lastOffsetRef.current = offset;
-    }
-  }
-
-  function onTouchMove(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    const el = containerRef.current;
-    if (e.touches.length === 2) {
-      const dist = getDist(e.touches[0], e.touches[1]);
-      const ratio = dist / lastDistRef.current;
-      const newScale = Math.min(5, Math.max(1, lastScaleRef.current * ratio));
-      setScale(newScale);
-      if (newScale === 1) setOffset({ x: 0, y: 0 });
-    } else if (e.touches.length === 1 && scale > 1) {
-      const dx = e.touches[0].clientX - lastTouchRef.current.x;
-      const dy = e.touches[0].clientY - lastTouchRef.current.y;
-      const raw = { x: lastOffsetRef.current.x + dx, y: lastOffsetRef.current.y + dy };
-      setOffset(clampOffset(raw.x, raw.y, scale, el));
-    }
-  }
-
-  function onTouchEnd(e) {
-    e.stopPropagation();
-    lastDistRef.current = null;
-    if (e.touches.length === 1) {
-      lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      lastOffsetRef.current = offset;
-    }
-  }
-
-  function onDoubleClick() {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
-  }
-
-  return (
-    <div style={{ width: "100%", background: C.card, borderRadius: 14, overflow: "hidden" }}>
-      {(imgErr && !planImg) ? (
-        <div style={{
-          display: "flex", flexDirection: "column", alignItems: "center",
-          justifyContent: "center", padding: "48px 24px", gap: 12, textAlign: "center",
-        }}>
-          <span style={{fontSize: 36}}>{"📋"}</span>
-          <div style={{fontSize: 13, fontWeight: 700, color: C.text}}>Kein Dienstplan vorhanden</div>
-          <div style={{fontSize: 11, color: C.muted, lineHeight: 1.5}}>
-            Der Manager hat noch keinen Dienstplan hochgeladen.
-          </div>
+function KalenderView({ csvCtx, userName, records, users }) {
+  const curMK=React.useMemo(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");},[]);
+  const [selM,setSelM]=useState(curMK);
+  const [allSched,setAllSched]=React.useState({});
+  const [allImgs,setAllImgs]=React.useState({});
+  const [fallback]=useFirebase("planImage",null);
+  React.useEffect(()=>{
+    if(!window._fbDb||!window._fbRef||!window._fbGet) return;
+    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+    const yr=d.getFullYear();
+    const ms=[yr+"_01",yr+"_02",yr+"_03",yr+"_04",yr+"_05",yr+"_06",yr+"_07",yr+"_08",yr+"_09",yr+"_10",yr+"_11",yr+"_12",(yr+1)+"_01",(yr+1)+"_02",(yr+1)+"_03"];
+    Promise.all(ms.map(m=>window._fbGet(window._fbRef(window._fbDb,"schedule_"+m)).then(s=>({m,d:s.val()})).catch(()=>({m,d:null})))).then(r=>{const f={};r.forEach(({m,d})=>{if(d)f[m]=d;});setAllSched(f);});
+    Promise.all(ms.map(m=>window._fbGet(window._fbRef(window._fbDb,"planImage_"+m)).then(s=>({m,d:s.val()})).catch(()=>({m,d:null})))).then(r=>{const f={};r.forEach(({m,d})=>{if(d)f[m]=d;});setAllImgs(f);});
+  },[]);
+  const avail=React.useMemo(()=>{const s=new Set([curMK]);Object.keys(allSched).forEach(m=>s.add(m));Object.keys(allImgs).forEach(m=>s.add(m));return[...s].sort();},[curMK,allSched,allImgs]);
+  const idx=avail.indexOf(selM);
+  const img=allImgs[selM]||fallback;
+  function norm(v){if(!v)return[];if(Array.isArray(v))return v;return Object.values(v);}
+  const myShifts=React.useMemo(()=>{
+    const md=allSched[selM];if(!md||!userName)return[];
+    const keys=Object.keys(md);
+    const find=n=>{if(md[n])return norm(md[n]);const k=keys.find(k=>k.toLowerCase()===n.toLowerCase());return k?norm(md[k]):[];};
+    let s=find(userName);if(!s.length){const f=userName.split(" ")[0];if(f!==userName)s=find(f);}return s;
+  },[allSched,selM,userName]);
+  const [yr,mo]=selM.split("_");
+  const mn=new Date(yr+"-"+mo+"-01").toLocaleDateString("de-DE",{month:"long",year:"numeric"});
+  return(
+    <div style={{width:"100%",background:C.card,borderRadius:14,overflow:"hidden"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderBottom:"1px solid "+C.border}}>
+        <button onClick={()=>{if(idx>0)setSelM(avail[idx-1]);}} disabled={idx<=0}
+          style={{width:36,height:36,borderRadius:9,border:"1px solid "+(idx>0?C.border:"transparent"),background:idx>0?"#fff":"transparent",color:idx>0?C.text:C.border,fontSize:20,cursor:idx>0?"pointer":"default",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>{"<"}</button>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.text}}>{mn}</div>
+          {selM===curMK&&<div style={{fontSize:9,color:C.mint,fontWeight:700}}>Aktueller Monat</div>}
         </div>
-      ) : (
-        <div>
-          <div
-            ref={containerRef}
-            onTouchStart={onTouchStart}
-            onTouchMove={onTouchMove}
-            onTouchEnd={onTouchEnd}
-            onDoubleClick={onDoubleClick}
-            style={{ overflow: "hidden", touchAction: "none", cursor: scale > 1 ? "grab" : "default" }}
-          >
-            <img
-              src={planImg || "plan.png"}
-              alt="Dienstplan"
-              onError={() => setImgErr(true)}
-              style={{
-                display: "block", width: "100%", height: "auto",
-                transform: `scale(${scale}) translate(${offset.x / scale}px, ${offset.y / scale}px)`,
-                transformOrigin: "center center", transition: "none",
-                userSelect: "none", pointerEvents: "none",
-              }}
-            />
-          </div>
+        <button onClick={()=>{if(idx<avail.length-1)setSelM(avail[idx+1]);}} disabled={idx>=avail.length-1}
+          style={{width:36,height:36,borderRadius:9,border:"1px solid "+(idx<avail.length-1?C.border:"transparent"),background:idx<avail.length-1?"#fff":"transparent",color:idx<avail.length-1?C.text:C.border,fontSize:20,cursor:idx<avail.length-1?"pointer":"default",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>{">"}</button>
+      </div>
+      {img?<PlanImage src={img}/>:(
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"36px 24px",gap:10,textAlign:"center"}}>
+          <span style={{fontSize:32}}>{"📋"}</span>
+          <div style={{fontSize:13,fontWeight:700,color:C.text}}>Kein Dienstplan vorhanden</div>
+          <div style={{fontSize:11,color:C.muted}}>Der Manager hat noch keinen Plan hochgeladen.</div>
         </div>
       )}
-
-      {/*   */}
-      {userName && myShifts.length > 0 && (
-        <MeineSchichtenSection userName={userName} myShifts={myShifts} records={records} users={users}/>
-      )}
-      {userName && myShifts.length === 0 && (
+      {userName&&myShifts.length>0&&<MeineSchichtenSection userName={userName} myShifts={myShifts} records={records} users={users}/>}
+      {userName&&myShifts.length===0&&(
         <div style={{padding:"14px",textAlign:"center"}}>
-          <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>
-            {"📋 Für <strong>{userName}</strong> sind noch keine Schichten im Dienstplan eingetragen."}
-            <div style={{fontSize:9,marginTop:4,opacity:.6}}>Der Manager muss den Plan hochladen und analysieren.</div>
-          </div>
+          <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>{"Keine Schichten fuer diesen Monat."}</div>
         </div>
       )}
     </div>
