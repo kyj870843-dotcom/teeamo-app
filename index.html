@@ -380,119 +380,186 @@ function useDienstplanCSV() {
 
 
 
-// KALENDER VIEW
-// 고정 박스 + 전체 fit + 박스 안에서만 핀치줌/더블탭
-function PlanImage({src}) {
-  const boxRef = useRef(null);
-  const Z = useRef({s:1,x:0,y:0,s0:1,x0:0,y0:0,d0:0,tx:0,ty:0,tap:0});
-  const [tr, setTr] = useState({s:1,x:0,y:0});
+// ═══════════════════════════════════════════════════════════════
+//  PlanImage  — 재사용 가능한 근무표 뷰어
+//  · 고정 컨테이너 (70 vh, overflow:hidden) → 레이아웃 밀림 없음
+//  · 내부 콘텐츠는 position:absolute + CSS Transform 만 사용
+//  · 핀치줌 / 마우스 휠 줌 / 더블탭·더블클릭 → reset
+//  · 이미지(JPG/PNG) 및 PDF(data:application/pdf) 모두 지원
+// ═══════════════════════════════════════════════════════════════
+function PlanImage({ src }) {
+  const containerRef = useRef(null);
 
-  const BOX_H = "70vh";  // 고정 박스 높이
-  const PDF_W = 1200;    // 가정 콘텐츠 너비 (A4 landscape 여유)
-  const PDF_H = 850;     // 가정 콘텐츠 높이
+  /* zoom 상태를 ref 에 담아 stale closure 방지 */
+  const Z = useRef({
+    sc: 1, tx: 0, ty: 0,   // 현재 상태
+    sc0: 1, tx0: 0, ty0: 0, // 제스처 시작 시 스냅샷
+    d0: 0,                   // 핀치 시작 거리
+    ptx: 0, pty: 0,          // 팬 시작 포인터
+    lastTap: 0               // 더블탭 감지
+  });
 
-  const isPdf = src && src.startsWith("data:application/pdf");
+  /* 렌더링은 React state 로 */
+  const [xf, setXf] = useState({ sc: 1, tx: 0, ty: 0 });
 
-  // PDF 스케일: 박스 너비/높이에 모두 맞도록 min 사용
-  const [fitW, setFitW] = useState(1);
-  const [fitH, setFitH] = useState(1);
-  React.useEffect(()=>{
-    const el = boxRef.current;
-    if(!el) return;
-    const bw = el.clientWidth || 375;
-    const bh = el.clientHeight || window.innerHeight*0.7;
-    setFitW(bw / PDF_W);
-    setFitH(bh / PDF_H);
-  },[]);
-  const fitScale = Math.min(fitW, fitH);
+  /* PDF fit-scale 계산용 컨테이너 크기 */
+  const [cw, setCw] = useState(375);
+  const [ch, setCh] = useState(500);
+  const PDF_W = 1200, PDF_H = 850;
+  const isPdf = !!(src && src.startsWith("data:application/pdf"));
+  const fitSc  = isPdf ? Math.min(cw / PDF_W, ch / PDF_H) : 1;
 
-  // 터치 이벤트 (passive:false는 useEffect에서만 가능)
-  React.useEffect(()=>{
-    const el = boxRef.current;
-    if(!el) return;
+  /* 컨테이너 크기 측정 (마운트 후 1회) */
+  React.useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    setCw(el.clientWidth  || 375);
+    setCh(el.clientHeight || 500);
+  }, []);
+
+  /* 터치/휠 이벤트 등록 (passive:false 는 useEffect 에서만 가능) */
+  React.useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
     const z = Z.current;
-    const upd = ()=>setTr({s:z.s,x:z.x,y:z.y});
-    const dist = ts=>Math.hypot(ts[0].clientX-ts[1].clientX,ts[0].clientY-ts[1].clientY);
-    const clamp = (v,l)=>Math.max(-l,Math.min(l,v));
 
-    function onStart(e){
-      if(e.touches.length===2){z.d0=dist(e.touches);z.s0=z.s;z.x0=z.x;z.y0=z.y;}
-      else{
-        z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;
-        const now=Date.now();
-        if(now-z.tap<280){z.s=1;z.x=0;z.y=0;upd();}
-        z.tap=now;
-      }
-    }
-    function onMove(e){
-      e.preventDefault();
-      if(e.touches.length===2){
-        const sc=Math.min(5,Math.max(1,z.s0*(dist(e.touches)/z.d0)));
-        z.s=sc;
-        z.x=clamp(z.x0,el.clientWidth*(sc-1)/2);
-        z.y=clamp(z.y0,el.clientHeight*(sc-1)/2);
-        upd();
-      }else if(e.touches.length===1&&z.s>1){
-        z.x=clamp(z.x0+e.touches[0].clientX-z.tx,el.clientWidth*(z.s-1)/2);
-        z.y=clamp(z.y0+e.touches[0].clientY-z.ty,el.clientHeight*(z.s-1)/2);
-        upd();
-      }
-    }
-    function onEnd(e){
-      if(e.touches.length===1){z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;}
-    }
-    el.addEventListener("touchstart",onStart,{passive:true});
-    el.addEventListener("touchmove",onMove,{passive:false});
-    el.addEventListener("touchend",onEnd,{passive:true});
-    return()=>{
-      el.removeEventListener("touchstart",onStart);
-      el.removeEventListener("touchmove",onMove);
-      el.removeEventListener("touchend",onEnd);
+    /* state 동기화 */
+    const commit = () => setXf({ sc: z.sc, tx: z.tx, ty: z.ty });
+
+    /* 화면 픽셀 기준 clamp */
+    const clamp = (v, lim) => Math.max(-lim, Math.min(lim, v));
+
+    /* 새 sc/tx/ty 적용 + clamp */
+    const apply = (sc, tx, ty) => {
+      const totSc = fitSc * sc;
+      const limX  = el.clientWidth  * (totSc - 1) / 2;
+      const limY  = el.clientHeight * (totSc - 1) / 2;
+      z.sc = sc;
+      z.tx = clamp(tx, Math.max(0, limX));
+      z.ty = clamp(ty, Math.max(0, limY));
+      commit();
     };
-  },[]);
 
-  if(!src) return null;
+    const reset = () => apply(1, 0, 0);
 
-  // 고정 박스 스타일 (공통)
-  const boxStyle = {
-    width:"100%", height:BOX_H,
-    overflow:"hidden", position:"relative",
-    background:"#f8f8f8", touchAction:"none", userSelect:"none",
-    display:"flex", alignItems:"center", justifyContent:"center"
+    /* 두 터치 사이 거리 */
+    const dist = t => Math.hypot(
+      t[0].clientX - t[1].clientX,
+      t[0].clientY - t[1].clientY
+    );
+
+    function onTouchStart(e) {
+      if (e.touches.length === 2) {
+        z.d0  = dist(e.touches);
+        z.sc0 = z.sc; z.tx0 = z.tx; z.ty0 = z.ty;
+      } else if (e.touches.length === 1) {
+        z.ptx = e.touches[0].clientX;
+        z.pty = e.touches[0].clientY;
+        z.tx0 = z.tx; z.ty0 = z.ty;
+        const now = Date.now();
+        if (now - z.lastTap < 300) reset();
+        z.lastTap = now;
+      }
+    }
+
+    function onTouchMove(e) {
+      e.preventDefault();                         /* passive:false 필수 */
+      if (e.touches.length === 2) {
+        const sc = Math.min(5, Math.max(1, z.sc0 * (dist(e.touches) / z.d0)));
+        apply(sc, z.tx0, z.ty0);
+      } else if (e.touches.length === 1 && z.sc > 1) {
+        apply(
+          z.sc,
+          z.tx0 + (e.touches[0].clientX - z.ptx),
+          z.ty0 + (e.touches[0].clientY - z.pty)
+        );
+      }
+    }
+
+    function onTouchEnd(e) {
+      if (e.touches.length === 1) {
+        z.ptx = e.touches[0].clientX;
+        z.pty = e.touches[0].clientY;
+        z.tx0 = z.tx; z.ty0 = z.ty;
+      }
+    }
+
+    function onWheel(e) {
+      e.preventDefault();
+      apply(
+        Math.min(5, Math.max(1, z.sc * (e.deltaY > 0 ? 0.88 : 1.14))),
+        z.tx, z.ty
+      );
+    }
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true  });
+    el.addEventListener("touchmove",  onTouchMove,  { passive: false });
+    el.addEventListener("touchend",   onTouchEnd,   { passive: true  });
+    el.addEventListener("wheel",      onWheel,      { passive: false });
+    el.addEventListener("dblclick",   reset);
+
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove",  onTouchMove);
+      el.removeEventListener("touchend",   onTouchEnd);
+      el.removeEventListener("wheel",      onWheel);
+      el.removeEventListener("dblclick",   reset);
+    };
+  }, [fitSc]);   /* fitSc 바뀌면(= 컨테이너 측정 후) 재등록 */
+
+  if (!src) return null;
+
+  const { sc, tx, ty } = xf;
+  const totSc = fitSc * sc;
+
+  /* ── 고정 컨테이너 (절대로 크기가 바뀌지 않음) ── */
+  const box = {
+    position:    "relative",
+    width:       "100%",
+    height:      "70vh",
+    overflow:    "hidden",         /* ← 핵심: 줌해도 밖으로 안 나감 */
+    background:  "#f0f0f0",
+    touchAction: "none",
+    userSelect:  "none",
+    cursor:      sc > 1 ? "grab" : "default"
   };
 
-  if(isPdf){
-    const totalScale = fitScale * tr.s;
-    const tx = tr.x / totalScale;
-    const ty = tr.y / totalScale;
-    return(
-      <div ref={boxRef} style={boxStyle}>
+  /* 내부 콘텐츠 transform (center 기준 scale → translate) */
+  const innerTf = `translate(-50%, -50%) scale(${totSc}) translate(${tx / totSc}px, ${ty / totSc}px)`;
+  const innerPos = { position: "absolute", top: "50%", left: "50%", transformOrigin: "center center", transition: "none" };
+
+  if (isPdf) {
+    return (
+      <div ref={containerRef} style={box}>
         <div style={{
-          width:PDF_W+"px", height:PDF_H+"px",
-          transform:`scale(${totalScale}) translate(${tx}px,${ty}px)`,
-          transformOrigin:"center center",
-          flexShrink:0, pointerEvents:"none"
+          ...innerPos,
+          width:         PDF_W + "px",
+          height:        PDF_H + "px",
+          transform:     innerTf,
+          pointerEvents: "none"
         }}>
-          <iframe src={src} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan"/>
+          <iframe src={src} style={{ width:"100%", height:"100%", border:"none" }} title="Dienstplan"/>
         </div>
       </div>
     );
   }
 
-  // 이미지: 박스 안에 꽉 차게 (object-fit:contain) + 핀치줌
-  const imgTr = `scale(${tr.s}) translate(${tr.x/tr.s}px,${tr.y/tr.s}px)`;
-  return(
-    <div ref={boxRef} style={boxStyle}>
-      <img src={src} alt="Dienstplan"
+  return (
+    <div ref={containerRef} style={box}>
+      <img
+        src={src}
+        alt="Dienstplan"
         style={{
-          maxWidth:"100%", maxHeight:"100%",
-          width:"auto", height:"auto",
-          objectFit:"contain", display:"block",
-          pointerEvents:"none",
-          transform:imgTr,
-          transformOrigin:"center center",
-          transition:"none"
-        }}/>
+          ...innerPos,
+          maxWidth:      "100%",
+          maxHeight:     "100%",
+          width:         "auto",
+          height:        "auto",
+          display:       "block",
+          transform:     innerTf,
+          pointerEvents: "none"
+        }}
+      />
     </div>
   );
 }
