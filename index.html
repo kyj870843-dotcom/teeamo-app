@@ -381,109 +381,89 @@ function useDienstplanCSV() {
 
 
 // KALENDER VIEW
-function PlanImage({ src }) {
-  // Simple image viewer with pinch zoom via touch events + passive:false
+function PlanImage({src}) {
   const ref = useRef(null);
-  const Z = useRef({ s:1, x:0, y:0, s0:1, x0:0, y0:0, d0:0, tx:0, ty:0, tap:0 });
-  const [style, setStyle] = useState({ transform:"scale(1) translate(0px,0px)", transformOrigin:"center center", transition:"none" });
-
+  const Z = useRef({s:1,x:0,y:0,s0:1,x0:0,y0:0,d0:0,tx:0,ty:0,tap:0});
+  const [tr, setTr] = useState("scale(1) translate(0px,0px)");
   React.useEffect(()=>{
-    const el = ref.current;
-    if(!el) return;
-    const z = Z.current;
-    const upd = ()=> setStyle({ transform:`scale(${z.s}) translate(${z.x/z.s}px,${z.y/z.s}px)`, transformOrigin:"center center", transition:"none" });
-    const dist = ts => Math.hypot(ts[0].clientX-ts[1].clientX, ts[0].clientY-ts[1].clientY);
-    const clamp = (v,lim) => Math.max(-lim, Math.min(lim, v));
-
-    const onStart = e => {
-      if(e.touches.length===2){
-        z.d0=dist(e.touches); z.s0=z.s; z.x0=z.x; z.y0=z.y;
-      } else {
-        z.tx=e.touches[0].clientX; z.ty=e.touches[0].clientY; z.x0=z.x; z.y0=z.y;
-        const now=Date.now();
-        if(now-z.tap<280){ z.s=1;z.x=0;z.y=0; upd(); }
-        z.tap=now;
-      }
-    };
-    const onMove = e => {
+    const el=ref.current; if(!el) return;
+    const z=Z.current;
+    const upd=()=>setTr(`scale(${z.s}) translate(${z.x/z.s}px,${z.y/z.s}px)`);
+    const dist=ts=>Math.hypot(ts[0].clientX-ts[1].clientX,ts[0].clientY-ts[1].clientY);
+    const clamp=(v,l)=>Math.max(-l,Math.min(l,v));
+    function onStart(e){
+      if(e.touches.length===2){z.d0=dist(e.touches);z.s0=z.s;z.x0=z.x;z.y0=z.y;}
+      else{z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;
+        const now=Date.now();if(now-z.tap<280){z.s=1;z.x=0;z.y=0;upd();}z.tap=now;}
+    }
+    function onMove(e){
       e.preventDefault();
       if(e.touches.length===2){
         const sc=Math.min(5,Math.max(1,z.s0*(dist(e.touches)/z.d0)));
-        const lx=el.clientWidth*(sc-1)/2, ly=el.clientHeight*(sc-1)/2;
-        z.s=sc; z.x=clamp(z.x0,lx); z.y=clamp(z.y0,ly); upd();
-      } else if(e.touches.length===1&&z.s>1){
-        const dx=e.touches[0].clientX-z.tx, dy=e.touches[0].clientY-z.ty;
-        const lx=el.clientWidth*(z.s-1)/2, ly=el.clientHeight*(z.s-1)/2;
-        z.x=clamp(z.x0+dx,lx); z.y=clamp(z.y0+dy,ly); upd();
+        const lx=el.clientWidth*(sc-1)/2,ly=el.clientHeight*(sc-1)/2;
+        z.s=sc;z.x=clamp(z.x0,lx);z.y=clamp(z.y0,ly);upd();
+      }else if(e.touches.length===1&&z.s>1){
+        const lx=el.clientWidth*(z.s-1)/2,ly=el.clientHeight*(z.s-1)/2;
+        z.x=clamp(z.x0+e.touches[0].clientX-z.tx,lx);
+        z.y=clamp(z.y0+e.touches[0].clientY-z.ty,ly);upd();
       }
-    };
-    const onEnd = e => {
-      if(e.touches.length===1){ z.tx=e.touches[0].clientX; z.ty=e.touches[0].clientY; z.x0=z.x; z.y0=z.y; }
-    };
+    }
+    function onEnd(e){if(e.touches.length===1){z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;}}
     el.addEventListener("touchstart",onStart,{passive:true});
     el.addEventListener("touchmove",onMove,{passive:false});
     el.addEventListener("touchend",onEnd,{passive:true});
-    return ()=>{ el.removeEventListener("touchstart",onStart); el.removeEventListener("touchmove",onMove); el.removeEventListener("touchend",onEnd); };
+    return()=>{el.removeEventListener("touchstart",onStart);el.removeEventListener("touchmove",onMove);el.removeEventListener("touchend",onEnd);};
   },[]);
-
-  const isPdf = src&&src.startsWith("data:application/pdf");
-  if(isPdf) return <div style={{width:"100%",height:"70vh"}}><iframe src={src} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan"/></div>;
-  return (
+  if(!src) return null;
+  if(src.startsWith("data:application/pdf")) return(
+    <div style={{width:"100%",height:"70vh"}}><iframe src={src} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan"/></div>
+  );
+  return(
     <div ref={ref} style={{width:"100%",height:"70vh",overflow:"hidden",background:"#f0f0f0",display:"flex",alignItems:"center",justifyContent:"center",touchAction:"none",userSelect:"none"}}>
-      <img src={src} alt="Dienstplan"
-        style={{maxWidth:"100%",maxHeight:"100%",width:"auto",height:"auto",
-          objectFit:"contain",pointerEvents:"none",display:"block",
-          transform:style.transform,transformOrigin:style.transformOrigin,transition:style.transition}}/>
+      <img src={src} alt="Dienstplan" style={{maxWidth:"100%",maxHeight:"100%",width:"auto",height:"auto",objectFit:"contain",pointerEvents:"none",display:"block",transform:tr,transformOrigin:"center center",transition:"none"}}/>
     </div>
   );
 }
 
 function KalenderView({ csvCtx, userName, records, users }) {
-  const currentMonthKey = React.useMemo(()=>{
-    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
-    return d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
-  },[]);
-  const [selViewMonth, setSelViewMonth] = useState(currentMonthKey);
-  const [allSchedules, setAllSchedules] = React.useState({});
-  const [allImages, setAllImages] = React.useState({});
-  const [fallbackImg] = useFirebase("planImage", null);
-
+  const curMK=React.useMemo(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");},[]);
+  const [selM,setSelM]=useState(curMK);
+  const [allSched,setAllSched]=React.useState({});
+  const [allImgs,setAllImgs]=React.useState({});
+  const [fallback]=useFirebase("planImage",null);
   React.useEffect(()=>{
     if(!window._fbDb||!window._fbRef||!window._fbGet) return;
     const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
     const yr=d.getFullYear();
-    const months=[yr+"_01",yr+"_02",yr+"_03",yr+"_04",yr+"_05",yr+"_06",yr+"_07",yr+"_08",yr+"_09",yr+"_10",yr+"_11",yr+"_12",(yr+1)+"_01",(yr+1)+"_02",(yr+1)+"_03"];
-    Promise.all(months.map(m=>window._fbGet(window._fbRef(window._fbDb,"schedule_"+m)).then(s=>({m,d:s.val()})).catch(()=>({m,d:null})))).then(res=>{const f={};res.forEach(({m,d})=>{if(d)f[m]=d;});setAllSchedules(f);});
-    Promise.all(months.map(m=>window._fbGet(window._fbRef(window._fbDb,"planImage_"+m)).then(s=>({m,d:s.val()})).catch(()=>({m,d:null})))).then(res=>{const f={};res.forEach(({m,d})=>{if(d)f[m]=d;});setAllImages(f);});
+    const ms=[yr+"_01",yr+"_02",yr+"_03",yr+"_04",yr+"_05",yr+"_06",yr+"_07",yr+"_08",yr+"_09",yr+"_10",yr+"_11",yr+"_12",(yr+1)+"_01",(yr+1)+"_02",(yr+1)+"_03"];
+    Promise.all(ms.map(m=>window._fbGet(window._fbRef(window._fbDb,"schedule_"+m)).then(s=>({m,d:s.val()})).catch(()=>({m,d:null})))).then(r=>{const f={};r.forEach(({m,d})=>{if(d)f[m]=d;});setAllSched(f);});
+    Promise.all(ms.map(m=>window._fbGet(window._fbRef(window._fbDb,"planImage_"+m)).then(s=>({m,d:s.val()})).catch(()=>({m,d:null})))).then(r=>{const f={};r.forEach(({m,d})=>{if(d)f[m]=d;});setAllImgs(f);});
   },[]);
-
-  const availableMonths=React.useMemo(()=>{const s=new Set([currentMonthKey]);Object.keys(allSchedules).forEach(m=>s.add(m));Object.keys(allImages).forEach(m=>s.add(m));return[...s].sort();},[currentMonthKey,allSchedules,allImages]);
-  const idx=availableMonths.indexOf(selViewMonth);
-  const planImg=allImages[selViewMonth]||fallbackImg;
-
+  const avail=React.useMemo(()=>{const s=new Set([curMK]);Object.keys(allSched).forEach(m=>s.add(m));Object.keys(allImgs).forEach(m=>s.add(m));return[...s].sort();},[curMK,allSched,allImgs]);
+  const idx=avail.indexOf(selM);
+  const img=allImgs[selM]||fallback;
   function norm(v){if(!v)return[];if(Array.isArray(v))return v;return Object.values(v);}
   const myShifts=React.useMemo(()=>{
-    const md=allSchedules[selViewMonth];if(!md||!userName)return[];
-    const keys=Object.keys(md);const find=n=>{if(md[n])return norm(md[n]);const k=keys.find(k=>k.toLowerCase()===n.toLowerCase());return k?norm(md[k]):[];};
+    const md=allSched[selM];if(!md||!userName)return[];
+    const keys=Object.keys(md);
+    const find=n=>{if(md[n])return norm(md[n]);const k=keys.find(k=>k.toLowerCase()===n.toLowerCase());return k?norm(md[k]):[];};
     let s=find(userName);if(!s.length){const f=userName.split(" ")[0];if(f!==userName)s=find(f);}return s;
-  },[allSchedules,selViewMonth,userName]);
-
-  const [yr,mo]=selViewMonth.split("_");
-  const monthName=new Date(yr+"-"+mo+"-01").toLocaleDateString("de-DE",{month:"long",year:"numeric"});
-
-  return (
+  },[allSched,selM,userName]);
+  const [yr,mo]=selM.split("_");
+  const mn=new Date(yr+"-"+mo+"-01").toLocaleDateString("de-DE",{month:"long",year:"numeric"});
+  return(
     <div style={{width:"100%",background:C.card,borderRadius:14,overflow:"hidden"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderBottom:`1px solid ${C.border}`}}>
-        <button onClick={()=>{if(idx>0)setSelViewMonth(availableMonths[idx-1]);}} disabled={idx<=0}
-          style={{width:36,height:36,borderRadius:9,border:`1px solid ${idx>0?C.border:"transparent"}`,background:idx>0?"#fff":"transparent",color:idx>0?C.text:C.border,fontSize:20,cursor:idx>0?"pointer":"default",lineHeight:1}}>{"<"}</button>
+        <button onClick={()=>{if(idx>0)setSelM(avail[idx-1]);}} disabled={idx<=0}
+          style={{width:36,height:36,borderRadius:9,border:`1px solid ${idx>0?C.border:"transparent"}`,background:idx>0?"#fff":"transparent",color:idx>0?C.text:C.border,fontSize:20,cursor:idx>0?"pointer":"default",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>{"<"}</button>
         <div style={{textAlign:"center"}}>
-          <div style={{fontSize:13,fontWeight:800,color:C.text}}>{monthName}</div>
-          {selViewMonth===currentMonthKey&&<div style={{fontSize:9,color:C.mint,fontWeight:700}}>Aktueller Monat</div>}
+          <div style={{fontSize:13,fontWeight:800,color:C.text}}>{mn}</div>
+          {selM===curMK&&<div style={{fontSize:9,color:C.mint,fontWeight:700}}>Aktueller Monat</div>}
         </div>
-        <button onClick={()=>{if(idx<availableMonths.length-1)setSelViewMonth(availableMonths[idx+1]);}} disabled={idx>=availableMonths.length-1}
-          style={{width:36,height:36,borderRadius:9,border:`1px solid ${idx<availableMonths.length-1?C.border:"transparent"}`,background:idx<availableMonths.length-1?"#fff":"transparent",color:idx<availableMonths.length-1?C.text:C.border,fontSize:20,cursor:idx<availableMonths.length-1?"pointer":"default",lineHeight:1}}>{">"}</button>
+        <button onClick={()=>{if(idx<avail.length-1)setSelM(avail[idx+1]);}} disabled={idx>=avail.length-1}
+          style={{width:36,height:36,borderRadius:9,border:`1px solid ${idx<avail.length-1?C.border:"transparent"}`,background:idx<avail.length-1?"#fff":"transparent",color:idx<avail.length-1?C.text:C.border,fontSize:20,cursor:idx<avail.length-1?"pointer":"default",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>{">"}</button>
       </div>
-      {planImg ? <PlanImage src={planImg}/> : (
+      {img?<PlanImage src={img}/>:(
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"36px 24px",gap:10,textAlign:"center"}}>
           <span style={{fontSize:32}}>{"📋"}</span>
           <div style={{fontSize:13,fontWeight:700,color:C.text}}>Kein Dienstplan vorhanden</div>
@@ -493,44 +473,13 @@ function KalenderView({ csvCtx, userName, records, users }) {
       {userName&&myShifts.length>0&&<MeineSchichtenSection userName={userName} myShifts={myShifts} records={records} users={users}/>}
       {userName&&myShifts.length===0&&(
         <div style={{padding:"14px",textAlign:"center"}}>
-          <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>
-            {"Keine Schichten fuer diesen Monat."}
-          </div>
+          <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>{"Keine Schichten fuer diesen Monat."}</div>
         </div>
       )}
     </div>
   );
 }
 
-
-function parseMinutes(timeStr) {
-  if (!timeStr) return null;
-  const [h, m] = timeStr.split(":").map(Number);
-  return h * 60 + m;
-}
-function calcShiftMinutes(timeRange) {
-  if (!timeRange) return null;
-  const [start, end] = timeRange.split("-");
-  const s = parseMinutes(start), e = parseMinutes(end);
-  if (s == null || e == null) return null;
-  return e > s ? e - s : null;
-}
-function getShiftStatus(shift, actualRec, date) {
-  const todayStr = today();
-  const shiftDate = date || todayStr;
-  if (!actualRec) {
-    // 날짜 기준: 과거면 nicht erschienen, 오늘 이후면 ausstehend
-    if (shiftDate < todayStr) return "nicht erschienen";
-    return "ausstehend";
-  }
-  if (!actualRec.aus || actualRec.aus === "") return "aktiv";
-  const planned = calcShiftMinutes(shift.time || shift.t);
-  const actual = calcShiftMinutes(`${actualRec.ein}-${actualRec.aus}`);
-  if (planned == null || actual == null) return "gearbeitet";
-  return actual >= planned ? "gearbeitet" : "prüfen";
-}
-
-//  SCHICHTTAUSCH MODAL 
 function SchichttauschModal({ userName, myShifts, users, onClose }) {
   const [step, setStep] = useState(1);
   const [myShift, setMyShift] = useState(null);
@@ -3426,13 +3375,13 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
   const [showKeyInput, setShowKeyInput] = useState(false);
   const fileRef = useRef(null);
   const planImgKey = selMonth ? "planImage_"+selMonth : "planImage";
-  const scheduleKey = selMonth ? "schedule_"+selMonth : "schedule";
+  const schedKey = selMonth ? "schedule_"+selMonth : "schedule";
   const [planImg] = useFirebase(planImgKey, null);
-  const [monthScheduleData] = useFirebase(scheduleKey, {});
-  const localImgForMonth = (localImg&&localImg.month===selMonth)?localImg.src:null;
-  const localSchedForMonth = (localSchedule&&localSchedule.month===selMonth)?localSchedule.data:null;
-  const schedule = localSchedForMonth || monthScheduleData || {};
-  const displayImg = localImgForMonth || planImg;
+  const [monthData] = useFirebase(schedKey, {});
+  const localImgOk = (localImg&&localImg.month===selMonth) ? localImg.src : null;
+  const localSchedOk = (localSchedule&&localSchedule.month===selMonth) ? localSchedule.data : null;
+  const schedule = localSchedOk || monthData || {};
+  const displayImg = localImgOk || planImg;
 
   //    
   async function handleFile(e) {
@@ -3465,7 +3414,7 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
     });
     const dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
     const previewUrl = isPdf ? `data:application/pdf;base64,${b64}` : dataUrl;
-    if (previewUrl) setLocalImg({src:previewUrl, month:selMonth, isPdf});
+    if (previewUrl) setLocalImg({src:previewUrl, month:selMonth});
 
     const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
     const promptText = `Du bist ein Assistent, der Dienstpläne analysiert. Analysiere diesen Dienstplan sehr sorgfältig.
@@ -3542,26 +3491,23 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       for (const [name, shifts] of Object.entries(parsed)) {
         parsedForFb[name] = Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]));
       }
-      const allShiftDates = Object.values(parsed).flatMap(sh=>sh.map(s=>s.date)).filter(Boolean).sort();
-      let detectedMonth;
-      if(selMonth){ detectedMonth=selMonth.replace("_","-"); }
-      else if(allShiftDates.length>0){
-        const mc={};allShiftDates.forEach(d=>{const m=d.slice(0,7);mc[m]=(mc[m]||0)+1;});
-        detectedMonth=Object.entries(mc).sort((a,b)=>b[1]-a[1])[0][0];
-      } else { detectedMonth=new Date().toISOString().slice(0,7); }
-      const savedMonthKey = detectedMonth.replace("-","_");
-      const monthKey = "schedule_"+savedMonthKey;
+      const allDates = Object.values(parsed).flatMap(sh=>sh.map(s=>s.date)).filter(Boolean);
+      let dm;
+      if(selMonth){ dm=selMonth.replace("_","-"); }
+      else if(allDates.length>0){const mc={};allDates.forEach(d=>{const m=d.slice(0,7);mc[m]=(mc[m]||0)+1;});dm=Object.entries(mc).sort((a,b)=>b[1]-a[1])[0][0];}
+      else{ dm=new Date().toISOString().slice(0,7); }
+      const smk=dm.replace("-","_");
       if(window._fbDb&&window._fbRef&&window._fbSet){
-        window._fbSet(window._fbRef(window._fbDb,monthKey),parsedForFb).catch(()=>{});
-        const fileDataUrl = isPdf?`data:application/pdf;base64,${b64}`:dataUrl;
-        if(b64.length<6000000){
-          window._fbSet(window._fbRef(window._fbDb,"planImage_"+savedMonthKey),fileDataUrl).catch(()=>{});
-          window._fbSet(window._fbRef(window._fbDb,"planImage"),fileDataUrl).catch(()=>{});
+        window._fbSet(window._fbRef(window._fbDb,"schedule_"+smk),parsedForFb).catch(()=>{});
+        const fu=isPdf?`data:application/pdf;base64,${b64}`:dataUrl;
+        if(b64.length<6000000&&fu){
+          window._fbSet(window._fbRef(window._fbDb,"planImage_"+smk),fu).catch(()=>{});
+          window._fbSet(window._fbRef(window._fbDb,"planImage"),fu).catch(()=>{});
         }
       }
-      setLocalSchedule({data:parsed,month:savedMonthKey});
-      setLocalImg(prev=>prev?{...prev,month:savedMonthKey}:prev);
-      if(onScheduleSaved) onScheduleSaved(savedMonthKey,parsed);
+      setLocalSchedule({data:parsed,month:smk});
+      setLocalImg(prev=>prev?{...prev,month:smk}:prev);
+      if(onScheduleSaved) onScheduleSaved(smk,parsed);
       setMsg({ type: "ok", text: `✅ Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
     } catch (err) {
       setMsg({ type: "err", text: `❌ 오류: ${err.message}` });
