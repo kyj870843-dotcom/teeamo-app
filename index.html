@@ -430,7 +430,10 @@ function PlanImage({ src }) {
   if(isPdf) return <div style={{width:"100%",height:"70vh"}}><iframe src={src} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan"/></div>;
   return (
     <div ref={ref} style={{width:"100%",height:"70vh",overflow:"hidden",background:"#f0f0f0",display:"flex",alignItems:"center",justifyContent:"center",touchAction:"none",userSelect:"none"}}>
-      <img src={src} alt="Dienstplan" style={{...style,maxWidth:"100%",maxHeight:"100%",width:"auto",height:"auto",objectFit:"contain",pointerEvents:"none",display:"block"}}/>
+      <img src={src} alt="Dienstplan"
+        style={{maxWidth:"100%",maxHeight:"100%",width:"auto",height:"auto",
+          objectFit:"contain",pointerEvents:"none",display:"block",
+          transform:style.transform,transformOrigin:style.transformOrigin,transition:style.transition}}/>
     </div>
   );
 }
