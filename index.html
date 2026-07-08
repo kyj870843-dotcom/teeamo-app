@@ -380,184 +380,238 @@ function useDienstplanCSV() {
 
 
 
-// ═══════════════════════════════════════════════════════════════
-//  PlanImage  — 재사용 가능한 근무표 뷰어
-//  · 고정 컨테이너 (70 vh, overflow:hidden) → 레이아웃 밀림 없음
-//  · 내부 콘텐츠는 position:absolute + CSS Transform 만 사용
-//  · 핀치줌 / 마우스 휠 줌 / 더블탭·더블클릭 → reset
-//  · 이미지(JPG/PNG) 및 PDF(data:application/pdf) 모두 지원
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+//  PlanImage  — 재사용 가능 근무표 뷰어 (v3)
+//
+//  ✅ 고정 컨테이너 (70vh, overflow:hidden) → 레이아웃 밀림 없음
+//  ✅ Fit-to-Contain 초기 배율 (이미지/PDF 전체가 한눈에 보임)
+//  ✅ 핀치줌 + 마우스 휠 줌 (1× ~ 5×)
+//  ✅ 터치 드래그 + 마우스 드래그 panning
+//  ✅ 더블탭 / 더블클릭 → 즉시 초기화
+//  ✅ 경계 제한 (이미지 가장자리가 컨테이너 밖으로 나가지 않음)
+//  ✅ 내부 콘텐츠는 position:absolute + transform 만 사용
+// ═══════════════════════════════════════════════════════════════════
 function PlanImage({ src }) {
-  const containerRef = useRef(null);
+  const boxRef = useRef(null);
 
-  /* zoom 상태를 ref 에 담아 stale closure 방지 */
+  // ── 줌/팬 상태 (ref = stale closure 방지) ──────────────────────
   const Z = useRef({
-    sc: 1, tx: 0, ty: 0,   // 현재 상태
-    sc0: 1, tx0: 0, ty0: 0, // 제스처 시작 시 스냅샷
-    d0: 0,                   // 핀치 시작 거리
-    ptx: 0, pty: 0,          // 팬 시작 포인터
-    lastTap: 0               // 더블탭 감지
+    sc:1, tx:0, ty:0,        // 현재 유저 줌 / 오프셋 (screen px)
+    sc0:1, tx0:0, ty0:0,     // 제스처 시작 스냅샷
+    d0:0,                     // 핀치 시작 거리
+    ptx:0, pty:0,             // 팬 시작 포인터
+    dragging:false,           // 마우스 드래그 중
+    lastTap:0                 // 더블탭 타이머
   });
 
-  /* 렌더링은 React state 로 */
-  const [xf, setXf] = useState({ sc: 1, tx: 0, ty: 0 });
+  // React state: 렌더링 트리거 용도
+  const [xf, setXf] = useState({ sc:1, tx:0, ty:0 });
 
-  /* PDF fit-scale 계산용 컨테이너 크기 */
+  // 컨테이너 측정
   const [cw, setCw] = useState(375);
   const [ch, setCh] = useState(500);
-  const PDF_W = 1200, PDF_H = 850;
-  const isPdf = !!(src && src.startsWith("data:application/pdf"));
-  const fitSc  = isPdf ? Math.min(cw / PDF_W, ch / PDF_H) : 1;
 
-  /* 컨테이너 크기 측정 (마운트 후 1회) */
+  // 이미지 자연 크기 (load 후 확정)
+  const [imgNat, setImgNat] = useState(null);
+
+  const isPdf = !!(src && src.startsWith("data:application/pdf"));
+
+  // 콘텐츠 원본 크기
+  const PDF_W = 1200, PDF_H = 850;
+  const natW = isPdf ? PDF_W : (imgNat ? imgNat.w : PDF_W);
+  const natH = isPdf ? PDF_H : (imgNat ? imgNat.h : PDF_H);
+
+  // Fit-to-Contain 기본 배율: 컨테이너에 꽉 차도록
+  const fitSc = Math.min(cw / natW, ch / natH);
+
+  // 컨테이너 크기 측정 (마운트 1회)
   React.useEffect(() => {
-    const el = containerRef.current;
+    const el = boxRef.current;
     if (!el) return;
     setCw(el.clientWidth  || 375);
     setCh(el.clientHeight || 500);
   }, []);
 
-  /* 터치/휠 이벤트 등록 (passive:false 는 useEffect 에서만 가능) */
+  // 터치 / 마우스 / 휠 이벤트 등록
   React.useEffect(() => {
-    const el = containerRef.current;
+    const el = boxRef.current;
     if (!el) return;
     const z = Z.current;
 
-    /* state 동기화 */
-    const commit = () => setXf({ sc: z.sc, tx: z.tx, ty: z.ty });
-
-    /* 화면 픽셀 기준 clamp */
-    const clamp = (v, lim) => Math.max(-lim, Math.min(lim, v));
-
-    /* 새 sc/tx/ty 적용 + clamp */
-    const apply = (sc, tx, ty) => {
+    // 화면 좌표 기준 clamp + 커밋
+    const commit = (sc, tx, ty) => {
       const totSc = fitSc * sc;
-      const limX  = el.clientWidth  * (totSc - 1) / 2;
-      const limY  = el.clientHeight * (totSc - 1) / 2;
+      // 콘텐츠 크기가 컨테이너보다 작으면 이동 불가(0), 크면 반절까지
+      const maxTx = Math.max(0, (natW * totSc - cw) / 2);
+      const maxTy = Math.max(0, (natH * totSc - ch) / 2);
+      const cl = (v, m) => Math.max(-m, Math.min(m, v));
       z.sc = sc;
-      z.tx = clamp(tx, Math.max(0, limX));
-      z.ty = clamp(ty, Math.max(0, limY));
-      commit();
+      z.tx = cl(tx, maxTx);
+      z.ty = cl(ty, maxTy);
+      setXf({ sc: z.sc, tx: z.tx, ty: z.ty });
     };
 
-    const reset = () => apply(1, 0, 0);
+    const reset = () => commit(1, 0, 0);
 
-    /* 두 터치 사이 거리 */
-    const dist = t => Math.hypot(
-      t[0].clientX - t[1].clientX,
-      t[0].clientY - t[1].clientY
+    const dist = ts => Math.hypot(
+      ts[0].clientX - ts[1].clientX,
+      ts[0].clientY - ts[1].clientY
     );
 
+    // ── Touch ────────────────────────────────────────────────────
     function onTouchStart(e) {
       if (e.touches.length === 2) {
-        z.d0  = dist(e.touches);
-        z.sc0 = z.sc; z.tx0 = z.tx; z.ty0 = z.ty;
+        z.d0=dist(e.touches); z.sc0=z.sc; z.tx0=z.tx; z.ty0=z.ty;
       } else if (e.touches.length === 1) {
-        z.ptx = e.touches[0].clientX;
-        z.pty = e.touches[0].clientY;
-        z.tx0 = z.tx; z.ty0 = z.ty;
-        const now = Date.now();
+        z.ptx=e.touches[0].clientX; z.pty=e.touches[0].clientY;
+        z.tx0=z.tx; z.ty0=z.ty;
+        const now=Date.now();
         if (now - z.lastTap < 300) reset();
         z.lastTap = now;
       }
     }
-
     function onTouchMove(e) {
-      e.preventDefault();                         /* passive:false 필수 */
+      e.preventDefault();
       if (e.touches.length === 2) {
-        const sc = Math.min(5, Math.max(1, z.sc0 * (dist(e.touches) / z.d0)));
-        apply(sc, z.tx0, z.ty0);
-      } else if (e.touches.length === 1 && z.sc > 1) {
-        apply(
+        commit(
+          Math.min(5, Math.max(1, z.sc0 * (dist(e.touches) / z.d0))),
+          z.tx0, z.ty0
+        );
+      } else if (e.touches.length === 1) {
+        commit(
           z.sc,
           z.tx0 + (e.touches[0].clientX - z.ptx),
           z.ty0 + (e.touches[0].clientY - z.pty)
         );
       }
     }
-
     function onTouchEnd(e) {
       if (e.touches.length === 1) {
-        z.ptx = e.touches[0].clientX;
-        z.pty = e.touches[0].clientY;
-        z.tx0 = z.tx; z.ty0 = z.ty;
+        z.ptx=e.touches[0].clientX; z.pty=e.touches[0].clientY;
+        z.tx0=z.tx; z.ty0=z.ty;
+      } else if (e.touches.length === 0) {
+        z.tx0=z.tx; z.ty0=z.ty;
       }
     }
 
+    // ── Mouse drag ───────────────────────────────────────────────
+    function onMouseDown(e) {
+      z.dragging=true;
+      z.ptx=e.clientX; z.pty=e.clientY;
+      z.tx0=z.tx; z.ty0=z.ty;
+      e.preventDefault();
+    }
+    function onMouseMove(e) {
+      if (!z.dragging) return;
+      commit(z.sc, z.tx0+(e.clientX-z.ptx), z.ty0+(e.clientY-z.pty));
+    }
+    function onMouseUp()    { z.dragging=false; }
+    function onMouseLeave() { z.dragging=false; }
+
+    // ── Mouse wheel ──────────────────────────────────────────────
     function onWheel(e) {
       e.preventDefault();
-      apply(
+      commit(
         Math.min(5, Math.max(1, z.sc * (e.deltaY > 0 ? 0.88 : 1.14))),
         z.tx, z.ty
       );
     }
 
-    el.addEventListener("touchstart", onTouchStart, { passive: true  });
-    el.addEventListener("touchmove",  onTouchMove,  { passive: false });
-    el.addEventListener("touchend",   onTouchEnd,   { passive: true  });
-    el.addEventListener("wheel",      onWheel,      { passive: false });
-    el.addEventListener("dblclick",   reset);
+    el.addEventListener("touchstart",  onTouchStart,  { passive: true  });
+    el.addEventListener("touchmove",   onTouchMove,   { passive: false });
+    el.addEventListener("touchend",    onTouchEnd,    { passive: true  });
+    el.addEventListener("mousedown",   onMouseDown);
+    el.addEventListener("mousemove",   onMouseMove);
+    el.addEventListener("mouseup",     onMouseUp);
+    el.addEventListener("mouseleave",  onMouseLeave);
+    el.addEventListener("wheel",       onWheel,       { passive: false });
+    el.addEventListener("dblclick",    reset);
 
     return () => {
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove",  onTouchMove);
-      el.removeEventListener("touchend",   onTouchEnd);
-      el.removeEventListener("wheel",      onWheel);
-      el.removeEventListener("dblclick",   reset);
+      el.removeEventListener("touchstart",  onTouchStart);
+      el.removeEventListener("touchmove",   onTouchMove);
+      el.removeEventListener("touchend",    onTouchEnd);
+      el.removeEventListener("mousedown",   onMouseDown);
+      el.removeEventListener("mousemove",   onMouseMove);
+      el.removeEventListener("mouseup",     onMouseUp);
+      el.removeEventListener("mouseleave",  onMouseLeave);
+      el.removeEventListener("wheel",       onWheel);
+      el.removeEventListener("dblclick",    reset);
     };
-  }, [fitSc]);   /* fitSc 바뀌면(= 컨테이너 측정 후) 재등록 */
+  }, [fitSc, natW, natH, cw, ch]);
 
   if (!src) return null;
 
+  // ── CSS 계산 ─────────────────────────────────────────────────────
   const { sc, tx, ty } = xf;
-  const totSc = fitSc * sc;
+  const totSc    = fitSc * sc;
+  // position:absolute + top/left:50% 로 중앙 배치 →
+  // translate(-50%,-50%) 으로 자기 크기 보정 →
+  // scale(totSc) 로 배율 →
+  // translate(px, py) 로 팬 (totSc 나눔 = 로컬 좌표로 변환)
+  const transform = `translate(-50%,-50%) scale(${totSc}) translate(${tx/totSc}px,${ty/totSc}px)`;
 
-  /* ── 고정 컨테이너 (절대로 크기가 바뀌지 않음) ── */
+  // 고정 컨테이너: 크기 불변, 내부만 transform
   const box = {
     position:    "relative",
     width:       "100%",
     height:      "70vh",
-    overflow:    "hidden",         /* ← 핵심: 줌해도 밖으로 안 나감 */
+    overflow:    "hidden",
     background:  "#f0f0f0",
     touchAction: "none",
     userSelect:  "none",
     cursor:      sc > 1 ? "grab" : "default"
   };
 
-  /* 내부 콘텐츠 transform (center 기준 scale → translate) */
-  const innerTf = `translate(-50%, -50%) scale(${totSc}) translate(${tx / totSc}px, ${ty / totSc}px)`;
-  const innerPos = { position: "absolute", top: "50%", left: "50%", transformOrigin: "center center", transition: "none" };
+  // 내부 공통 스타일
+  const inner = {
+    position:        "absolute",
+    top:             "50%",
+    left:            "50%",
+    transformOrigin: "center center",
+    transition:      "none",
+    pointerEvents:   "none",
+    transform
+  };
 
+  // ── PDF ──────────────────────────────────────────────────────────
   if (isPdf) {
     return (
-      <div ref={containerRef} style={box}>
-        <div style={{
-          ...innerPos,
-          width:         PDF_W + "px",
-          height:        PDF_H + "px",
-          transform:     innerTf,
-          pointerEvents: "none"
-        }}>
-          <iframe src={src} style={{ width:"100%", height:"100%", border:"none" }} title="Dienstplan"/>
+      <div ref={boxRef} style={box}>
+        <div style={{ ...inner, width: PDF_W+"px", height: PDF_H+"px" }}>
+          <iframe src={src}
+            style={{ width:"100%", height:"100%", border:"none" }}
+            title="Dienstplan"/>
         </div>
       </div>
     );
   }
 
+  // ── 이미지 ───────────────────────────────────────────────────────
+  // 자연 크기를 알기 전: 임시로 maxWidth/maxHeight 로 화면에 표시
+  // 자연 크기를 알게 되면: 명시적 크기로 전환 (fitSc 재계산됨)
   return (
-    <div ref={containerRef} style={box}>
+    <div ref={boxRef} style={box}>
       <img
         src={src}
         alt="Dienstplan"
-        style={{
-          ...innerPos,
-          maxWidth:      "100%",
-          maxHeight:     "100%",
-          width:         "auto",
-          height:        "auto",
-          display:       "block",
-          transform:     innerTf,
-          pointerEvents: "none"
+        onLoad={e => {
+          const nw = e.target.naturalWidth;
+          const nh = e.target.naturalHeight;
+          if (nw && nh) setImgNat({ w:nw, h:nh });
+        }}
+        style={imgNat ? {
+          ...inner,
+          width:   natW+"px",
+          height:  natH+"px",
+          display: "block"
+        } : {
+          ...inner,
+          maxWidth:  "100%",
+          maxHeight: "100%",
+          width:     "auto",
+          height:    "auto",
+          display:   "block"
         }}
       />
     </div>
