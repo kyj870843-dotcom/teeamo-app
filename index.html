@@ -381,72 +381,106 @@ function useDienstplanCSV() {
 
 
 // KALENDER VIEW
+// PDF/이미지 공통 뷰어 - 전체화면 fit + 핀치줌 + 더블탭 리셋
 function PlanImage({src}) {
   const outerRef = useRef(null);
-  const ref = useRef(null);
+  const [cw, setCw] = useState(375);           // 컨테이너 실제 너비
   const Z = useRef({s:1,x:0,y:0,s0:1,x0:0,y0:0,d0:0,tx:0,ty:0,tap:0});
-  const [tr, setTr] = useState("scale(1) translate(0px,0px)");
-  // PDF를 화면 너비에 맞게 스케일다운하기 위한 state
-  const [pdfScale, setPdfScale] = useState(1);
-  const PDF_W = 794; // A4 기준 너비(px)
+  const [us, setUs] = useState(1);             // user zoom scale
+  const [ux, setUx] = useState(0);             // user zoom offset x
+  const [uy, setUy] = useState(0);             // user zoom offset y
+
+  // A4 landscape (주간 근무표 기준) - 여유 있게 1200px로 설정
+  const PDF_NATIVE_W = 1200;
+  const PDF_NATIVE_H = 850;
+  const fitScale = cw / PDF_NATIVE_W;           // 화면에 맞게 fit
+  const isPdf = src && src.startsWith("data:application/pdf");
 
   React.useEffect(()=>{
-    if(!outerRef.current) return;
-    const w = outerRef.current.clientWidth || window.innerWidth;
-    setPdfScale(w / PDF_W);
+    const el = outerRef.current;
+    if(!el) return;
+    setCw(el.clientWidth || window.innerWidth || 375);
   },[]);
 
   React.useEffect(()=>{
-    const el=ref.current; if(!el) return;
-    const z=Z.current;
-    const upd=()=>setTr("scale("+z.s+") translate("+(z.x/z.s)+"px,"+(z.y/z.s)+"px)");
-    const dist=ts=>Math.hypot(ts[0].clientX-ts[1].clientX,ts[0].clientY-ts[1].clientY);
-    const clamp=(v,l)=>Math.max(-l,Math.min(l,v));
+    const el = outerRef.current;
+    if(!el) return;
+    const z = Z.current;
+    const upd = ()=>{ setUs(z.s); setUx(z.x); setUy(z.y); };
+    const dist = ts=>Math.hypot(ts[0].clientX-ts[1].clientX,ts[0].clientY-ts[1].clientY);
+    const clamp = (v,l)=>Math.max(-l,Math.min(l,v));
+
     function onStart(e){
       if(e.touches.length===2){z.d0=dist(e.touches);z.s0=z.s;z.x0=z.x;z.y0=z.y;}
-      else{z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;
-        const now=Date.now();if(now-z.tap<280){z.s=1;z.x=0;z.y=0;upd();}z.tap=now;}
+      else{
+        z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;
+        const now=Date.now();
+        if(now-z.tap<280){z.s=1;z.x=0;z.y=0;upd();}
+        z.tap=now;
+      }
     }
     function onMove(e){
       e.preventDefault();
       if(e.touches.length===2){
         const sc=Math.min(5,Math.max(1,z.s0*(dist(e.touches)/z.d0)));
-        z.s=sc;z.x=clamp(z.x0,el.clientWidth*(sc-1)/2);z.y=clamp(z.y0,el.clientHeight*(sc-1)/2);upd();
+        z.s=sc;
+        z.x=clamp(z.x0,el.clientWidth*(sc-1)/2);
+        z.y=clamp(z.y0,el.clientHeight*(sc-1)/2);
+        upd();
       }else if(e.touches.length===1&&z.s>1){
         z.x=clamp(z.x0+e.touches[0].clientX-z.tx,el.clientWidth*(z.s-1)/2);
-        z.y=clamp(z.y0+e.touches[0].clientY-z.ty,el.clientHeight*(z.s-1)/2);upd();
+        z.y=clamp(z.y0+e.touches[0].clientY-z.ty,el.clientHeight*(z.s-1)/2);
+        upd();
       }
     }
-    function onEnd(e){if(e.touches.length===1){z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;}}
+    function onEnd(e){
+      if(e.touches.length===1){z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;}
+    }
     el.addEventListener("touchstart",onStart,{passive:true});
     el.addEventListener("touchmove",onMove,{passive:false});
     el.addEventListener("touchend",onEnd,{passive:true});
-    return()=>{el.removeEventListener("touchstart",onStart);el.removeEventListener("touchmove",onMove);el.removeEventListener("touchend",onEnd);};
+    return()=>{
+      el.removeEventListener("touchstart",onStart);
+      el.removeEventListener("touchmove",onMove);
+      el.removeEventListener("touchend",onEnd);
+    };
   },[]);
 
   if(!src) return null;
 
-  // PDF: iframe을 스케일다운해서 전체 페이지가 한눈에 보이도록
-  if(src.startsWith("data:application/pdf")) {
-    const PDF_H = 1123; // A4 기준 높이(px)
-    const scaledH = Math.round(PDF_H * pdfScale);
+  // 공통 outer 스타일 (이미지/PDF 동일)
+  const outerStyle = {
+    width:"100%", overflow:"hidden", background:"#f8f8f8",
+    touchAction:"none", userSelect:"none"
+  };
+
+  if(isPdf){
+    // fitScale로 전체화면에 맞게 + us(사용자 줌) 적용
+    const totalScale = fitScale * us;
+    const scaledH = Math.round(PDF_NATIVE_H * totalScale);
+    const tx = ux / totalScale;
+    const ty = uy / totalScale;
     return(
-      <div ref={outerRef} style={{width:"100%",overflow:"hidden",background:"#f8f8f8"}}>
-        <div style={{width:PDF_W+"px",height:PDF_H+"px",transform:"scale("+pdfScale+")",transformOrigin:"top left",pointerEvents:"none"}}>
+      <div ref={outerRef} style={{...outerStyle, height: scaledH+"px", position:"relative"}}>
+        <div style={{
+          position:"absolute", top:0, left:0,
+          width:PDF_NATIVE_W+"px", height:PDF_NATIVE_H+"px",
+          transform:`scale(${totalScale}) translate(${tx}px,${ty}px)`,
+          transformOrigin:"top left", pointerEvents:"none"
+        }}>
           <iframe src={src} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan"/>
         </div>
-        <div style={{height:0,marginTop:scaledH+"px"}}/>
       </div>
     );
   }
 
-  // 이미지: width:100% 자연 비율 + 핀치줌
+  // 이미지: width:100% + 핀치줌
+  const imgTr = `scale(${us}) translate(${ux/us}px,${uy/us}px)`;
   return(
-    <div ref={el=>{outerRef.current=el;ref.current=el;}}
-      style={{width:"100%",overflow:"hidden",background:"#fff",touchAction:"none",userSelect:"none"}}>
+    <div ref={outerRef} style={{...outerStyle, background:"#fff"}}>
       <img src={src} alt="Dienstplan"
         style={{width:"100%",height:"auto",display:"block",pointerEvents:"none",
-          transform:tr,transformOrigin:"top center",transition:"none"}}/>
+          transform:imgTr,transformOrigin:"top center",transition:"none"}}/>
     </div>
   );
 }
@@ -3597,11 +3631,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
       {/*   */}
       {displayImg && (
         <div style={{marginBottom:12,borderRadius:14,overflow:"hidden"}}>
-          {displayImg.startsWith("data:application/pdf")?(
-            <div style={{width:"100%",height:"80vh"}}><iframe src={displayImg} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan PDF"/></div>
-          ):(
-            <img src={displayImg} alt="Dienstplan" style={{width:"100%",height:"auto",display:"block"}}/>
-          )}
+          <PlanImage src={displayImg}/>
         </div>
       )}
 
