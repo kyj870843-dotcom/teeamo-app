@@ -69,7 +69,7 @@ const C = {
 
 const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","Teenjoy"];
 const MONTHS     = ["2026-06","2026-05","2026-04"];
-function monthLabel(m){if(!m)return"";const p=m.includes("_")?m.split("_"):m.split("-");return new Date(p[0]+"-"+p[1]+"-01").toLocaleDateString("de-DE",{month:"long",year:"numeric"});}
+const MONTH_LABELS = {"2026-06":"Juni 2026","2026-05":"Mai 2026","2026-04":"April 2026"};
 const TAGE_DE    = ["So","Mo","Di","Mi","Do","Fr","Sa"];
 const MANAGERS   = ["tingting","teddy","yeaji"];
 
@@ -380,106 +380,214 @@ function useDienstplanCSV() {
 
 
 
-// KALENDER VIEW
-function PlanImage({src}) {
-  const ref = useRef(null);
-  const Z = useRef({s:1,x:0,y:0,s0:1,x0:0,y0:0,d0:0,tx:0,ty:0,tap:0});
-  const [tr, setTr] = useState("scale(1) translate(0px,0px)");
-  React.useEffect(()=>{
-    const el=ref.current; if(!el) return;
-    const z=Z.current;
-    const upd=()=>setTr(`scale(${z.s}) translate(${z.x/z.s}px,${z.y/z.s}px)`);
-    const dist=ts=>Math.hypot(ts[0].clientX-ts[1].clientX,ts[0].clientY-ts[1].clientY);
-    const clamp=(v,l)=>Math.max(-l,Math.min(l,v));
-    function onStart(e){
-      if(e.touches.length===2){z.d0=dist(e.touches);z.s0=z.s;z.x0=z.x;z.y0=z.y;}
-      else{z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;
-        const now=Date.now();if(now-z.tap<280){z.s=1;z.x=0;z.y=0;upd();}z.tap=now;}
-    }
-    function onMove(e){
-      e.preventDefault();
-      if(e.touches.length===2){
-        const sc=Math.min(5,Math.max(1,z.s0*(dist(e.touches)/z.d0)));
-        const lx=el.clientWidth*(sc-1)/2,ly=el.clientHeight*(sc-1)/2;
-        z.s=sc;z.x=clamp(z.x0,lx);z.y=clamp(z.y0,ly);upd();
-      }else if(e.touches.length===1&&z.s>1){
-        const lx=el.clientWidth*(z.s-1)/2,ly=el.clientHeight*(z.s-1)/2;
-        z.x=clamp(z.x0+e.touches[0].clientX-z.tx,lx);
-        z.y=clamp(z.y0+e.touches[0].clientY-z.ty,ly);upd();
+//  KALENDER VIEW (plan.png   +  ) 
+function KalenderView({ csvCtx, userName, records, users }) {
+  const [imgErr, setImgErr] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const containerRef = useRef(null);
+  const lastTouchRef = useRef(null);
+  const lastDistRef = useRef(null);
+  const lastScaleRef = useRef(1);
+  const lastOffsetRef = useRef({ x: 0, y: 0 });
+
+  const [schedule] = useFirebase("schedule", {});
+  const [planImg] = useFirebase("planImage", null);
+  
+  // 현재 독일 월 기준 월별 schedule도 로드
+  const currentMonthKey = React.useMemo(()=>{
+    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+    return "schedule_"+d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
+  },[]);
+  const [monthSchedule] = useFirebase(currentMonthKey, {});
+  
+  // 두 schedule 합치기 (월별 우선)
+  const combinedSchedule = React.useMemo(()=>{
+    const base = schedule||{};
+    const monthly = monthSchedule||{};
+    const result = {...base};
+    for(const [name, shifts] of Object.entries(monthly)){
+      if(shifts && (Array.isArray(shifts)?shifts:Object.values(shifts)).length>0){
+        result[name] = Array.isArray(shifts)?shifts:Object.values(shifts);
       }
     }
-    function onEnd(e){if(e.touches.length===1){z.tx=e.touches[0].clientX;z.ty=e.touches[0].clientY;z.x0=z.x;z.y0=z.y;}}
-    el.addEventListener("touchstart",onStart,{passive:true});
-    el.addEventListener("touchmove",onMove,{passive:false});
-    el.addEventListener("touchend",onEnd,{passive:true});
-    return()=>{el.removeEventListener("touchstart",onStart);el.removeEventListener("touchmove",onMove);el.removeEventListener("touchend",onEnd);};
-  },[]);
-  if(!src) return null;
-  if(src.startsWith("data:application/pdf")) return(
-    <div style={{width:"100%",height:"70vh"}}><iframe src={src} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan"/></div>
-  );
-  return(
-    <div ref={ref} style={{width:"100%",height:"70vh",overflow:"hidden",background:"#f0f0f0",display:"flex",alignItems:"center",justifyContent:"center",touchAction:"none",userSelect:"none"}}>
-      <img src={src} alt="Dienstplan" style={{maxWidth:"100%",maxHeight:"100%",width:"auto",height:"auto",objectFit:"contain",pointerEvents:"none",display:"block",transform:tr,transformOrigin:"center center",transition:"none"}}/>
-    </div>
-  );
-}
+    return result;
+  },[schedule, monthSchedule]);
 
-function KalenderView({ csvCtx, userName, records, users }) {
-  const curMK=React.useMemo(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");},[]);
-  const [selM,setSelM]=useState(curMK);
-  const [allSched,setAllSched]=React.useState({});
-  const [allImgs,setAllImgs]=React.useState({});
-  const [fallback]=useFirebase("planImage",null);
-  React.useEffect(()=>{
-    if(!window._fbDb||!window._fbRef||!window._fbGet) return;
-    const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
-    const yr=d.getFullYear();
-    const ms=[yr+"_01",yr+"_02",yr+"_03",yr+"_04",yr+"_05",yr+"_06",yr+"_07",yr+"_08",yr+"_09",yr+"_10",yr+"_11",yr+"_12",(yr+1)+"_01",(yr+1)+"_02",(yr+1)+"_03"];
-    Promise.all(ms.map(m=>window._fbGet(window._fbRef(window._fbDb,"schedule_"+m)).then(s=>({m,d:s.val()})).catch(()=>({m,d:null})))).then(r=>{const f={};r.forEach(({m,d})=>{if(d)f[m]=d;});setAllSched(f);});
-    Promise.all(ms.map(m=>window._fbGet(window._fbRef(window._fbDb,"planImage_"+m)).then(s=>({m,d:s.val()})).catch(()=>({m,d:null})))).then(r=>{const f={};r.forEach(({m,d})=>{if(d)f[m]=d;});setAllImgs(f);});
-  },[]);
-  const avail=React.useMemo(()=>{const s=new Set([curMK]);Object.keys(allSched).forEach(m=>s.add(m));Object.keys(allImgs).forEach(m=>s.add(m));return[...s].sort();},[curMK,allSched,allImgs]);
-  const idx=avail.indexOf(selM);
-  const img=allImgs[selM]||fallback;
-  function norm(v){if(!v)return[];if(Array.isArray(v))return v;return Object.values(v);}
-  const myShifts=React.useMemo(()=>{
-    const md=allSched[selM];if(!md||!userName)return[];
-    const keys=Object.keys(md);
-    const find=n=>{if(md[n])return norm(md[n]);const k=keys.find(k=>k.toLowerCase()===n.toLowerCase());return k?norm(md[k]):[];};
-    let s=find(userName);if(!s.length){const f=userName.split(" ")[0];if(f!==userName)s=find(f);}return s;
-  },[allSched,selM,userName]);
-  const [yr,mo]=selM.split("_");
-  const mn=new Date(yr+"-"+mo+"-01").toLocaleDateString("de-DE",{month:"long",year:"numeric"});
-  return(
-    <div style={{width:"100%",background:C.card,borderRadius:14,overflow:"hidden"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderBottom:`1px solid ${C.border}`}}>
-        <button onClick={()=>{if(idx>0)setSelM(avail[idx-1]);}} disabled={idx<=0}
-          style={{width:36,height:36,borderRadius:9,border:`1px solid ${idx>0?C.border:"transparent"}`,background:idx>0?"#fff":"transparent",color:idx>0?C.text:C.border,fontSize:20,cursor:idx>0?"pointer":"default",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>{"<"}</button>
-        <div style={{textAlign:"center"}}>
-          <div style={{fontSize:13,fontWeight:800,color:C.text}}>{mn}</div>
-          {selM===curMK&&<div style={{fontSize:9,color:C.mint,fontWeight:700}}>Aktueller Monat</div>}
+  // Firebase  schedule   
+  function normalizeShifts(val) {
+    if (!val) return [];
+    if (Array.isArray(val)) return val;
+    // Firebase {0:{...}, 1:{...}}   
+    return Object.values(val);
+  }
+
+  // schedule  :   
+  const myShifts = React.useMemo(() => {
+    if (!userName || !combinedSchedule) return [];
+    const keys = Object.keys(combinedSchedule);
+    if (combinedSchedule[userName]) return normalizeShifts(combinedSchedule[userName]);
+    const lower = userName.toLowerCase();
+    const k2 = keys.find(k => k.toLowerCase() === lower);
+    if (k2) return normalizeShifts(combinedSchedule[k2]);
+    const firstName = userName.split(" ")[0];
+    if (firstName !== userName) {
+      if (combinedSchedule[firstName]) return normalizeShifts(combinedSchedule[firstName]);
+      const k3 = keys.find(k => k.toLowerCase() === firstName.toLowerCase());
+      if (k3) return normalizeShifts(combinedSchedule[k3]);
+    }
+    return [];
+  }, [combinedSchedule, userName]);
+
+  // viewport   (    )
+
+  function clampOffset(ox, oy, sc, el) {
+    if (!el) return { x: ox, y: oy };
+    const cw = el.clientWidth;
+    const ch = el.clientHeight;
+    const imgW = cw * sc;
+    const imgH = ch * sc; // height auto 
+    const maxX = Math.max(0, (imgW - cw) / 2);
+    const maxY = Math.max(0, (imgH - ch) / 2);
+    return { x: Math.min(maxX, Math.max(-maxX, ox)), y: Math.min(maxY, Math.max(-maxY, oy)) };
+  }
+
+  function getDist(t1, t2) {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  function getMid(t1, t2) {
+    return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
+  }
+
+  function onTouchStart(e) {
+    e.stopPropagation();
+    if (e.touches.length === 2) {
+      lastDistRef.current = getDist(e.touches[0], e.touches[1]);
+      lastScaleRef.current = scale;
+      lastOffsetRef.current = offset;
+    } else if (e.touches.length === 1) {
+      lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      lastOffsetRef.current = offset;
+    }
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = containerRef.current;
+    if (e.touches.length === 2) {
+      const dist = getDist(e.touches[0], e.touches[1]);
+      const ratio = dist / lastDistRef.current;
+      const newScale = Math.min(5, Math.max(1, lastScaleRef.current * ratio));
+      setScale(newScale);
+      if (newScale === 1) setOffset({ x: 0, y: 0 });
+    } else if (e.touches.length === 1 && scale > 1) {
+      const dx = e.touches[0].clientX - lastTouchRef.current.x;
+      const dy = e.touches[0].clientY - lastTouchRef.current.y;
+      const raw = { x: lastOffsetRef.current.x + dx, y: lastOffsetRef.current.y + dy };
+      setOffset(clampOffset(raw.x, raw.y, scale, el));
+    }
+  }
+
+  function onTouchEnd(e) {
+    e.stopPropagation();
+    lastDistRef.current = null;
+    if (e.touches.length === 1) {
+      lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      lastOffsetRef.current = offset;
+    }
+  }
+
+  function onDoubleClick() {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  }
+
+  return (
+    <div style={{ width: "100%", background: C.card, borderRadius: 14, overflow: "hidden" }}>
+      {(imgErr && !planImg) ? (
+        <div style={{
+          display: "flex", flexDirection: "column", alignItems: "center",
+          justifyContent: "center", padding: "48px 24px", gap: 12, textAlign: "center",
+        }}>
+          <span style={{fontSize: 36}}>{"📋"}</span>
+          <div style={{fontSize: 13, fontWeight: 700, color: C.text}}>Kein Dienstplan vorhanden</div>
+          <div style={{fontSize: 11, color: C.muted, lineHeight: 1.5}}>
+            Der Manager hat noch keinen Dienstplan hochgeladen.
+          </div>
         </div>
-        <button onClick={()=>{if(idx<avail.length-1)setSelM(avail[idx+1]);}} disabled={idx>=avail.length-1}
-          style={{width:36,height:36,borderRadius:9,border:`1px solid ${idx<avail.length-1?C.border:"transparent"}`,background:idx<avail.length-1?"#fff":"transparent",color:idx<avail.length-1?C.text:C.border,fontSize:20,cursor:idx<avail.length-1?"pointer":"default",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>{">"}</button>
-      </div>
-      {img?<PlanImage src={img}/>:(
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"36px 24px",gap:10,textAlign:"center"}}>
-          <span style={{fontSize:32}}>{"📋"}</span>
-          <div style={{fontSize:13,fontWeight:700,color:C.text}}>Kein Dienstplan vorhanden</div>
-          <div style={{fontSize:11,color:C.muted}}>Der Manager hat noch keinen Plan hochgeladen.</div>
+      ) : (
+        <div>
+          <div
+            ref={containerRef}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onDoubleClick={onDoubleClick}
+            style={{ overflow: "hidden", touchAction: "none", cursor: scale > 1 ? "grab" : "default" }}
+          >
+            <img
+              src={planImg || "plan.png"}
+              alt="Dienstplan"
+              onError={() => setImgErr(true)}
+              style={{
+                display: "block", width: "100%", height: "auto",
+                transform: `scale(${scale}) translate(${offset.x / scale}px, ${offset.y / scale}px)`,
+                transformOrigin: "center center", transition: "none",
+                userSelect: "none", pointerEvents: "none",
+              }}
+            />
+          </div>
         </div>
       )}
-      {userName&&myShifts.length>0&&<MeineSchichtenSection userName={userName} myShifts={myShifts} records={records} users={users}/>}
-      {userName&&myShifts.length===0&&(
+
+      {/*   */}
+      {userName && myShifts.length > 0 && (
+        <MeineSchichtenSection userName={userName} myShifts={myShifts} records={records} users={users}/>
+      )}
+      {userName && myShifts.length === 0 && (
         <div style={{padding:"14px",textAlign:"center"}}>
-          <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>{"Keine Schichten fuer diesen Monat."}</div>
+          <div style={{fontSize:11,color:C.muted,background:C.bg,borderRadius:10,padding:"12px"}}>
+            {"📋 Für <strong>{userName}</strong> sind noch keine Schichten im Dienstplan eingetragen."}
+            <div style={{fontSize:9,marginTop:4,opacity:.6}}>Der Manager muss den Plan hochladen und analysieren.</div>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
+//      
+function parseMinutes(timeStr) {
+  if (!timeStr) return null;
+  const [h, m] = timeStr.split(":").map(Number);
+  return h * 60 + m;
+}
+function calcShiftMinutes(timeRange) {
+  if (!timeRange) return null;
+  const [start, end] = timeRange.split("-");
+  const s = parseMinutes(start), e = parseMinutes(end);
+  if (s == null || e == null) return null;
+  return e > s ? e - s : null;
+}
+function getShiftStatus(shift, actualRec, date) {
+  const todayStr = today();
+  const shiftDate = date || todayStr;
+  if (!actualRec) {
+    // 날짜 기준: 과거면 nicht erschienen, 오늘 이후면 ausstehend
+    if (shiftDate < todayStr) return "nicht erschienen";
+    return "ausstehend";
+  }
+  if (!actualRec.aus || actualRec.aus === "") return "aktiv";
+  const planned = calcShiftMinutes(shift.time || shift.t);
+  const actual = calcShiftMinutes(`${actualRec.ein}-${actualRec.aus}`);
+  if (planned == null || actual == null) return "gearbeitet";
+  return actual >= planned ? "gearbeitet" : "prüfen";
+}
+
+//  SCHICHTTAUSCH MODAL 
 function SchichttauschModal({ userName, myShifts, users, onClose }) {
   const [step, setStep] = useState(1);
   const [myShift, setMyShift] = useState(null);
@@ -1576,7 +1684,8 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
 
 //  SETTINGS VIEW () 
 function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdmin }) {
-  const [vorname, setVorname] = useState(user?.vorname || "");
+  if (!user) return null;
+  const [vorname, setVorname] = useState(user.vorname || "");
   const [saveMsg, setSaveMsg] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [impfDoc, setImpfDoc] = useState(user.infektionsschutz || null);
@@ -1588,7 +1697,6 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   const [newPin1, setNewPin1] = useState("");
   const [newPin2, setNewPin2] = useState("");
   const [pinMsg, setPinMsg] = useState("");
-  if (!user) return null;
 
   function changePIN() {
     const current = getPin(userKey);
@@ -1895,9 +2003,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const displayName=user.vorname;
   const myRecs=records.filter(r=>r.user===user.vorname);
   const myAntraege=antraege.filter(a=>a.user===user.vorname);
-  const curMo=(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");})();
-  const myMonthRecs=myRecs.filter(r=>r.date&&r.date.startsWith(curMo));
-  const monthSummary=FILIALEN.map(f=>({f,h:myMonthRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
+  const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
 
   // Dienstplan  :   Tausch  
   const [_notifications] = useFirebase("notifications", {});
@@ -2184,7 +2290,7 @@ function StatistikTab({records,users}){
         <div style={{display:"flex",gap:7}}>
           {availMonths.map(m=>(
             <button key={m} onClick={()=>setSelMonth(m)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${selMonth===m?C.mint:C.border}`,background:selMonth===m?C.mintLight:"#fff",color:selMonth===m?C.mintDark:C.muted}}>
-              {monthLabel(m)}
+              {MONTH_LABELS[m]}
             </button>
           ))}
         </div>
@@ -2269,9 +2375,9 @@ function StatistikTab({records,users}){
 
 //  BERSICHT ALL TAB 
 function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sColor, sBg, setDetailKey, setUsers, monthAccordion, setMonthAccordion, delRecordConfirm, setDelRecordConfirm }) {
-  const [selEmpMonth, setSelEmpMonth] = useState(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");});
   const emp = safeUsers.find(u=>u.key===empKey);
   if (!emp) return null;
+
   const empRecs = records.filter(r=>r.user===emp.vorname);
   const total = empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
   const byMonth={};
@@ -2281,12 +2387,6 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
   const DAY=["So","Mo","Di","Mi","Do","Fr","Sa"];
   const contract=emp.contractHours||0;
   const totalDiff=contract>0?total-contract:null;
-  const curGM=(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");})();
-  const allMonthOpts=[...new Set([curGM,...monthKeys])].sort((a,b)=>b.localeCompare(a));
-  const selRecs=byMonth[selEmpMonth]||[];
-  const selTotal=selRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-  const selDays=selRecs.filter(r=>r.aus).length;
-  const selDiff=contract>0?selTotal-contract:null;
 
   return (
     <div style={{padding:"14px"}}>
@@ -2320,20 +2420,9 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
           <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:4,display:"inline-block",color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>{getStatus(emp.vorname)}</span>
         </div>
       </div>
-      <div style={{...S.card,marginBottom:10,padding:"10px 12px"}}>
-        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase"}}>Monat</div>
-        <div style={{display:"flex",gap:5,overflowX:"auto",paddingBottom:2}}>
-          {allMonthOpts.map(m=>(
-            <button key={m} onClick={()=>setSelEmpMonth(m)}
-              style={{flexShrink:0,padding:"5px 10px",borderRadius:8,border:`1.5px solid ${selEmpMonth===m?C.navy:C.border}`,
-                background:selEmpMonth===m?C.navy:"#fff",color:selEmpMonth===m?"#fff":C.muted,
-                fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{monthLabel(m)}</button>
-          ))}
-        </div>
-      </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-        {[{l:"Std. gesamt",v:selTotal.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:selDays+"d",c:C.navy}].map(({l,v,c})=>(
-          <div key={l} style={S.card}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div><div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div>{selDiff!==null&&l==="Std. gesamt"&&<div style={{fontSize:10,color:selDiff>=0?C.mintDark:C.red,fontWeight:700}}>{(selDiff>=0?"+":"")+selDiff.toFixed(1)+"h"}</div>}</div>
+        {[{l:"Std. gesamt",v:total.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
+          <div key={l} style={S.card}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div><div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div></div>
         ))}
       </div>
       <div style={{...S.card,marginBottom:12}}>
@@ -2358,7 +2447,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
         const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
         const mDays=mRecs.filter(r=>r.aus).length;
         const mDiff=contract>0?mTotal-contract:null;
-        const isOpen=m===selEmpMonth?(monthAccordion[m]!==false):(monthAccordion[m]===true);
+        const isOpen=monthAccordion[m]!==false;
         const [y,mo]=m.split("-");
         return(
           <div key={m} style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
@@ -3027,12 +3116,11 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
     });
   },[]);
 
+  // 선택된 월의 schedule 또는 현재 schedule
   const activeSchedule = React.useMemo(()=>{
-    const hasAny=Object.keys(allMonthSchedules).length>0;
-    if(!hasAny) return schedule||{};
-    if(!selMonth) return {};
+    if(!selMonth) return schedule||{};
     const raw = allMonthSchedules[selMonth];
-    if(!raw) return {};
+    if(!raw) return schedule||{};
     // Firebase object → array 변환
     const result={};
     for(const [name,shifts] of Object.entries(raw)){
@@ -3143,9 +3231,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
               <KalenderView csvCtx={csvCtx} userName={manager.vorname} records={records} users={users}/>
             </div>
           )}
-          <DienstplanUploadView records={records} users={users} antraege={antraege} setAntraege={setAntraege} absagenList={absagenList} setAbsagenList={setAbsagenList} setRecords={setRecords} approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag} approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}
-            selMonth={selMonth}
-            onScheduleSaved={(mk,pd)=>{setAllMonthSchedules(prev=>({...prev,[mk]:Object.fromEntries(Object.entries(pd).map(([n,s])=>[n,Object.fromEntries((s||[]).map((x,i)=>[String(i),x]))]))}));setSelMonth(mk);}}/>
+          <DienstplanUploadView records={records} users={users} antraege={antraege} setAntraege={setAntraege} absagenList={absagenList} setAbsagenList={setAbsagenList} setRecords={setRecords} approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag} approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}/>
         </div>
       )}
 
@@ -3177,7 +3263,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                     </div>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    {(()=>{let m=0;shifts.forEach(s=>{const t=s.time||s.t;if(t&&t.includes("-")){const[a,b]=t.split("-");const[ah,am]=(a||"").split(":").map(Number);const[bh,bm]=(b||"").split(":").map(Number);if(!isNaN(ah)&&!isNaN(bh)){const d=(bh*60+bm)-(ah*60+am);if(d>0)m+=d;}}});const h=m/60;return(<div style={{textAlign:"right"}}><div style={{fontSize:10,color:C.muted,fontWeight:600}}>{shifts.length} Schichten</div>{h>0&&<div style={{fontSize:11,fontWeight:800,color:C.mintDark}}>{h%1===0?h:h.toFixed(1)}h</div>}</div>);})()}
+                    <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{shifts.length} Schichten</span>
                     <span style={{fontSize:12,color:C.muted}}>{isOpen ? "A" : "V"}</span>
                   </div>
                 </button>
@@ -3364,24 +3450,19 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 }
 
 //  DIENSTPLAN UPLOAD + AI ANALYSE 
-function DienstplanUploadView({ records, users, antraege, setAntraege, absagenList, setAbsagenList, setRecords, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage, onScheduleSaved, selMonth }) {
+function DienstplanUploadView({ records, users, antraege, setAntraege, absagenList, setAbsagenList, setRecords, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage }) {
   const nList = Array.isArray(antraege) ? antraege : [];
   const abList = Array.isArray(absagenList) ? absagenList : [];
   const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
-  const [localImg, setLocalImg] = useState(null);
-  const [localSchedule, setLocalSchedule] = useState(null);
+  const [schedule, setSchedule, scheduleReady] = useFirebase("schedule", {});
+  const [imgSrc, setImgSrc] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [msg, setMsg] = useState(null);
   const [showKeyInput, setShowKeyInput] = useState(false);
   const fileRef = useRef(null);
-  const planImgKey = selMonth ? "planImage_"+selMonth : "planImage";
-  const schedKey = selMonth ? "schedule_"+selMonth : "schedule";
-  const [planImg] = useFirebase(planImgKey, null);
-  const [monthData] = useFirebase(schedKey, {});
-  const localImgOk = (localImg&&localImg.month===selMonth) ? localImg.src : null;
-  const localSchedOk = (localSchedule&&localSchedule.month===selMonth) ? localSchedule.data : null;
-  const schedule = localSchedOk || monthData || {};
-  const displayImg = localImgOk || planImg;
+
+  // plan.png Firebase Storage  base64 Firebase 
+  const [planImg, setPlanImg, planReady] = useFirebase("planImage", null);
 
   //    
   async function handleFile(e) {
@@ -3413,8 +3494,7 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
       r.readAsDataURL(file);
     });
     const dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
-    const previewUrl = isPdf ? `data:application/pdf;base64,${b64}` : dataUrl;
-    if (previewUrl) setLocalImg({src:previewUrl, month:selMonth});
+    if (!isPdf) setImgSrc(dataUrl);
 
     const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
     const promptText = `Du bist ein Assistent, der Dienstpläne analysiert. Analysiere diesen Dienstplan sehr sorgfältig.
@@ -3487,27 +3567,29 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         throw new Error(`Raw: ${text.slice(0, 200)}`);
       }
 
+      // Firebase :     (Firebase  )
       const parsedForFb = {};
       for (const [name, shifts] of Object.entries(parsed)) {
         parsedForFb[name] = Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]));
       }
-      const allDates = Object.values(parsed).flatMap(sh=>sh.map(s=>s.date)).filter(Boolean);
-      let dm;
-      if(selMonth){ dm=selMonth.replace("_","-"); }
-      else if(allDates.length>0){const mc={};allDates.forEach(d=>{const m=d.slice(0,7);mc[m]=(mc[m]||0)+1;});dm=Object.entries(mc).sort((a,b)=>b[1]-a[1])[0][0];}
-      else{ dm=new Date().toISOString().slice(0,7); }
-      const smk=dm.replace("-","_");
-      if(window._fbDb&&window._fbRef&&window._fbSet){
-        window._fbSet(window._fbRef(window._fbDb,"schedule_"+smk),parsedForFb).catch(()=>{});
-        const fu=isPdf?`data:application/pdf;base64,${b64}`:dataUrl;
-        if(b64.length<6000000&&fu){
-          window._fbSet(window._fbRef(window._fbDb,"planImage_"+smk),fu).catch(()=>{});
-          window._fbSet(window._fbRef(window._fbDb,"planImage"),fu).catch(()=>{});
-        }
+      // 월별 저장: 첫 번째 날짜에서 월 추출
+      const allShiftDates = Object.values(parsed).flatMap(sh=>sh.map(s=>s.date)).filter(Boolean).sort();
+      const detectedMonth = allShiftDates.length>0 ? allShiftDates[0].slice(0,7) : new Date().toISOString().slice(0,7);
+      const monthKey = "schedule_" + detectedMonth.replace("-","_");
+      if (window._fbDb && window._fbRef && window._fbSet) {
+        // 월별 노드에 저장
+        window._fbSet(window._fbRef(window._fbDb, monthKey), parsedForFb)
+          .then(()=>console.log("✅ schedule saved to", monthKey, Object.keys(parsedForFb)))
+          .catch(e=>console.error("schedule save error:", e));
+        // 현재 schedule도 유지 (기존 호환성)
+        window._fbSet(window._fbRef(window._fbDb, "schedule"), parsedForFb)
+          .catch(e=>console.error(e));
       }
-      setLocalSchedule({data:parsed,month:smk});
-      setLocalImg(prev=>prev?{...prev,month:smk}:prev);
-      if(onScheduleSaved) onScheduleSaved(smk,parsed);
+      setSchedule(parsed);
+      //  Firebase  (PDF   )
+      if (!isPdf && b64.length < 4000000) {
+        setPlanImg(dataUrl);
+      }
       setMsg({ type: "ok", text: `✅ Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
     } catch (err) {
       setMsg({ type: "err", text: `❌ 오류: ${err.message}` });
@@ -3515,6 +3597,7 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
     setAnalyzing(false);
   }
 
+  const displayImg = imgSrc || planImg;
 
   return (
     <div style={{padding:"14px"}}>
@@ -3567,14 +3650,9 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
 
       {/*   */}
       {displayImg && (
-        <div style={{marginBottom:12,borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,background:"#f0f0f0"}}>
-          {displayImg.startsWith("data:application/pdf")?(
-            <iframe src={displayImg} style={{width:"100%",height:"70vh",border:"none",display:"block"}} title="Dienstplan PDF"/>
-          ):(
-            <div style={{height:"60vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
-              <img src={displayImg} alt="Dienstplan" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain",display:"block"}}/>
-            </div>
-          )}
+        <div style={{marginBottom:12}}>
+          <img src={displayImg} alt="Dienstplan"
+            style={{width:"100%",height:"auto",borderRadius:14,display:"block"}}/>
         </div>
       )}
 
