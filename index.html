@@ -414,11 +414,11 @@ function PlanImage({src}) {
   },[]);
   if(!src) return null;
   if(src.startsWith("data:application/pdf")) return(
-    <div style={{width:"100%",height:"70vh"}}><iframe src={src} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan"/></div>
+    <div style={{width:"100%",height:"80vh"}}><iframe src={src} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan"/></div>
   );
   return(
-    <div ref={ref} style={{width:"100%",height:"70vh",overflow:"hidden",background:"#f0f0f0",display:"flex",alignItems:"center",justifyContent:"center",touchAction:"none",userSelect:"none"}}>
-      <img src={src} alt="Dienstplan" style={{maxWidth:"100%",maxHeight:"100%",width:"auto",height:"auto",objectFit:"contain",pointerEvents:"none",display:"block",transform:tr,transformOrigin:"center center",transition:"none"}}/>
+    <div ref={ref} style={{width:"100%",overflow:"hidden",background:"#fff",touchAction:"none",userSelect:"none"}}>
+      <img src={src} alt="Dienstplan" style={{width:"100%",height:"auto",display:"block",pointerEvents:"none",transform:tr,transformOrigin:"top center",transition:"none"}}/>
     </div>
   );
 }
@@ -3568,9 +3568,12 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
 
       {/*   */}
       {displayImg && (
-        <div style={{marginBottom:12}}>
-          <img src={displayImg} alt="Dienstplan"
-            style={{width:"100%",height:"auto",borderRadius:14,display:"block"}}/>
+        <div style={{marginBottom:12,borderRadius:14,overflow:"hidden"}}>
+          {displayImg.startsWith("data:application/pdf")?(
+            <div style={{width:"100%",height:"80vh"}}><iframe src={displayImg} style={{width:"100%",height:"100%",border:"none"}} title="Dienstplan PDF"/></div>
+          ):(
+            <img src={displayImg} alt="Dienstplan" style={{width:"100%",height:"auto",display:"block"}}/>
+          )}
         </div>
       )}
 
