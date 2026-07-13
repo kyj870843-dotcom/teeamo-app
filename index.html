@@ -3789,10 +3789,43 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
       }
 
       // ── STEP C: 검수 UI 진입 (즉시 저장 안 함) ────────────────
+      // 직원 이름 퍼지 매칭: AI 오타를 등록된 직원으로 자동 보정
+      const empVornamen = (Array.isArray(users)?users:[])
+        .filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
+      function fuzzyMatchName(aiName) {
+        if (!aiName) return aiName;
+        // 1) 완전 일치 (대소문자 무시)
+        const exact = empVornamen.find(n=>n.toLowerCase()===aiName.toLowerCase());
+        if (exact) return exact;
+        // 2) 포함 관계 (AI 이름이 등록 이름을 포함하거나 반대)
+        const contains = empVornamen.find(n=>
+          n.toLowerCase().includes(aiName.toLowerCase()) ||
+          aiName.toLowerCase().includes(n.toLowerCase())
+        );
+        if (contains) return contains;
+        // 3) 편집 거리(Levenshtein) 1~2이면 보정
+        function lev(a,b){
+          const m=a.length,n=b.length;
+          const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i?j?0:i:j));
+          for(let i=1;i<=m;i++) for(let j=1;j<=n;j++)
+            dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+          return dp[m][n];
+        }
+        const byDist = empVornamen
+          .map(n=>({n, d:lev(n.toLowerCase(), aiName.toLowerCase())}))
+          .sort((a,b)=>a.d-b.d);
+        if (byDist.length>0 && byDist[0].d<=2) return byDist[0].n;
+        // 4) 매칭 없으면 AI 이름 그대로 (⚠ 경고 표시됨)
+        return aiName;
+      }
+
       const rows = [];
       for (const [name, shifts] of Object.entries(parsed)) {
+        const correctedName = fuzzyMatchName(name);
         for (const s of shifts) {
-          rows.push({ id:Math.random().toString(36).slice(2), name, date:s.date, filiale:s.filiale, time:s.time||"" });
+          rows.push({ id:Math.random().toString(36).slice(2),
+            name: correctedName,
+            date:s.date, filiale:s.filiale, time:s.time||"" });
         }
       }
       rows.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.name<b.name?-1:1);
@@ -3922,114 +3955,225 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
         </div>
       )}
 
-      {/* ═══ 스크롤 영역: 수정 가능한 편집 리스트 ═══ */}
-      {editRows.length > 0 && (
-        <div style={{padding:"14px"}}>
-          {/* 헤더 */}
-          <div style={{
-            display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12
-          }}>
-            <div style={{fontSize:11,fontWeight:800,color:C.navy,textTransform:"uppercase",letterSpacing:".05em"}}>
-              {pendingAnalysis ? "Ergebnisse pruefen & korrigieren" : "Schichten bearbeiten"}
-            </div>
-            <div style={{fontSize:10,color:C.muted}}>{editRows.length} Eintraege</div>
-          </div>
+      {/* ═══ 스크롤 영역: 날짜→지점 그룹 레이아웃 ═══ */}
+      {editRows.length > 0 && (()=>{
+        // 날짜별 → 지점별 그룹핑
+        const validNames = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
+        const filOrder = FILIALEN; // ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"]
+        const filShort = {"TEEAMO Arkaden":"Arkaden","TEEAMO Aegidiimarkt":"Aegidiimarkt","TEEnJOY":"TEEnJOY"};
+        const filIcon  = {"TEEAMO Arkaden":"🏪","TEEAMO Aegidiimarkt":"🏬","TEEnJOY":"🧋"};
 
-          {/* 편집 카드 목록 */}
-          {editRows.map((row)=>{
-            const accountExists = Array.isArray(users) && users.some(u=>u.vorname===row.name);
-            const actualRec = accountExists ? (Array.isArray(records)?records:[]).find(r=>r.user===row.name&&r.date===row.date) : null;
-            const todayStr2 = today();
-            let statusLabel="Ausstehend", statusColor=C.muted, statusBg=C.border;
-            if (!accountExists){ statusLabel="Kein Konto"; statusColor=C.muted; statusBg=C.border; }
-            else if (actualRec?.aus){ statusLabel="Gearbeitet"; statusColor=C.mintDark; statusBg=C.mintLight; }
-            else if (actualRec?.ein){ statusLabel="Aktiv"; statusColor=C.yellow; statusBg=C.yellowLight; }
-            else if (row.date < todayStr2){ statusLabel="Nicht erschienen"; statusColor=C.red; statusBg=C.redLight; }
-            return (
-              <div key={row.id} style={{
-                ...S.card, marginBottom:10, padding:"12px 12px 10px",
-                border:"1px solid "+C.border
-              }}>
-                {/* 직원 + 상태 + 삭제 */}
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>MITARBEITER</div>
-                    <select value={row.name}
-                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,name:v}:r));}}
-                      style={{...S.input,width:"100%",fontSize:13,fontWeight:700,padding:"6px 8px"}}>
-                      <option value="">-- Name --</option>
-                      {(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).map(u=>(
-                        <option key={u.key} value={u.vorname}>{u.vorname}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {/* 상태 배지 */}
-                  <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
-                    flexShrink:0,color:statusColor,background:statusBg,
-                    border:"1px solid "+statusColor,marginTop:14}}>
-                    {statusLabel}
-                  </span>
-                  {/* 삭제 버튼 */}
-                  <button onClick={()=>setEditRows(prev=>prev.filter(r=>r.id!==row.id))}
-                    style={{marginTop:14,width:28,height:28,flexShrink:0,
-                      borderRadius:8,border:"1px solid "+C.border,background:"#fff",
-                      color:C.red,fontSize:14,cursor:"pointer",display:"flex",
-                      alignItems:"center",justifyContent:"center"}}>
-                    {"🗑"}
-                  </button>
-                </div>
+        // 날짜 목록 추출 (오름차순)
+        const dates = [...new Set(editRows.map(r=>r.date))].filter(Boolean).sort();
 
-                {/* 날짜 / 지점 / 시간 */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:6}}>
-                  <div>
-                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>DATUM</div>
-                    <input value={row.date} type="date"
-                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,date:v}:r));}}
-                      style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
-                  </div>
-                  <div>
-                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>FILIALE</div>
-                    <select value={row.filiale}
-                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,filiale:v}:r));}}
-                      style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}>
-                      {FILIALEN.map(f=><option key={f} value={f}>{f.replace("TEEAMO ","")}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>ARBEITSZEIT (z.B. 09:00-17:00)</div>
-                  <input value={row.time||""} placeholder="09:00-17:00"
-                    onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,time:v}:r));}}
-                    style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
-                </div>
-                {/* 실제 기록 (있으면 표시) */}
-                {actualRec?.ein&&(
-                  <div style={{marginTop:6,padding:"4px 8px",borderRadius:7,
-                    background:actualRec.aus?C.mintLight:C.yellowLight,fontSize:10,
-                    color:actualRec.aus?C.mintDark:C.yellow,fontWeight:600}}>
-                    Eingestempelt: {actualRec.ein}{actualRec.aus?" – "+actualRec.aus:" (laueft noch)"}
-                    {actualRec.aus&&" · "+stdLabel(actualRec.ein,actualRec.aus)}
-                  </div>
-                )}
+        const addRow = (date, filiale) => setEditRows(prev=>[...prev,{
+          id:Math.random().toString(36).slice(2),
+          name:"", date, filiale, time:""
+        }]);
+
+        const updateRow = (id, field, val) =>
+          setEditRows(prev=>prev.map(r=>r.id===id?{...r,[field]:val}:r));
+
+        const deleteRow = (id) =>
+          setEditRows(prev=>prev.filter(r=>r.id!==id));
+
+        return (
+          <div style={{padding:"10px 14px 90px"}}>
+            {/* 상단 헤더 */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:800,color:C.navy,textTransform:"uppercase",letterSpacing:".05em"}}>
+                {pendingAnalysis ? "Ergebnisse pruefen" : "Schichten bearbeiten"}
               </div>
-            );
-          })}
+              <div style={{fontSize:10,color:C.muted}}>{editRows.length} Eintraege · {dates.length} Tage</div>
+            </div>
 
-          {/* + 근무 추가 버튼 */}
-          <button onClick={()=>setEditRows(prev=>[...prev,{
-            id:Math.random().toString(36).slice(2),
-            name:"", date:new Date().toISOString().slice(0,10),
-            filiale:FILIALEN[0], time:""
-          }])}
-            style={{width:"100%",padding:"11px",borderRadius:11,
+            {/* 날짜별 섹션 */}
+            {dates.map(date=>{
+              const dateObj = new Date(date+"T00:00:00");
+              const dayName = dateObj.toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"numeric"});
+              // 이 날짜의 모든 행
+              const dayRows = editRows.filter(r=>r.date===date);
+              const hasAlert = dayRows.some(r=>r.name && !validNames.includes(r.name));
+
+              return (
+                <div key={date} style={{marginBottom:20}}>
+                  {/* 날짜 헤더 */}
+                  <div style={{
+                    display:"flex",alignItems:"center",gap:8,
+                    padding:"7px 10px",borderRadius:10,marginBottom:8,
+                    background:hasAlert?"#FFF3F3":"#EEF4FF",
+                    border:"1px solid "+(hasAlert?C.red:C.navy)
+                  }}>
+                    <span style={{fontSize:14}}>{"🗓️"}</span>
+                    <div style={{fontSize:12,fontWeight:800,color:hasAlert?C.red:C.navy}}>
+                      {dayName}
+                    </div>
+                    {hasAlert&&<span style={{fontSize:10,color:C.red,fontWeight:700}}>{"⚠ Pruefen!"}</span>}
+                  </div>
+
+                  {/* 지점별 서브섹션 */}
+                  {filOrder.map(fil=>{
+                    const filRows = dayRows.filter(r=>r.filiale===fil);
+                    const short = filShort[fil]||fil;
+                    const icon  = filIcon[fil]||"🏢";
+                    const hasFilAlert = filRows.some(r=>r.name && !validNames.includes(r.name));
+
+                    return (
+                      <div key={fil} style={{
+                        marginBottom:8,borderRadius:10,overflow:"hidden",
+                        border:"1px solid "+(hasFilAlert?C.red:C.border)
+                      }}>
+                        {/* 지점 헤더 */}
+                        <div style={{
+                          display:"flex",alignItems:"center",justifyContent:"space-between",
+                          padding:"6px 10px",
+                          background:hasFilAlert?C.redLight:C.bg,
+                          borderBottom:filRows.length>0?"1px solid "+(hasFilAlert?C.red:C.border):"none"
+                        }}>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <span style={{fontSize:13}}>{icon}</span>
+                            <span style={{fontSize:11,fontWeight:800,color:hasFilAlert?C.red:C.text}}>{short}</span>
+                            <span style={{fontSize:10,color:C.muted,fontWeight:500}}>({filRows.length})</span>
+                          </div>
+                          <button onClick={()=>addRow(date,fil)}
+                            style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:7,
+                              border:"1px dashed "+C.mint,background:"transparent",
+                              color:C.mintDark,cursor:"pointer"}}>
+                            {"+ hinzufuegen"}
+                          </button>
+                        </div>
+
+                        {/* 직원 행들 */}
+                        {filRows.length===0?(
+                          <div style={{padding:"8px 12px",fontSize:10,color:C.muted,fontStyle:"italic"}}>
+                            Keine Schichten
+                          </div>
+                        ):filRows.map(row=>{
+                          const nameOk = !row.name || validNames.includes(row.name);
+                          const empList = ["emplist",row.id].join("-");
+                          return (
+                            <div key={row.id} style={{
+                              display:"flex",alignItems:"center",gap:6,
+                              padding:"7px 10px",
+                              background:nameOk?"#fff":C.redLight,
+                              borderTop:"1px solid "+(nameOk?C.border:C.red)
+                            }}>
+                              {/* 직원 콤보박스 */}
+                              <div style={{flex:2,minWidth:0}}>
+                                <input
+                                  list={empList}
+                                  value={row.name}
+                                  onChange={e=>updateRow(row.id,"name",e.target.value)}
+                                  placeholder="Name..."
+                                  style={{
+                                    ...S.input,width:"100%",fontSize:12,fontWeight:700,
+                                    padding:"5px 7px",boxSizing:"border-box",
+                                    borderColor:nameOk?C.border:C.red,
+                                    background:nameOk?"#fff":C.redLight
+                                  }}
+                                />
+                                <datalist id={empList}>
+                                  {(Array.isArray(users)?users:[])
+                                    .filter(u=>!MANAGERS.includes(u.key))
+                                    .sort((a,b)=>a.vorname<b.vorname?-1:1)
+                                    .map(u=><option key={u.key} value={u.vorname}>{u.vorname}</option>)
+                                  }
+                                </datalist>
+                                {!nameOk&&row.name&&(
+                                  <div style={{fontSize:8,color:C.red,marginTop:2,fontWeight:700}}>
+                                    {"⚠ Nicht registriert"}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 시간 입력 */}
+                              <input
+                                value={row.time||""}
+                                onChange={e=>updateRow(row.id,"time",e.target.value)}
+                                placeholder="09:00-17:00"
+                                style={{
+                                  ...S.input,flex:1.2,minWidth:0,
+                                  fontSize:11,padding:"5px 6px",boxSizing:"border-box"
+                                }}
+                              />
+
+                              {/* 삭제 버튼 */}
+                              <button onClick={()=>deleteRow(row.id)}
+                                style={{flexShrink:0,width:26,height:26,
+                                  borderRadius:7,border:"1px solid "+C.border,
+                                  background:"#fff",color:C.red,fontSize:13,
+                                  cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                {"×"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+
+                  {/* 이 날짜에 지점에 속하지 않는 행 (비정상 지점명) */}
+                  {dayRows.filter(r=>!filOrder.includes(r.filiale)).map(row=>{
+                    const nameOk = !row.name||validNames.includes(row.name);
+                    const filOk = false; // 알 수 없는 지점
+                    const empList2 = "emplist2-"+row.id;
+                    return(
+                      <div key={row.id} style={{
+                        borderRadius:10,marginBottom:4,overflow:"hidden",
+                        border:"1px solid "+C.red,background:C.redLight
+                      }}>
+                        <div style={{padding:"5px 10px",fontSize:9,fontWeight:700,
+                          color:C.red,borderBottom:"1px solid "+C.red}}>
+                          {"⚠ Unbekannte Filiale: "+row.filiale}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:6,padding:"7px 10px"}}>
+                          <input list={empList2} value={row.name}
+                            onChange={e=>updateRow(row.id,"name",e.target.value)}
+                            placeholder="Name..."
+                            style={{...S.input,flex:1.5,fontSize:12,fontWeight:700,padding:"5px 7px",boxSizing:"border-box"}}/>
+                          <datalist id={empList2}>
+                            {(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key))
+                              .map(u=><option key={u.key} value={u.vorname}>{u.vorname}</option>)}
+                          </datalist>
+                          <select value={row.filiale}
+                            onChange={e=>updateRow(row.id,"filiale",e.target.value)}
+                            style={{...S.input,flex:1.2,fontSize:11,padding:"5px 6px",boxSizing:"border-box",borderColor:C.red}}>
+                            {FILIALEN.map(f=><option key={f} value={f}>{filShort[f]||f}</option>)}
+                          </select>
+                          <input value={row.time||""} onChange={e=>updateRow(row.id,"time",e.target.value)}
+                            placeholder="09:00-17:00"
+                            style={{...S.input,flex:1,fontSize:11,padding:"5px 6px",boxSizing:"border-box"}}/>
+                          <button onClick={()=>deleteRow(row.id)}
+                            style={{flexShrink:0,width:26,height:26,borderRadius:7,
+                              border:"1px solid "+C.border,background:"#fff",color:C.red,
+                              fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                            {"×"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+
+            {/* 새 날짜 전체 추가 */}
+            <button onClick={()=>{
+              const nextDate = new Date(); nextDate.setDate(nextDate.getDate()+1);
+              const d = nextDate.toISOString().slice(0,10);
+              addRow(d, FILIALEN[0]);
+            }} style={{
+              width:"100%",padding:"11px",borderRadius:11,
               border:"1.5px dashed "+C.mint,background:"transparent",
-              color:C.mintDark,fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:80}}>
-            {"+ Schicht hinzufuegen"}
-          </button>
-        </div>
-      )}
+              color:C.mintDark,fontSize:12,fontWeight:700,cursor:"pointer"
+            }}>
+              {"+ Neuen Tag hinzufuegen"}
+            </button>
+          </div>
+        );
+      })()}
 
-      {/* 데이터 없을 때 안내 */}
+            {/* 데이터 없을 때 안내 */}
       {editRows.length === 0 && !analyzing && (
         <div style={{padding:"32px 14px",textAlign:"center"}}>
           <div style={{fontSize:32,marginBottom:8}}>📋</div>
