@@ -3583,6 +3583,10 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
   const [msg, setMsg] = useState(null);
   const [showKeyInput, setShowKeyInput] = useState(false);
   const fileRef = useRef(null);
+  // 검수 보정 UI 상태
+  const [pendingAnalysis, setPendingAnalysis] = useState(null);
+  const [editRows, setEditRows] = useState([]);
+  const [saving, setSaving] = useState(false);
 
   // 선택된 월의 plan 이미지 Firebase 로드
   const planImgKey = selMonth ? "planImage_"+selMonth : "planImage";
@@ -3655,120 +3659,183 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
     }
     if (dataUrl) { setLocalImgSrc(dataUrl); setLocalImgMonth(selMonth); }
 
-    const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
-    const promptText = `Du bist ein Assistent, der Dienstpläne analysiert. Analysiere diesen Dienstplan sehr sorgfältig.
+    const empNames = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname).join(", ");
+    const curYear = new Date().getFullYear();
 
-WICHTIG: Erkenne nur Namen aus dieser exakten Liste (Groß-/Kleinschreibung ignorieren):
-${empNames}
+    // ── STEP A: PDF 텍스트 레이어 추출 ──────────────────────────
+    let extractedText = "";
+    if (isPdf && window.pdfjsLib) {
+      try {
+        setMsg({ type:"info", text:"Schritt 1/3: Textebene wird extrahiert..." });
+        const pdfLib = window.pdfjsLib;
+        pdfLib.GlobalWorkerOptions.workerSrc =
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        const rawB = atob(b64);
+        const bytesB = new Uint8Array(rawB.length);
+        for (let i=0;i<rawB.length;i++) bytesB[i]=rawB.charCodeAt(i);
+        const pdfDoc = await pdfLib.getDocument({data:bytesB}).promise;
+        const totalPages = Math.min(pdfDoc.numPages, 3);
+        const pageTexts = [];
+        for (let p=1; p<=totalPages; p++) {
+          const pg = await pdfDoc.getPage(p);
+          const tc = await pg.getTextContent();
+          const items = tc.items.map(it=>({text:it.str, x:Math.round(it.transform[4]), y:Math.round(it.transform[5])}));
+          const rowMap = {};
+          items.forEach(it=>{const yk=Math.round(it.y/8)*8; if(!rowMap[yk])rowMap[yk]=[]; rowMap[yk].push(it);});
+          const rows = Object.entries(rowMap)
+            .sort((a,b)=>Number(b[0])-Number(a[0]))
+            .map(([,cells])=>cells.sort((a,b)=>a.x-b.x).map(c=>c.text).join(" | "));
+          pageTexts.push(rows.join("\n"));
+        }
+        extractedText = pageTexts.join("\n---\n");
+        console.log("PDF Text:", extractedText.slice(0,500));
+      } catch(e) { console.warn("Textextraktion fehlgeschlagen:", e); }
+    }
 
-Regeln:
-- Jeder Name in der Liste entspricht GENAU einem Mitarbeiter. Ordne gefundene Namen der Liste zu (auch bei leichten Schreibfehlern im Bild).
-- Filialen: "Arkaden" oder "TEEAMO Arkaden" → "TEEAMO Arkaden"; "Aegidiimarkt" oder "Aegidiimarkt" oder ähnlich → "TEEAMO Aegidiimarkt"; "Teenjoy" oder "TEEnJOY" → "Teenjoy"
-- Datum: Jahr ${new Date().getFullYear()}, Format YYYY-MM-DD
-- Zeit: Format HH:MM-HH:MM (z.B. "09:00-17:00"), null wenn nicht angegeben
-- Ignoriere Namen die NICHT in der obigen Liste sind
+    // ── STEP B: Chain-of-Thought API-Aufruf ──────────────────────
+    setMsg({ type:"info", text:"Schritt 2/3: KI analysiert sorgfaeltig..." });
+    const textSection = extractedText
+      ? "\n\nDIREKT EXTRAHIERTER TEXT AUS PDF:\n" + extractedText + "\n"
+      : "";
 
-Antworte NUR mit validem JSON, ohne jeglichen anderen Text, keine Markdown-Backticks:
-{"VornameGenauWieInListe":[{"d":"YYYY-MM-DD","f":"TEEAMO Arkaden","t":"09:00-17:00"}]}
+    const promptText = "Du bist ein praeziser Dienstplan-Analysator. Befolge diese Schritte EXAKT:\n\n"
+      + "=== MITARBEITERLISTE (NUR diese Namen) ===\n" + empNames + "\n"
+      + textSection
+      + "\n=== SCHRITT 1: TABELLENSTRUKTUR ===\n"
+      + "Beschreibe: Wie viele Spalten? Was steht in Spaltenkoepfen (Daten/Wochentage)? "
+      + "Wie viele Zeilen? Was steht in Zeilenkoepfen?\n\n"
+      + "=== SCHRITT 2: ZELLENWEISE AUSLESEN ===\n"
+      + "Lies JEDE Zelle systematisch. Fuer jeden Namen aus der Liste:\n"
+      + "Format: Name | Datum YYYY-MM-DD | Filiale | Zeit HH:MM-HH:MM\n"
+      + "Filialen: Arkaden/TEEAMO Arkaden -> TEEAMO Arkaden | Aegidiimarkt -> TEEAMO Aegidiimarkt | Teenjoy/TEEnJOY -> Teenjoy\n"
+      + "Jahr: " + curYear + "\n\n"
+      + "=== SCHRITT 3: JSON AUSGABE ===\n"
+      + "Antworte exakt so:\n"
+      + "<analyse>\n[Deine Analyse aus Schritt 1 und 2]\n</analyse>\n"
+      + "<json>\n"
+      + '{"VornameExakt":[{"d":"YYYY-MM-DD","f":"TEEAMO Arkaden","t":"09:00-17:00"}]}\n'
+      + "</json>\n\n"
+      + "REGELN: Vornamen EXAKT wie in Liste. Datum YYYY-MM-DD. Zeit HH:MM-HH:MM oder null. "
+      + "Namen NICHT in Liste ignorieren.";
 
-Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
-
-    const contentBlock = isPdf
-      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
-      : { type: "image", source: { type: "base64", media_type: file.type, data: b64 } };
+    const contentBlock = dataUrl
+      ? { type:"image", source:{type:"base64", media_type:"image/jpeg", data: dataUrl.split(",")[1]} }
+      : { type:"document", source:{type:"base64", media_type:"application/pdf", data:b64} };
 
     try {
       let res;
       try {
         res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-            "anthropic-dangerous-direct-browser-access": "true",
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json",
+            "x-api-key":apiKey,
+            "anthropic-version":"2023-06-01",
+            "anthropic-dangerous-direct-browser-access":"true",
           },
           body: JSON.stringify({
-            model: "claude-sonnet-4-6",
-            max_tokens: 8000,
-            messages: [{
-              role: "user",
-              content: [ contentBlock, { type: "text", text: promptText } ]
-            }]
+            model:"claude-sonnet-4-6",
+            max_tokens:8000,
+            messages:[{role:"user", content:[contentBlock,{type:"text",text:promptText}]}]
           })
         });
-      } catch(fetchErr) {
-        throw new Error(`Netzwerkfehler: ${fetchErr.message}. Bitte API-Schlüssel prüfen und erneut versuchen.`);
+      } catch(fe) {
+        throw new Error("Netzwerkfehler: " + fe.message);
       }
-
       if (!res.ok) {
-        let errBody = "";
-        try { const j = await res.json(); errBody = j.error?.message || JSON.stringify(j); } catch{}
-        throw new Error(`API ${res.status}: ${errBody}`);
+        let eb=""; try{const j=await res.json();eb=j.error?.message||JSON.stringify(j);}catch{}
+        throw new Error("API " + res.status + ": " + eb);
       }
       const data = await res.json();
-      const text = data.content.map(c => c.text || "").join("");
-      const clean = text.replace(/```json|```/g, "").trim();
+      const fullText = data.content.map(c=>c.text||"").join("");
+      console.log("KI-Antwort:", fullText);
+
+      let jsonStr = "";
+      const jsonMatch = fullText.match(/<json>([\s\S]*?)<\/json>/i);
+      if (jsonMatch) { jsonStr = jsonMatch[1].trim(); }
+      else { const m=fullText.match(/\{[\s\S]*\}/); jsonStr=m?m[0]:""; }
+      jsonStr = jsonStr.replace(/```json|```/g,"").trim();
+
       let parsed;
       try {
-        const raw = JSON.parse(clean);
-        //  (d/f/t)   (date/filiale/time) 
+        const raw = JSON.parse(jsonStr);
         parsed = {};
         for (const [name, shifts] of Object.entries(raw)) {
-          parsed[name] = (shifts || []).map(s => ({
-            date: s.date || s.d,
-            filiale: s.filiale || s.f,
-            time: s.time || s.t || null,
-          }));
+          parsed[name] = (shifts||[]).map(s=>({
+            date: s.date||s.d||"",
+            filiale: s.filiale||s.f||"",
+            time: s.time||s.t||null,
+          })).filter(s=>s.date);
         }
       } catch(pe) {
-        console.error("Raw response:", text);
-        throw new Error(`Raw: ${text.slice(0, 200)}`);
+        console.error("JSON Fehler:", jsonStr);
+        throw new Error("JSON-Fehler: " + jsonStr.slice(0,200));
       }
 
-      // ── Firebase 월별 독립 저장 (덮어쓰기 절대 금지) ──────────────
-      const parsedForFb = {};
+      // ── STEP C: 검수 UI 진입 (즉시 저장 안 함) ────────────────
+      const rows = [];
       for (const [name, shifts] of Object.entries(parsed)) {
-        parsedForFb[name] = Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]));
-      }
-      // 저장할 월 결정: 선택된 탭 우선, 없으면 날짜에서 다수결 추출
-      let saveMonthKey;
-      if (selMonth) {
-        saveMonthKey = selMonth;
-      } else {
-        const allDates = Object.values(parsed).flatMap(sh=>sh.map(s=>s.date||s.d)).filter(Boolean);
-        if (allDates.length > 0) {
-          const mc = {};
-          allDates.forEach(d=>{ const m=d.slice(0,7).replace("-","_"); mc[m]=(mc[m]||0)+1; });
-          saveMonthKey = Object.entries(mc).sort((a,b)=>b[1]-a[1])[0][0];
-        } else {
-          const now = new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
-          saveMonthKey = now.getFullYear()+"_"+String(now.getMonth()+1).padStart(2,"0");
+        for (const s of shifts) {
+          rows.push({ id:Math.random().toString(36).slice(2), name, date:s.date, filiale:s.filiale, time:s.time||"" });
         }
       }
-      const fbScheduleKey = "schedule_" + saveMonthKey;
-      const fbImageKey    = "planImage_" + saveMonthKey;
-
-      if (window._fbDb && window._fbRef && window._fbSet) {
-        // schedule 월별 저장 (해당 월 키에만, root 덮어쓰기 없음)
-        window._fbSet(window._fbRef(window._fbDb, fbScheduleKey), parsedForFb)
-          .then(()=>console.log("✅ schedule saved →", fbScheduleKey))
-          .catch(e=>console.error("schedule save error:", e));
-        // planImage 월별 저장 (항상 변환된 이미지 dataUrl 사용 — PDF 비율 문제 없음)
-        if (dataUrl) {
-          window._fbSet(window._fbRef(window._fbDb, fbImageKey), dataUrl)
-            .then(()=>console.log("✅ planImage saved →", fbImageKey))
-            .catch(e=>console.error("planImage save error:", e));
-          window._fbSet(window._fbRef(window._fbDb, "planImage"), dataUrl).catch(()=>{});
-        }
-      }
-      // 부모 AdminDienstplanView에 즉시 반영
-      if (onScheduleSaved) onScheduleSaved(saveMonthKey, parsed);
-      setMsg({ type: "ok", text: `✅ Analyse abgeschlossen! ${Object.keys(parsed).length} Personen erfasst.` });
-    } catch (err) {
-      setMsg({ type: "err", text: `❌ 오류: ${err.message}` });
+      rows.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.name<b.name?-1:1);
+      setPendingAnalysis({ parsed, dataUrl, selMonthAtTime: selMonth });
+      setEditRows(rows);
+      setMsg({ type:"review", text:"Analyse fertig! " + rows.length + " Schichten erkannt. Bitte pruefen." });
+    } catch(err) {
+      setMsg({ type:"err", text:"Fehler: " + err.message });
     }
     setAnalyzing(false);
+  }
+
+  // ── 검수 확인 후 Firebase 저장 ────────────────────────────────
+  async function confirmAndSave() {
+    if (!pendingAnalysis) return;
+    setSaving(true);
+    setMsg({ type:"info", text:"Wird gespeichert..." });
+
+    const parsed = {};
+    for (const row of editRows) {
+      if (!row.name||!row.date) continue;
+      if (!parsed[row.name]) parsed[row.name] = [];
+      parsed[row.name].push({ date:row.date, filiale:row.filiale, time:row.time||null });
+    }
+
+    const parsedForFb = {};
+    for (const [name,shifts] of Object.entries(parsed)) {
+      parsedForFb[name] = Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]));
+    }
+
+    let saveMonthKey = pendingAnalysis.selMonthAtTime;
+    if (!saveMonthKey) {
+      const allDates = editRows.map(r=>r.date).filter(Boolean);
+      if (allDates.length>0){
+        const mc={};
+        allDates.forEach(d=>{const m=d.slice(0,7).replace("-","_");mc[m]=(mc[m]||0)+1;});
+        saveMonthKey=Object.entries(mc).sort((a,b)=>b[1]-a[1])[0][0];
+      } else {
+        const now=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+        saveMonthKey=now.getFullYear()+"_"+String(now.getMonth()+1).padStart(2,"0");
+      }
+    }
+    const fbScheduleKey = "schedule_"+saveMonthKey;
+    const fbImageKey    = "planImage_"+saveMonthKey;
+    const dUrl = pendingAnalysis.dataUrl;
+
+    if (window._fbDb&&window._fbRef&&window._fbSet) {
+      await window._fbSet(window._fbRef(window._fbDb,fbScheduleKey),parsedForFb).catch(()=>{});
+      if (dUrl) {
+        await window._fbSet(window._fbRef(window._fbDb,fbImageKey),dUrl).catch(()=>{});
+        await window._fbSet(window._fbRef(window._fbDb,"planImage"),dUrl).catch(()=>{});
+      }
+    }
+    if (onScheduleSaved) onScheduleSaved(saveMonthKey, parsed);
+    setLocalSchedule({data:parsed, month:saveMonthKey});
+    setPendingAnalysis(null);
+    setEditRows([]);
+    setSaving(false);
+    setMsg({ type:"ok", text:"Gespeichert! " + Object.keys(parsed).length + " Personen, " + editRows.length + " Schichten." });
   }
 
 
@@ -3814,9 +3881,80 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         )}
         {msg&&(
           <div style={{marginTop:10,padding:"9px 12px",borderRadius:9,
-            background:msg.type==="ok"?C.mintLight:C.redLight,
-            color:msg.type==="ok"?C.mintDark:C.red,fontSize:11,fontWeight:600}}>
+            background:msg.type==="ok"?C.mintLight:msg.type==="err"?C.redLight:msg.type==="review"?"#EEF4FF":C.bg,
+            color:msg.type==="ok"?C.mintDark:msg.type==="err"?C.red:msg.type==="review"?C.navy:C.text,
+            fontSize:11,fontWeight:600}}>
             {msg.text}
+          </div>
+        )}
+
+        {/* Analyse-Ergebnis: Pruefen & Korrigieren */}
+        {pendingAnalysis && editRows.length > 0 && (
+          <div style={{marginTop:12}}>
+            <div style={{fontSize:11,fontWeight:800,color:C.navy,marginBottom:8,
+              textTransform:"uppercase",letterSpacing:".05em"}}>
+              Ergebnisse pruefen & korrigieren
+            </div>
+            {editRows.map((row)=>(
+              <div key={row.id} style={{...S.card,padding:"10px 12px",marginBottom:8,
+                border:"1px solid "+C.border,position:"relative"}}>
+                <button onClick={()=>setEditRows(prev=>prev.filter(r=>r.id!==row.id))}
+                  style={{position:"absolute",top:8,right:8,width:22,height:22,
+                    borderRadius:"50%",border:"none",background:C.border,
+                    color:C.muted,fontSize:12,cursor:"pointer",lineHeight:1}}>{"x"}</button>
+                <div style={{marginBottom:6}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:2}}>MITARBEITER</div>
+                  <input value={row.name}
+                    onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,name:v}:r));}}
+                    style={{...S.input,width:"100%",fontSize:13,fontWeight:700,padding:"6px 8px"}}/>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                  <div>
+                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:2}}>DATUM</div>
+                    <input value={row.date} type="date"
+                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,date:v}:r));}}
+                      style={{...S.input,width:"100%",fontSize:11,padding:"5px 4px",boxSizing:"border-box"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:2}}>FILIALE</div>
+                    <select value={row.filiale}
+                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,filiale:v}:r));}}
+                      style={{...S.input,width:"100%",fontSize:11,padding:"5px 4px",boxSizing:"border-box"}}>
+                      {FILIALEN.map(f=><option key={f} value={f}>{f.replace("TEEAMO ","")}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:2}}>ZEIT</div>
+                    <input value={row.time||""} placeholder="09:00-17:00"
+                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,time:v}:r));}}
+                      style={{...S.input,width:"100%",fontSize:11,padding:"5px 4px",boxSizing:"border-box"}}/>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button onClick={()=>setEditRows(prev=>[...prev,{
+              id:Math.random().toString(36).slice(2),name:"",
+              date:new Date().toISOString().slice(0,10),filiale:FILIALEN[0],time:""
+            }])}
+              style={{width:"100%",padding:"9px",borderRadius:10,
+                border:"1.5px dashed "+C.border,background:"transparent",
+                color:C.muted,fontSize:12,cursor:"pointer",marginBottom:12}}>
+              {"+ Schicht hinzufuegen"}
+            </button>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>{setPendingAnalysis(null);setEditRows([]);setMsg(null);}}
+                style={{flex:1,padding:"12px",borderRadius:11,
+                  border:"1px solid "+C.border,background:"#fff",
+                  color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>
+                Verwerfen
+              </button>
+              <button onClick={confirmAndSave} disabled={saving}
+                style={{flex:2,padding:"12px",borderRadius:11,border:"none",
+                  background:"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",
+                  color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",opacity:saving?0.6:1}}>
+                {saving?"Speichern...":"Bestaetigen & Speichern"}
+              </button>
+            </div>
           </div>
         )}
       </div>
