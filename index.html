@@ -3858,74 +3858,69 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
   return (
     <div style={{padding:"0"}}>
 
-      {/* ═══ STICKY 상단 고정: 업로드 UI + 근무표 이미지 ═══ */}
-      <div style={{
-        position:"sticky", top:0, zIndex:60,
-        background:C.card,
-        boxShadow:"0 2px 16px rgba(0,0,0,.10)"
-      }}>
-        {/* 업로드 컨트롤 */}
-        <div style={{padding:"12px 14px 8px"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-            <div style={{fontSize:12,fontWeight:800,color:C.text}}>Dienstplan hochladen</div>
-            {apiKey&&(
-              <button onClick={()=>setShowKeyInput(v=>!v)}
-                style={{fontSize:9,padding:"3px 8px",borderRadius:8,
-                  border:"1px solid "+C.border,background:"#fff",color:C.muted,cursor:"pointer"}}>
-                API-Key
-              </button>
-            )}
-          </div>
-          {showKeyInput&&(
-            <div style={{...S.card,marginBottom:8,padding:"10px 12px",border:"1.5px solid "+C.yellow}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Anthropic API-Schluessel</div>
-              <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
-                placeholder="sk-ant-..."
-                style={{...S.input,width:"100%",fontSize:12,marginBottom:6}}/>
-              <button onClick={()=>setShowKeyInput(false)}
-                style={{width:"100%",padding:"6px",borderRadius:8,border:"none",
-                  background:C.navy,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                Speichern
-              </button>
-            </div>
-          )}
-
-          <input type="file" accept="image/*,application/pdf" ref={fileRef}
-            style={{display:"none"}} onChange={handleFile}/>
-          <button
-            onClick={()=>fileRef.current.click()}
-            disabled={analyzing}
-            style={{width:"100%",padding:"13px",borderRadius:12,border:"2px dashed "+C.mint,
-              background:analyzing?"#f8f8f8":C.mintLight,
-              color:analyzing?C.muted:C.mintDark,
-              fontWeight:800,fontSize:13,cursor:analyzing?"not-allowed":"pointer",
-              display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            {analyzing ? "KI analysiert..." : "Bild oder PDF auswaehlen & analysieren"}
-          </button>
-          {!apiKey&&(
-            <button onClick={()=>setShowKeyInput(true)}
-              style={{marginTop:6,width:"100%",padding:"7px",borderRadius:8,
-                border:"1px solid "+C.border,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
-              API-Schluessel eingeben
+      {/* ── 업로드 UI: 일반 스크롤 (sticky 없음) ── */}
+      <div style={{padding:"12px 14px 8px",background:C.card,
+        borderBottom:"1px solid "+C.border}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+          <div style={{fontSize:12,fontWeight:800,color:C.text}}>Dienstplan hochladen</div>
+          {apiKey&&(
+            <button onClick={()=>setShowKeyInput(v=>!v)}
+              style={{fontSize:9,padding:"3px 8px",borderRadius:8,
+                border:"1px solid "+C.border,background:"#fff",color:C.muted,cursor:"pointer"}}>
+              API-Key
             </button>
           )}
-          {msg&&(
-            <div style={{marginTop:8,padding:"8px 12px",borderRadius:9,
-              background:msg.type==="ok"?C.mintLight:msg.type==="err"?C.redLight:msg.type==="review"?"#EEF4FF":"#f0f4ff",
-              color:msg.type==="ok"?C.mintDark:msg.type==="err"?C.red:msg.type==="review"?C.navy:C.text,
-              fontSize:11,fontWeight:600}}>
-              {msg.text}
-            </div>
-          )}
         </div>
-
-        {/* 근무표 이미지 — 스티키 고정 영역의 일부 */}
-        {displayImg&&(
-          <div style={{overflow:"hidden",borderTop:"1px solid "+C.border}}>
-            <PlanImage src={displayImg}/>
+        {showKeyInput&&(
+          <div style={{...S.card,marginBottom:8,padding:"10px 12px",border:"1.5px solid "+C.yellow}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Anthropic API-Schluessel</div>
+            <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
+              placeholder="sk-ant-..."
+              style={{...S.input,width:"100%",fontSize:12,marginBottom:6}}/>
+            <button onClick={()=>setShowKeyInput(false)}
+              style={{width:"100%",padding:"6px",borderRadius:8,border:"none",
+                background:C.navy,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+              Speichern
+            </button>
+          </div>
+        )}
+        <input type="file" accept="image/*,application/pdf" ref={fileRef}
+          style={{display:"none"}} onChange={handleFile}/>
+        <button onClick={()=>fileRef.current.click()} disabled={analyzing}
+          style={{width:"100%",padding:"13px",borderRadius:12,border:"2px dashed "+C.mint,
+            background:analyzing?"#f8f8f8":C.mintLight,
+            color:analyzing?C.muted:C.mintDark,
+            fontWeight:800,fontSize:13,cursor:analyzing?"not-allowed":"pointer",
+            display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          {analyzing ? "KI analysiert..." : "Bild oder PDF auswaehlen & analysieren"}
+        </button>
+        {!apiKey&&(
+          <button onClick={()=>setShowKeyInput(true)}
+            style={{marginTop:6,width:"100%",padding:"7px",borderRadius:8,
+              border:"1px solid "+C.border,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
+            API-Schluessel eingeben
+          </button>
+        )}
+        {msg&&(
+          <div style={{marginTop:8,padding:"8px 12px",borderRadius:9,
+            background:msg.type==="ok"?C.mintLight:msg.type==="err"?C.redLight:msg.type==="review"?"#EEF4FF":"#f0f4ff",
+            color:msg.type==="ok"?C.mintDark:msg.type==="err"?C.red:msg.type==="review"?C.navy:C.text,
+            fontSize:11,fontWeight:600}}>
+            {msg.text}
           </div>
         )}
       </div>
+
+      {/* ── 근무표 이미지만 Sticky 고정 ── */}
+      {displayImg&&(
+        <div style={{
+          position:"sticky", top:0, zIndex:60,
+          background:C.card,
+          boxShadow:"0 2px 12px rgba(0,0,0,.12)"
+        }}>
+          <PlanImage src={displayImg}/>
+        </div>
+      )}
 
       {/* ═══ 스크롤 영역: 수정 가능한 편집 리스트 ═══ */}
       {editRows.length > 0 && (
