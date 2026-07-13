@@ -75,7 +75,7 @@ const C = {
   yellow:"#C8A96A", yellowLight:"#FAF4E8",
 };
 
-const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","Teenjoy"];
+const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
 const MONTHS     = ["2026-06","2026-05","2026-04"];
 const MONTH_LABELS = {"2026-06":"Juni 2026","2026-05":"Mai 2026","2026-04":"April 2026"};
 const TAGE_DE    = ["So","Mo","Di","Mi","Do","Fr","Sa"];
@@ -93,7 +93,7 @@ function sortName(str) {
 }
 function byName(a,b){ return sortName(a.vorname).localeCompare(sortName(b.vorname)); }
 const NACHTRAG_ROUTING = {
-  "TEEAMO Arkaden":"yeaji","TEEAMO Aegidiimarkt":"yeaji","Teenjoy":"teddy",
+  "TEEAMO Arkaden":"yeaji","TEEAMO Aegidiimarkt":"yeaji","TEEnJOY":"teddy",
 };
 
 const INIT_USERS = [
@@ -121,12 +121,12 @@ const INIT_USERS = [
 const INIT_RECORDS = [
   {id:1, user:"Anna",   date:"2026-06-02",filiale:"TEEAMO Arkaden",     ein:"09:02",aus:"18:10",note:"",typ:"normal"},
   {id:2, user:"Dayoung",date:"2026-06-02",filiale:"TEEAMO Aegidiimarkt",ein:"10:00",aus:"18:00",note:"",typ:"normal"},
-  {id:3, user:"Eunjin", date:"2026-06-03",filiale:"Teenjoy",            ein:"09:05",aus:"17:55",note:"",typ:"normal"},
+  {id:3, user:"Eunjin", date:"2026-06-03",filiale:"TEEnJOY",            ein:"09:05",aus:"17:55",note:"",typ:"normal"},
   {id:4, user:"Gayeon", date:"2026-06-03",filiale:"TEEAMO Arkaden",     ein:"09:00",aus:"18:00",note:"",typ:"normal"},
   {id:5, user:"Jiwoo",  date:"2026-06-04",filiale:"TEEAMO Aegidiimarkt",ein:"09:10",aus:"17:50",note:"Stau",typ:"normal"},
-  {id:6, user:"Jiye",   date:"2026-06-04",filiale:"Teenjoy",            ein:"10:00",aus:"18:00",note:"",typ:"normal"},
+  {id:6, user:"Jiye",   date:"2026-06-04",filiale:"TEEnJOY",            ein:"10:00",aus:"18:00",note:"",typ:"normal"},
   {id:7, user:"Anna",   date:"2026-06-05",filiale:"TEEAMO Arkaden",     ein:"09:02",aus:null,   note:"",typ:"normal"},
-  {id:8, user:"Semi",   date:"2026-06-05",filiale:"Teenjoy",            ein:"09:00",aus:"17:00",note:"",typ:"normal"},
+  {id:8, user:"Semi",   date:"2026-06-05",filiale:"TEEnJOY",            ein:"09:00",aus:"17:00",note:"",typ:"normal"},
   {id:9, user:"Saemee", date:"2026-06-08",filiale:"TEEAMO Arkaden",     ein:"09:00",aus:"18:00",note:"",typ:"normal"},
   {id:10,user:"Yujin",  date:"2026-06-09",filiale:"TEEAMO Aegidiimarkt",ein:"09:05",aus:null,   note:"",typ:"normal"},
 ];
@@ -368,10 +368,10 @@ const S = {
   pill: (s) => ({ fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: 99, background: s==="offen"?C.yellowLight:s==="genehmigt"?C.mintLight:C.redLight, color: s==="offen"?C.yellow:s==="genehmigt"?C.mintDark:C.red }),
 };
 
-const FILIAL_NAMES = { A:"TEEAMO Arkaden", B:"TEEAMO Aegidiimarkt", C:"Teenjoy" };
+const FILIAL_NAMES = { A:"TEEAMO Arkaden", B:"TEEAMO Aegidiimarkt", C:"TEEnJOY" };
 const FILIAL_INIT = {
-  "TEEAMO Arkaden":"Ar", "TEEAMO Aegidiimarkt":"Ae", "Teenjoy":"Tj",
-  "Arkaden":"Ar", "Aegidiimarkt":"Ae", "Teenjoy":"Tj",
+  "TEEAMO Arkaden":"Ar", "TEEAMO Aegidiimarkt":"Ae", "TEEnJOY":"Tj",
+  "Arkaden":"Ar", "Aegidiimarkt":"Ae", "TEEnJOY":"Tj",
 };
 function filialInit(f){ return FILIAL_INIT[f]||f?.slice(0,2)||"?"; }
 const FILIAL_COLOR = {
@@ -1166,7 +1166,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
 
   useEffect(() => {
     if (status === "prüfen" && actualRec) {
-      const zustaendig = f === "Teenjoy" ? "teddy" : "yeaji";
+      const zustaendig = f === "TEEnJOY" ? "teddy" : "yeaji";
       const notifKey = `prüfen_${userName}_${d}`;
       setNotifications(prev => {
         if (prev && prev[notifKey]) return prev;
@@ -1472,7 +1472,7 @@ function EinspringenView({ userName }) {
               </div>
               <div style={{width:40,height:40,borderRadius:10,background:C.mintLight,
                 display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>
-                {s.filiale==="Teenjoy"?"🧋":"☕"}
+                {s.filiale==="TEEnJOY"?"🧋":"☕"}
               </div>
             </div>
             <button onClick={()=>einspringen(s)}
@@ -2386,12 +2386,12 @@ function StatistikTab({records,users}){
     else downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
   }
   function exportSummary(fmt="xlsx"){
-    const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","Teenjoy (Std)","Ø Std/Tag"];
+    const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","TEEnJOY (Std)","Ø Std/Tag"];
     const rows=[hdr,...empList.map(emp=>{
       const er=monthRecs.filter(r=>r.user===emp.vorname);
       const total=er.reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
-      return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["Teenjoy"].toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
+      return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["TEEnJOY"].toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
     })];
     if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monatsübersicht");
     else downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
@@ -2696,7 +2696,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
               ))}
             </div>
             <div style={{display:"flex",gap:10,flexWrap:"wrap",borderTop:`1px solid ${C.border}`,paddingTop:6}}>
-              {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"Teenjoy"}].map(({init,l})=>(
+              {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"TEEnJOY"}].map(({init,l})=>(
                 <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
                   <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
                   <span style={{fontSize:9,color:C.muted}}>{l}</span>
@@ -2713,8 +2713,8 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
               Kein Dienstplan für heute eingetragen.
             </div>
           ):(()=>{
-            //  : Arkaden  Aegidiimarkt  Teenjoy
-            const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","Teenjoy"];
+            //  : Arkaden  Aegidiimarkt  TEEnJOY
+            const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
             //   shift  
             const withShift = todayShiftEmps.map(emp=>{
               const shift=norm(schedule[emp.vorname]||[]).find(s=>(s.date||s.d)===todayStr);
@@ -3723,7 +3723,7 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
       + "=== SCHRITT 2: ZELLENWEISE AUSLESEN ===\n"
       + "Lies JEDE Zelle systematisch. Fuer jeden Namen aus der Liste:\n"
       + "Format: Name | Datum YYYY-MM-DD | Filiale | Zeit HH:MM-HH:MM\n"
-      + "Filialen: Arkaden/TEEAMO Arkaden -> TEEAMO Arkaden | Aegidiimarkt -> TEEAMO Aegidiimarkt | Teenjoy/TEEnJOY -> Teenjoy\n"
+      + "Filialen: Arkaden/TEEAMO Arkaden -> TEEAMO Arkaden | Aegidiimarkt/TEEAMO Aegidiimarkt -> TEEAMO Aegidiimarkt | Teenjoy/TEEnJOY/Teenjoy -> TEEnJOY\n"
       + "Jahr: " + curYear + "\n\n"
       + "=== SCHRITT 3: JSON AUSGABE ===\n"
       + "Antworte exakt so:\n"
