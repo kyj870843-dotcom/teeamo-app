@@ -931,9 +931,33 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
         sched[antrag.partner] = [...sched[antrag.partner],
           {d: antrag.initiatorDate, f: antrag.initiatorFiliale, t: antrag.initiatorTime||null}];
         window._fbSet(window._fbRef(window._fbDb, "schedule"), sched)
-          .then(() => console.log("✅ Schedule getauscht:", antrag.initiator, "↔", antrag.partner))
-          .catch(e => console.error("Schedule swap error:", e));
-      }, {onlyOnce: true});
+        // root schedule update
+        window._fbSet(window._fbRef(window._fbDb, "schedule"), sched)
+          .then(() => console.log("root schedule swapped"))
+          .catch(e => console.error("root error:", e));
+        // monthly schedule_YYYY_MM update (admin + partner real-time)
+        const affectedMonths = [...new Set([
+          antrag.initiatorDate ? antrag.initiatorDate.slice(0,7).replace("-","_") : null,
+          antrag.partnerDate ? antrag.partnerDate.slice(0,7).replace("-","_") : null,
+        ])].filter(Boolean);
+        affectedMonths.forEach(mk => {
+          const fk = "schedule_"+mk;
+          window._fbOnValue(window._fbRef(window._fbDb, fk), mSnap => {
+            const ms = mSnap.val() ? JSON.parse(JSON.stringify(mSnap.val())) : {};
+            const iArr = Object.values(ms[antrag.initiator]||{});
+            const iNew = iArr.filter(s=>(s.d||s.date)!==antrag.initiatorDate);
+            if((antrag.partnerDate||"").slice(0,7).replace("-","_")===mk)
+              iNew.push({d:antrag.partnerDate,f:antrag.partnerFiliale,t:antrag.partnerTime||null});
+            ms[antrag.initiator]=Object.fromEntries(iNew.map((s,ii)=>[String(ii),s]));
+            const pArr = Object.values(ms[antrag.partner]||{});
+            const pNew = pArr.filter(s=>(s.d||s.date)!==antrag.partnerDate);
+            if((antrag.initiatorDate||"").slice(0,7).replace("-","_")===mk)
+              pNew.push({d:antrag.initiatorDate,f:antrag.initiatorFiliale,t:antrag.initiatorTime||null});
+            ms[antrag.partner]=Object.fromEntries(pNew.map((s,ii)=>[String(ii),s]));
+            window._fbSet(window._fbRef(window._fbDb, fk), ms).catch(()=>{});
+          }, {onlyOnce:true});
+        });
+       }, {onlyOnce: true});
     }
 
     //   getauscht
@@ -1309,8 +1333,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
               </div>
             )}
 
-            {/* Absagen 탭 */}
-}
+            {/* Absagen 폼 */}
             {modalTab==="absagen"&&(
               <div>
                 <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>{"Grund "}<span style={{color:C.red}}>*</span></div>
