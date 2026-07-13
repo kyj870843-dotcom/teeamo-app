@@ -51,6 +51,14 @@
   window.dispatchEvent(new Event("firebase-ready"));
 </script>
 <script src="https://unpkg.com/@babel/standalone@7.26.0/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  // PDF.js worker 설정 (CDN)
+  if (window.pdfjsLib) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -380,77 +388,72 @@ function useDienstplanCSV() {
 
 
 
-// ═══════════════════════════════════════════════════════════════════
-//  PlanImage  — 재사용 가능 근무표 뷰어 (v3)
+// ═══════════════════════════════════════════════════════════════
+//  PlanImage  — 완성형 이미지 뷰어 (v4)
 //
-//  ✅ 고정 컨테이너 (70vh, overflow:hidden) → 레이아웃 밀림 없음
-//  ✅ Fit-to-Contain 초기 배율 (이미지/PDF 전체가 한눈에 보임)
-//  ✅ 핀치줌 + 마우스 휠 줌 (1× ~ 5×)
-//  ✅ 터치 드래그 + 마우스 드래그 panning
-//  ✅ 더블탭 / 더블클릭 → 즉시 초기화
-//  ✅ 경계 제한 (이미지 가장자리가 컨테이너 밖으로 나가지 않음)
-//  ✅ 내부 콘텐츠는 position:absolute + transform 만 사용
-// ═══════════════════════════════════════════════════════════════════
+//  · PDF는 업로드 시 이미지로 변환되어 저장됨 (← DienstplanUploadView)
+//  · 여기서는 순수 이미지만 처리 → naturalW/H로 완벽 fit-to-contain
+//  · 고정 컨테이너 (overflow:hidden) → 레이아웃 절대 밀림 없음
+//  · 더블탭/더블클릭 = 전체가 보이는 초기 상태로 완전 리셋
+//  · 핀치줌 + 마우스 휠 줌 (1× ~ 5×)
+//  · 확대 시에만 드래그 팬 활성화, 경계 clamp 적용
+// ═══════════════════════════════════════════════════════════════
 function PlanImage({ src }) {
   const boxRef = useRef(null);
 
-  // ── 줌/팬 상태 (ref = stale closure 방지) ──────────────────────
+  // ── 줌/팬 상태 (ref = stale closure 없음) ──────────────────
   const Z = useRef({
-    sc:1, tx:0, ty:0,        // 현재 유저 줌 / 오프셋 (screen px)
-    sc0:1, tx0:0, ty0:0,     // 제스처 시작 스냅샷
-    d0:0,                     // 핀치 시작 거리
-    ptx:0, pty:0,             // 팬 시작 포인터
-    dragging:false,           // 마우스 드래그 중
-    lastTap:0                 // 더블탭 타이머
+    sc:1, tx:0, ty:0,          // 현재 유저 scale + offset(screen px)
+    sc0:1, tx0:0, ty0:0,       // 제스처 시작 스냅샷
+    d0:0,                       // 핀치 시작 거리
+    ptx:0, pty:0,               // 팬 시작 포인터
+    dragging:false,             // 마우스 드래그 중
+    lastTap:0                   // 더블탭 타이머
   });
-
-  // React state: 렌더링 트리거 용도
   const [xf, setXf] = useState({ sc:1, tx:0, ty:0 });
 
-  // 컨테이너 측정
+  // ── 컨테이너 크기 (마운트 후 측정) ─────────────────────────
   const [cw, setCw] = useState(375);
-  const [ch, setCh] = useState(500);
+  const [ch, setCh] = useState(600);
 
-  // 이미지 자연 크기 (load 후 확정)
-  const [imgNat, setImgNat] = useState(null);
+  // ── 이미지 원본 크기 (onLoad 후 확정) ──────────────────────
+  const [nat, setNat] = useState(null); // { w, h }
 
-  const isPdf = !!(src && src.startsWith("data:application/pdf"));
+  // Fit-to-Contain 기본 배율: 컨테이너에 가로/세로 모두 맞춤
+  // (naturalWidth/Height 모를 땐 기본 배율 1)
+  const fitSc = nat ? Math.min(cw / nat.w, ch / nat.h) : 1;
 
-  // 콘텐츠 원본 크기
-  const PDF_W = 794, PDF_H = 1123;  // A4 portrait
-  const natW = isPdf ? PDF_W : (imgNat ? imgNat.w : PDF_W);
-  const natH = isPdf ? PDF_H : (imgNat ? imgNat.h : PDF_H);
-
-  // Fit-to-Contain 기본 배율: 컨테이너에 꽉 차도록
-  const fitSc = Math.min(cw / natW, ch / natH);
-
-  // 컨테이너 크기 측정 (마운트 1회)
+  // 컨테이너 크기 측정
   React.useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
     setCw(el.clientWidth  || 375);
-    setCh(el.clientHeight || 500);
+    setCh(el.clientHeight || 600);
   }, []);
 
-  // 터치 / 마우스 / 휠 이벤트 등록
+  // ── 이벤트 핸들러 등록 ─────────────────────────────────────
   React.useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
     const z = Z.current;
 
-    // 화면 좌표 기준 clamp + 커밋
+    // sc=1 이면 "전체 이미지가 보이는 초기 상태"
+    // 가로/세로 모두 fitSc 적용됨 → 어느 쪽도 잘리지 않음
     const commit = (sc, tx, ty) => {
-      const totSc = fitSc * sc;
-      // 콘텐츠 크기가 컨테이너보다 작으면 이동 불가(0), 크면 반절까지
-      const maxTx = Math.max(0, (natW * totSc - cw) / 2);
-      const maxTy = Math.max(0, (natH * totSc - ch) / 2);
-      const cl = (v, m) => Math.max(-m, Math.min(m, v));
+      // 실제 화면에서 콘텐츠 크기 (= 원본 * fitSc * sc)
+      const visW = (nat ? nat.w : cw) * fitSc * sc;
+      const visH = (nat ? nat.h : ch) * fitSc * sc;
+      // 컨테이너보다 클 때만 팬 허용 → clamp
+      const maxTx = Math.max(0, (visW - cw) / 2);
+      const maxTy = Math.max(0, (visH - ch) / 2);
+      const cl    = (v, m) => Math.max(-m, Math.min(m, v));
       z.sc = sc;
       z.tx = cl(tx, maxTx);
       z.ty = cl(ty, maxTy);
       setXf({ sc: z.sc, tx: z.tx, ty: z.ty });
     };
 
+    // 더블탭/더블클릭 → 초기 상태 (전체가 보임)
     const reset = () => commit(1, 0, 0);
 
     const dist = ts => Math.hypot(
@@ -458,26 +461,27 @@ function PlanImage({ src }) {
       ts[0].clientY - ts[1].clientY
     );
 
-    // ── Touch ────────────────────────────────────────────────────
+    // Touch
     function onTouchStart(e) {
       if (e.touches.length === 2) {
         z.d0=dist(e.touches); z.sc0=z.sc; z.tx0=z.tx; z.ty0=z.ty;
       } else if (e.touches.length === 1) {
         z.ptx=e.touches[0].clientX; z.pty=e.touches[0].clientY;
         z.tx0=z.tx; z.ty0=z.ty;
-        const now=Date.now();
+        const now = Date.now();
         if (now - z.lastTap < 300) reset();
         z.lastTap = now;
       }
     }
     function onTouchMove(e) {
-      e.preventDefault();
+      e.preventDefault(); // passive:false 필수
       if (e.touches.length === 2) {
         commit(
           Math.min(5, Math.max(1, z.sc0 * (dist(e.touches) / z.d0))),
           z.tx0, z.ty0
         );
-      } else if (e.touches.length === 1) {
+      } else if (e.touches.length === 1 && z.sc > 1) {
+        // 확대 시에만 드래그 팬 허용
         commit(
           z.sc,
           z.tx0 + (e.touches[0].clientX - z.ptx),
@@ -486,16 +490,17 @@ function PlanImage({ src }) {
       }
     }
     function onTouchEnd(e) {
-      if (e.touches.length === 1) {
-        z.ptx=e.touches[0].clientX; z.pty=e.touches[0].clientY;
-        z.tx0=z.tx; z.ty0=z.ty;
-      } else if (e.touches.length === 0) {
+      if (e.touches.length < 2) {
+        if (e.touches.length === 1) {
+          z.ptx=e.touches[0].clientX; z.pty=e.touches[0].clientY;
+        }
         z.tx0=z.tx; z.ty0=z.ty;
       }
     }
 
-    // ── Mouse drag ───────────────────────────────────────────────
+    // Mouse drag (확대 시에만)
     function onMouseDown(e) {
+      if (z.sc <= 1) return;
       z.dragging=true;
       z.ptx=e.clientX; z.pty=e.clientY;
       z.tx0=z.tx; z.ty0=z.ty;
@@ -505,10 +510,9 @@ function PlanImage({ src }) {
       if (!z.dragging) return;
       commit(z.sc, z.tx0+(e.clientX-z.ptx), z.ty0+(e.clientY-z.pty));
     }
-    function onMouseUp()    { z.dragging=false; }
-    function onMouseLeave() { z.dragging=false; }
+    function stopDrag() { z.dragging=false; }
 
-    // ── Mouse wheel ──────────────────────────────────────────────
+    // Mouse wheel
     function onWheel(e) {
       e.preventDefault();
       commit(
@@ -522,8 +526,8 @@ function PlanImage({ src }) {
     el.addEventListener("touchend",    onTouchEnd,    { passive: true  });
     el.addEventListener("mousedown",   onMouseDown);
     el.addEventListener("mousemove",   onMouseMove);
-    el.addEventListener("mouseup",     onMouseUp);
-    el.addEventListener("mouseleave",  onMouseLeave);
+    el.addEventListener("mouseup",     stopDrag);
+    el.addEventListener("mouseleave",  stopDrag);
     el.addEventListener("wheel",       onWheel,       { passive: false });
     el.addEventListener("dblclick",    reset);
 
@@ -533,25 +537,26 @@ function PlanImage({ src }) {
       el.removeEventListener("touchend",    onTouchEnd);
       el.removeEventListener("mousedown",   onMouseDown);
       el.removeEventListener("mousemove",   onMouseMove);
-      el.removeEventListener("mouseup",     onMouseUp);
-      el.removeEventListener("mouseleave",  onMouseLeave);
+      el.removeEventListener("mouseup",     stopDrag);
+      el.removeEventListener("mouseleave",  stopDrag);
       el.removeEventListener("wheel",       onWheel);
       el.removeEventListener("dblclick",    reset);
     };
-  }, [fitSc, natW, natH, cw, ch]);
+  }, [fitSc, nat, cw, ch]);
 
   if (!src) return null;
 
-  // ── CSS 계산 ─────────────────────────────────────────────────────
+  // ── CSS 계산 ──────────────────────────────────────────────
   const { sc, tx, ty } = xf;
-  const totSc    = fitSc * sc;
-  // position:absolute + top/left:50% 로 중앙 배치 →
-  // translate(-50%,-50%) 으로 자기 크기 보정 →
-  // scale(totSc) 로 배율 →
-  // translate(px, py) 로 팬 (totSc 나눔 = 로컬 좌표로 변환)
+  const totSc = fitSc * sc; // 실제 렌더 배율
+
+  // 중앙 정렬 후 scale, 그 다음 팬
+  // translate(-50%,-50%): 자기 크기의 절반만큼 올라와 중앙 정렬
+  // scale(totSc): 배율 적용
+  // translate(tx/totSc, ty/totSc): 팬 (로컬 좌표계 보정)
   const transform = `translate(-50%,-50%) scale(${totSc}) translate(${tx/totSc}px,${ty/totSc}px)`;
 
-  // 고정 컨테이너: 크기 불변, 내부만 transform
+  // 고정 컨테이너 (크기 절대 불변)
   const box = {
     position:    "relative",
     width:       "100%",
@@ -563,7 +568,7 @@ function PlanImage({ src }) {
     cursor:      sc > 1 ? "grab" : "default"
   };
 
-  // 내부 공통 스타일
+  // 내부 콘텐츠 공통 스타일
   const inner = {
     position:        "absolute",
     top:             "50%",
@@ -571,47 +576,21 @@ function PlanImage({ src }) {
     transformOrigin: "center center",
     transition:      "none",
     pointerEvents:   "none",
-    transform
+    transform,
+    display:         "block"
   };
 
-  // ── PDF ──────────────────────────────────────────────────────────
-  if (isPdf) {
-    return (
-      <div ref={boxRef} style={box}>
-        <div style={{ ...inner, width: PDF_W+"px", height: PDF_H+"px" }}>
-          <iframe src={src}
-            style={{ width:"100%", height:"100%", border:"none" }}
-            title="Dienstplan"/>
-        </div>
-      </div>
-    );
-  }
-
-  // ── 이미지 ───────────────────────────────────────────────────────
-  // 자연 크기를 알기 전: 임시로 maxWidth/maxHeight 로 화면에 표시
-  // 자연 크기를 알게 되면: 명시적 크기로 전환 (fitSc 재계산됨)
   return (
     <div ref={boxRef} style={box}>
-      <img
-        src={src}
-        alt="Dienstplan"
+      <img src={src} alt="Dienstplan"
         onLoad={e => {
-          const nw = e.target.naturalWidth;
-          const nh = e.target.naturalHeight;
-          if (nw && nh) setImgNat({ w:nw, h:nh });
+          const nw=e.target.naturalWidth, nh=e.target.naturalHeight;
+          if (nw && nh) setNat({ w:nw, h:nh });
         }}
-        style={imgNat ? {
-          ...inner,
-          width:   natW+"px",
-          height:  natH+"px",
-          display: "block"
+        style={nat ? {
+          ...inner, width: nat.w+"px", height: nat.h+"px"
         } : {
-          ...inner,
-          maxWidth:  "100%",
-          maxHeight: "100%",
-          width:     "auto",
-          height:    "auto",
-          display:   "block"
+          ...inner, maxWidth:"100%", maxHeight:"100%", width:"auto", height:"auto"
         }}
       />
     </div>
@@ -3626,8 +3605,35 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
       r.onload = () => res(r.result.split(",")[1]);
       r.readAsDataURL(file);
     });
-    const dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
-    if (!isPdf) { setLocalImgSrc(dataUrl); setLocalImgMonth(selMonth); }
+
+    // PDF → 이미지 변환 (PDF.js 사용)
+    // PDF를 이미지로 변환하면 어떤 비율이든 완벽한 fit-to-contain 가능
+    let dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
+    if (isPdf && window.pdfjsLib) {
+      try {
+        setMsg({ type:"info", text:"⏳ PDF wird in Bild umgewandelt…" });
+        const pdfLib = window.pdfjsLib;
+        pdfLib.GlobalWorkerOptions.workerSrc =
+          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        const raw = atob(b64);
+        const bytes = new Uint8Array(raw.length);
+        for (let i=0; i<raw.length; i++) bytes[i]=raw.charCodeAt(i);
+        const pdf  = await pdfLib.getDocument({ data: bytes }).promise;
+        const page = await pdf.getPage(1);
+        // 3x 해상도로 고화질 렌더
+        const viewport = page.getViewport({ scale: 3.0 });
+        const canvas   = document.createElement("canvas");
+        canvas.width   = viewport.width;
+        canvas.height  = viewport.height;
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+        dataUrl = canvas.toDataURL("image/jpeg", 0.93);
+        setMsg({ type:"info", text:"⏳ Analysiere… (kann 20–40 Sek. dauern)" });
+      } catch(pdfErr) {
+        console.warn("PDF→Image 변환 실패, PDF 원본 사용:", pdfErr);
+        dataUrl = `data:application/pdf;base64,${b64}`;
+      }
+    }
+    if (dataUrl) { setLocalImgSrc(dataUrl); setLocalImgMonth(selMonth); }
 
     const empNames = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key)).map(u => u.vorname).join(", ");
     const promptText = `Du bist ein Assistent, der Dienstpläne analysiert. Analysiere diesen Dienstplan sehr sorgfältig.
@@ -3728,16 +3734,12 @@ Verwende die Vornamen EXAKT so wie sie in der Liste stehen.`;
         window._fbSet(window._fbRef(window._fbDb, fbScheduleKey), parsedForFb)
           .then(()=>console.log("✅ schedule saved →", fbScheduleKey))
           .catch(e=>console.error("schedule save error:", e));
-        // planImage 월별 저장 (PDF/이미지 모두)
-        const fileUrl = isPdf ? `data:application/pdf;base64,${b64}` : dataUrl;
-        if (fileUrl && b64.length < 6000000) {
-          window._fbSet(window._fbRef(window._fbDb, fbImageKey), fileUrl)
+        // planImage 월별 저장 (항상 변환된 이미지 dataUrl 사용 — PDF 비율 문제 없음)
+        if (dataUrl) {
+          window._fbSet(window._fbRef(window._fbDb, fbImageKey), dataUrl)
             .then(()=>console.log("✅ planImage saved →", fbImageKey))
             .catch(e=>console.error("planImage save error:", e));
-          // 최신 이미지를 fallback용 planImage에도 저장
-          window._fbSet(window._fbRef(window._fbDb, "planImage"), fileUrl).catch(()=>{});
-          // 로컬 미리보기 갱신
-          if (isPdf) { setLocalImgSrc(fileUrl); setLocalImgMonth(saveMonthKey); }
+          window._fbSet(window._fbRef(window._fbDb, "planImage"), dataUrl).catch(()=>{});
         }
       }
       // 부모 AdminDienstplanView에 즉시 반영
