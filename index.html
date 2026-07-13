@@ -1,3 +1,19 @@
+  // schedule 변경 시 editRows 자동 초기화 (pendingAnalysis 없을 때만)
+  React.useEffect(()=>{
+    if (pendingAnalysis) return;
+    if (!schedule || Object.keys(schedule).length===0) return;
+    const rows = [];
+    for (const [name, rawShifts] of Object.entries(schedule)) {
+      const shifts = Array.isArray(rawShifts)?rawShifts:Object.values(rawShifts||{});
+      for (const s of shifts) {
+        rows.push({ id:Math.random().toString(36).slice(2),
+          name, date:s.date||s.d||"", filiale:s.filiale||s.f||"", time:s.time||s.t||"" });
+      }
+    }
+    rows.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.name<b.name?-1:1);
+    setEditRows(rows);
+  }, [selMonth, schedule, pendingAnalysis]);
+
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -3840,269 +3856,228 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
 
 
   return (
-    <div style={{padding:"14px"}}>
+    <div style={{padding:"0"}}>
 
-      {/* API   */}
-      {showKeyInput && (
-        <div style={{...S.card, marginBottom:12, border:`1.5px solid ${C.yellow}`}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:6}}>{"🔑 Anthropic API-Schlüssel"}</div>
-          <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
-            placeholder="sk-ant-..."
-            style={{...S.input, width:"100%", fontSize:11, marginBottom:8}}/>
-          <button onClick={()=>setShowKeyInput(false)}
-            style={{width:"100%",padding:"9px",borderRadius:9,border:"none",background:C.mint,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>
-            Speichern
-          </button>
-        </div>
-      )}
-
-      {/*   */}
-      <div style={{...S.card, marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"📋 Dienstplan hochladen"}</div>
-        <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{"Bild hochladen → KI analysiert automatisch die Schichten"}</div>
-        <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" onChange={handleFile} style={{display:"none"}}/>
-        <button onClick={()=>fileRef.current.click()} disabled={analyzing}
-          style={{width:"100%",padding:"12px",borderRadius:11,border:`2px dashed ${C.mint}`,
-            background:C.mintLight,color:C.mintDark,fontWeight:800,fontSize:13,cursor:"pointer",
-            opacity:analyzing?0.6:1}}>
-          {analyzing ? "⏳ KI analysiert…" : "📷 Bild oder PDF auswählen & analysieren"}
-        </button>
-        {!apiKey&&(
-          <button onClick={()=>setShowKeyInput(true)}
-            style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
-            {"🔑 API-Schlüssel eingeben"}
-          </button>
-        )}
-        {apiKey&&(
-          <button onClick={()=>setShowKeyInput(v=>!v)}
-            style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
-            {"🔑 API-Schlüssel ändern"}
-          </button>
-        )}
-        {msg&&(
-          <div style={{marginTop:10,padding:"9px 12px",borderRadius:9,
-            background:msg.type==="ok"?C.mintLight:msg.type==="err"?C.redLight:msg.type==="review"?"#EEF4FF":C.bg,
-            color:msg.type==="ok"?C.mintDark:msg.type==="err"?C.red:msg.type==="review"?C.navy:C.text,
-            fontSize:11,fontWeight:600}}>
-            {msg.text}
+      {/* ═══ STICKY 상단 고정: 업로드 UI + 근무표 이미지 ═══ */}
+      <div style={{
+        position:"sticky", top:0, zIndex:60,
+        background:C.card,
+        boxShadow:"0 2px 16px rgba(0,0,0,.10)"
+      }}>
+        {/* 업로드 컨트롤 */}
+        <div style={{padding:"12px 14px 8px"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+            <div style={{fontSize:12,fontWeight:800,color:C.text}}>Dienstplan hochladen</div>
+            {apiKey&&(
+              <button onClick={()=>setShowKeyInput(v=>!v)}
+                style={{fontSize:9,padding:"3px 8px",borderRadius:8,
+                  border:"1px solid "+C.border,background:"#fff",color:C.muted,cursor:"pointer"}}>
+                API-Key
+              </button>
+            )}
           </div>
-        )}
+          {showKeyInput&&(
+            <div style={{...S.card,marginBottom:8,padding:"10px 12px",border:"1.5px solid "+C.yellow}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Anthropic API-Schluessel</div>
+              <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
+                placeholder="sk-ant-..."
+                style={{...S.input,width:"100%",fontSize:12,marginBottom:6}}/>
+              <button onClick={()=>setShowKeyInput(false)}
+                style={{width:"100%",padding:"6px",borderRadius:8,border:"none",
+                  background:C.navy,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                Speichern
+              </button>
+            </div>
+          )}
 
-        {/* Analyse-Ergebnis: Pruefen & Korrigieren */}
-        {pendingAnalysis && editRows.length > 0 && (
-          <div style={{marginTop:12}}>
-            <div style={{fontSize:11,fontWeight:800,color:C.navy,marginBottom:8,
-              textTransform:"uppercase",letterSpacing:".05em"}}>
-              Ergebnisse pruefen & korrigieren
-            </div>
-            {editRows.map((row)=>(
-              <div key={row.id} style={{...S.card,padding:"10px 12px",marginBottom:8,
-                border:"1px solid "+C.border,position:"relative"}}>
-                <button onClick={()=>setEditRows(prev=>prev.filter(r=>r.id!==row.id))}
-                  style={{position:"absolute",top:8,right:8,width:22,height:22,
-                    borderRadius:"50%",border:"none",background:C.border,
-                    color:C.muted,fontSize:12,cursor:"pointer",lineHeight:1}}>{"x"}</button>
-                <div style={{marginBottom:6}}>
-                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:2}}>MITARBEITER</div>
-                  <input value={row.name}
-                    onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,name:v}:r));}}
-                    style={{...S.input,width:"100%",fontSize:13,fontWeight:700,padding:"6px 8px"}}/>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
-                  <div>
-                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:2}}>DATUM</div>
-                    <input value={row.date} type="date"
-                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,date:v}:r));}}
-                      style={{...S.input,width:"100%",fontSize:11,padding:"5px 4px",boxSizing:"border-box"}}/>
-                  </div>
-                  <div>
-                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:2}}>FILIALE</div>
-                    <select value={row.filiale}
-                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,filiale:v}:r));}}
-                      style={{...S.input,width:"100%",fontSize:11,padding:"5px 4px",boxSizing:"border-box"}}>
-                      {FILIALEN.map(f=><option key={f} value={f}>{f.replace("TEEAMO ","")}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:2}}>ZEIT</div>
-                    <input value={row.time||""} placeholder="09:00-17:00"
-                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,time:v}:r));}}
-                      style={{...S.input,width:"100%",fontSize:11,padding:"5px 4px",boxSizing:"border-box"}}/>
-                  </div>
-                </div>
-              </div>
-            ))}
-            <button onClick={()=>setEditRows(prev=>[...prev,{
-              id:Math.random().toString(36).slice(2),name:"",
-              date:new Date().toISOString().slice(0,10),filiale:FILIALEN[0],time:""
-            }])}
-              style={{width:"100%",padding:"9px",borderRadius:10,
-                border:"1.5px dashed "+C.border,background:"transparent",
-                color:C.muted,fontSize:12,cursor:"pointer",marginBottom:12}}>
-              {"+ Schicht hinzufuegen"}
+          <input type="file" accept="image/*,application/pdf" ref={fileRef}
+            style={{display:"none"}} onChange={handleFile}/>
+          <button
+            onClick={()=>fileRef.current.click()}
+            disabled={analyzing}
+            style={{width:"100%",padding:"13px",borderRadius:12,border:"2px dashed "+C.mint,
+              background:analyzing?"#f8f8f8":C.mintLight,
+              color:analyzing?C.muted:C.mintDark,
+              fontWeight:800,fontSize:13,cursor:analyzing?"not-allowed":"pointer",
+              display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            {analyzing ? "KI analysiert..." : "Bild oder PDF auswaehlen & analysieren"}
+          </button>
+          {!apiKey&&(
+            <button onClick={()=>setShowKeyInput(true)}
+              style={{marginTop:6,width:"100%",padding:"7px",borderRadius:8,
+                border:"1px solid "+C.border,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
+              API-Schluessel eingeben
             </button>
-            <div style={{display:"flex",gap:8}}>
-              <button onClick={()=>{setPendingAnalysis(null);setEditRows([]);setMsg(null);}}
-                style={{flex:1,padding:"12px",borderRadius:11,
-                  border:"1px solid "+C.border,background:"#fff",
-                  color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>
-                Verwerfen
-              </button>
-              <button onClick={confirmAndSave} disabled={saving}
-                style={{flex:2,padding:"12px",borderRadius:11,border:"none",
-                  background:"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",
-                  color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",opacity:saving?0.6:1}}>
-                {saving?"Speichern...":"Bestaetigen & Speichern"}
-              </button>
+          )}
+          {msg&&(
+            <div style={{marginTop:8,padding:"8px 12px",borderRadius:9,
+              background:msg.type==="ok"?C.mintLight:msg.type==="err"?C.redLight:msg.type==="review"?"#EEF4FF":"#f0f4ff",
+              color:msg.type==="ok"?C.mintDark:msg.type==="err"?C.red:msg.type==="review"?C.navy:C.text,
+              fontSize:11,fontWeight:600}}>
+              {msg.text}
             </div>
+          )}
+        </div>
+
+        {/* 근무표 이미지 — 스티키 고정 영역의 일부 */}
+        {displayImg&&(
+          <div style={{overflow:"hidden",borderTop:"1px solid "+C.border}}>
+            <PlanImage src={displayImg}/>
           </div>
         )}
       </div>
 
-      {/*   */}
-      {displayImg && (
-        <div style={{
-          position:"sticky", top:0, zIndex:50,
-          marginBottom:12, borderRadius:14, overflow:"hidden",
-          boxShadow:"0 2px 12px rgba(0,0,0,.10)"
-        }}>
-          <PlanImage src={displayImg}/>
-        </div>
-      )}
-
-      {/*   */}
-      {schedule && Object.keys(schedule).length > 0 && (
-        <div>
-          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:12,
-            textTransform:"uppercase",letterSpacing:".06em"}}>
-            Extrahierte Schichten
+      {/* ═══ 스크롤 영역: 수정 가능한 편집 리스트 ═══ */}
+      {editRows.length > 0 && (
+        <div style={{padding:"14px"}}>
+          {/* 헤더 */}
+          <div style={{
+            display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12
+          }}>
+            <div style={{fontSize:11,fontWeight:800,color:C.navy,textTransform:"uppercase",letterSpacing:".05em"}}>
+              {pendingAnalysis ? "Ergebnisse pruefen & korrigieren" : "Schichten bearbeiten"}
+            </div>
+            <div style={{fontSize:10,color:C.muted}}>{editRows.length} Eintraege</div>
           </div>
-          {Object.entries(schedule).map(([name, rawShifts]) => {
-            const normShifts = !rawShifts?[]:Array.isArray(rawShifts)?rawShifts:Object.values(rawShifts);
-            if (normShifts.length === 0) return null;
-            const accountExists = Array.isArray(users) && users.some(u=>u.vorname===name);
-            const todayStr = today();
-            const sorted = [...normShifts].sort((a,b)=>{
-              const da=a.date||a.d||"", db=b.date||b.d||"";
-              return da<db?-1:da>db?1:0;
-            });
-            return (
-              <div key={name} style={{marginBottom:20}}>
-                {/* ── 직원 이름 헤더 ── */}
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <div style={{fontSize:20,fontWeight:900,color:C.text,letterSpacing:"-.02em"}}>{name}</div>
-                  {!accountExists&&(
-                    <span style={{fontSize:9,padding:"2px 7px",borderRadius:99,
-                      background:C.border,color:C.muted,fontWeight:600}}>Kein Konto</span>
-                  )}
-                </div>
-                {/* ── 날짜별 카드 ── */}
-                {sorted.map((shift, i) => {
-                  const d = shift.date||shift.d;
-                  const f = shift.filiale||shift.f;
-                  const t = shift.time||shift.t;
-                  const actualRec = accountExists ? records.find(r=>r.user===name&&r.date===d) : null;
-                  let statusLabel, statusColor, statusBg;
-                  if (!accountExists) {
-                    statusLabel="Ausstehend"; statusColor=C.muted; statusBg=C.border;
-                  } else if (!actualRec) {
-                    if (d < todayStr) {
-                      statusLabel="Nicht erschienen"; statusColor=C.red; statusBg=C.redLight;
-                    } else {
-                      statusLabel="Ausstehend"; statusColor=C.muted; statusBg=C.border;
-                    }
-                  } else if (!actualRec.aus||actualRec.aus==="") {
-                    statusLabel="Aktiv"; statusColor=C.yellow; statusBg=C.yellowLight;
-                  } else {
-                    statusLabel="Gearbeitet"; statusColor=C.mintDark; statusBg=C.mintLight;
-                  }
-                  const pendingNachtrag = nList.find(a=>a.user===name&&a.date===d&&a.status==="offen");
-                  const doneNachtrag    = nList.find(a=>a.user===name&&a.date===d&&a.status!=="offen");
-                  const pendingAbsage   = abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status==="offen");
-                  const doneAbsage      = abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status!=="offen");
-                  const dateObj = new Date(d);
-                  const dayDate = dateObj.toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"});
 
-                  return (
-                    <div key={i} style={{
-                      borderRadius:12,marginBottom:6,overflow:"hidden",
-                      border:`1px solid ${pendingNachtrag||pendingAbsage?C.yellow:C.border}`,
-                      background:actualRec?.aus?C.mintLight:actualRec?.ein?"#FFF9E6":"#fff"
-                    }}>
-                      {/* 메인 행 */}
-                      <div style={{display:"flex",alignItems:"center",
-                        justifyContent:"space-between",padding:"11px 14px"}}>
-                        {/* 좌측: 날짜 + 지점·시간 */}
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:15,fontWeight:800,color:C.text,marginBottom:2}}>
-                            {dayDate}
-                          </div>
-                          <div style={{fontSize:11,color:C.muted,fontWeight:500}}>
-                            {f}{t?` · ${t}`:""}
-                          </div>
-                          {actualRec?.ein&&(
-                            <div style={{fontSize:10,color:actualRec.aus?C.mintDark:C.yellow,
-                              fontWeight:600,marginTop:3}}>
-                              {"⏱ "}{actualRec.ein}{actualRec.aus?` – ${actualRec.aus}`:" (läuft)"}
-                              {actualRec.aus&&<span style={{color:C.muted,fontWeight:400}}>
-                                {" · "}{stdLabel(actualRec.ein,actualRec.aus)}
-                              </span>}
-                            </div>
-                          )}
-                        </div>
-                        {/* 우측: 상태 배지 */}
-                        <span style={{
-                          fontSize:10,fontWeight:700,
-                          padding:"4px 10px",borderRadius:99,flexShrink:0,marginLeft:10,
-                          color:statusColor,background:statusBg,
-                          border:`1px solid ${statusColor}`
-                        }}>
-                          {statusLabel}
-                        </span>
-                      </div>
-                      {/* 부가 정보 행 */}
-                      {pendingNachtrag&&(
-                        <div style={{padding:"6px 14px",borderTop:`1px solid ${C.yellow}`,background:C.yellowLight}}>
-                          <span style={{fontSize:9,fontWeight:700,color:C.yellow}}>
-                            🕐 Nachtrag ausstehend · {pendingNachtrag.ein} – {pendingNachtrag.aus}
-                          </span>
-                        </div>
-                      )}
-                      {!pendingNachtrag&&doneNachtrag&&(
-                        <div style={{padding:"6px 14px",borderTop:`1px solid ${C.border}`,
-                          background:doneNachtrag.status==="genehmigt"?C.mintLight:C.redLight}}>
-                          <span style={{fontSize:9,fontWeight:700,
-                            color:doneNachtrag.status==="genehmigt"?C.mintDark:C.red}}>
-                            🕐 {doneNachtrag.status==="genehmigt"?"Nachtrag genehmigt ✓":"Nachtrag abgelehnt ✕"}
-                            {" · "}{doneNachtrag.ein} – {doneNachtrag.aus}
-                          </span>
-                        </div>
-                      )}
-                      {pendingAbsage&&(
-                        <div style={{padding:"6px 14px",borderTop:`1px solid ${C.yellow}`,background:C.yellowLight}}>
-                          <span style={{fontSize:9,fontWeight:700,color:C.yellow}}>🚫 Absage ausstehend</span>
-                        </div>
-                      )}
-                      {!pendingAbsage&&doneAbsage&&(
-                        <div style={{padding:"6px 14px",borderTop:`1px solid ${C.border}`,
-                          background:doneAbsage.status==="genehmigt"?C.redLight:C.bg}}>
-                          <span style={{fontSize:9,fontWeight:700,
-                            color:doneAbsage.status==="genehmigt"?C.red:C.muted}}>
-                            🚫 Absage {doneAbsage.status==="genehmigt"?"genehmigt ✓":"abgelehnt ✕"}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+          {/* 편집 카드 목록 */}
+          {editRows.map((row)=>{
+            const accountExists = Array.isArray(users) && users.some(u=>u.vorname===row.name);
+            const actualRec = accountExists ? (Array.isArray(records)?records:[]).find(r=>r.user===row.name&&r.date===row.date) : null;
+            const todayStr2 = today();
+            let statusLabel="Ausstehend", statusColor=C.muted, statusBg=C.border;
+            if (!accountExists){ statusLabel="Kein Konto"; statusColor=C.muted; statusBg=C.border; }
+            else if (actualRec?.aus){ statusLabel="Gearbeitet"; statusColor=C.mintDark; statusBg=C.mintLight; }
+            else if (actualRec?.ein){ statusLabel="Aktiv"; statusColor=C.yellow; statusBg=C.yellowLight; }
+            else if (row.date < todayStr2){ statusLabel="Nicht erschienen"; statusColor=C.red; statusBg=C.redLight; }
+            return (
+              <div key={row.id} style={{
+                ...S.card, marginBottom:10, padding:"12px 12px 10px",
+                border:"1px solid "+C.border
+              }}>
+                {/* 직원 + 상태 + 삭제 */}
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>MITARBEITER</div>
+                    <select value={row.name}
+                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,name:v}:r));}}
+                      style={{...S.input,width:"100%",fontSize:13,fontWeight:700,padding:"6px 8px"}}>
+                      <option value="">-- Name --</option>
+                      {(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).map(u=>(
+                        <option key={u.key} value={u.vorname}>{u.vorname}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {/* 상태 배지 */}
+                  <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
+                    flexShrink:0,color:statusColor,background:statusBg,
+                    border:"1px solid "+statusColor,marginTop:14}}>
+                    {statusLabel}
+                  </span>
+                  {/* 삭제 버튼 */}
+                  <button onClick={()=>setEditRows(prev=>prev.filter(r=>r.id!==row.id))}
+                    style={{marginTop:14,width:28,height:28,flexShrink:0,
+                      borderRadius:8,border:"1px solid "+C.border,background:"#fff",
+                      color:C.red,fontSize:14,cursor:"pointer",display:"flex",
+                      alignItems:"center",justifyContent:"center"}}>
+                    {"🗑"}
+                  </button>
+                </div>
+
+                {/* 날짜 / 지점 / 시간 */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:6}}>
+                  <div>
+                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>DATUM</div>
+                    <input value={row.date} type="date"
+                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,date:v}:r));}}
+                      style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>FILIALE</div>
+                    <select value={row.filiale}
+                      onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,filiale:v}:r));}}
+                      style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}>
+                      {FILIALEN.map(f=><option key={f} value={f}>{f.replace("TEEAMO ","")}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>ARBEITSZEIT (z.B. 09:00-17:00)</div>
+                  <input value={row.time||""} placeholder="09:00-17:00"
+                    onChange={e=>{const v=e.target.value;setEditRows(prev=>prev.map(r=>r.id===row.id?{...r,time:v}:r));}}
+                    style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
+                </div>
+                {/* 실제 기록 (있으면 표시) */}
+                {actualRec?.ein&&(
+                  <div style={{marginTop:6,padding:"4px 8px",borderRadius:7,
+                    background:actualRec.aus?C.mintLight:C.yellowLight,fontSize:10,
+                    color:actualRec.aus?C.mintDark:C.yellow,fontWeight:600}}>
+                    Eingestempelt: {actualRec.ein}{actualRec.aus?" – "+actualRec.aus:" (laueft noch)"}
+                    {actualRec.aus&&" · "+stdLabel(actualRec.ein,actualRec.aus)}
+                  </div>
+                )}
               </div>
             );
           })}
+
+          {/* + 근무 추가 버튼 */}
+          <button onClick={()=>setEditRows(prev=>[...prev,{
+            id:Math.random().toString(36).slice(2),
+            name:"", date:new Date().toISOString().slice(0,10),
+            filiale:FILIALEN[0], time:""
+          }])}
+            style={{width:"100%",padding:"11px",borderRadius:11,
+              border:"1.5px dashed "+C.mint,background:"transparent",
+              color:C.mintDark,fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:80}}>
+            {"+ Schicht hinzufuegen"}
+          </button>
         </div>
       )}
+
+      {/* 데이터 없을 때 안내 */}
+      {editRows.length === 0 && !analyzing && (
+        <div style={{padding:"32px 14px",textAlign:"center"}}>
+          <div style={{fontSize:32,marginBottom:8}}>📋</div>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>
+            Kein Dienstplan vorhanden
+          </div>
+          <div style={{fontSize:11,color:C.muted}}>
+            Bitte erst hochladen und analysieren.
+          </div>
+        </div>
+      )}
+
+      {/* ═══ 하단 고정 저장 버튼 ═══ */}
+      {editRows.length > 0 && (
+        <div style={{
+          position:"fixed", bottom:0, left:0, right:0, zIndex:70,
+          padding:"12px 16px",
+          paddingBottom:"max(12px,env(safe-area-inset-bottom))",
+          background:"#fff",
+          borderTop:"1.5px solid "+C.border,
+          boxShadow:"0 -4px 20px rgba(0,0,0,.12)"
+        }}>
+          <div style={{display:"flex",gap:8,maxWidth:500,margin:"0 auto"}}>
+            <button onClick={()=>{setEditRows([]);setPendingAnalysis(null);setMsg(null);}}
+              style={{flex:1,padding:"12px",borderRadius:11,
+                border:"1px solid "+C.border,background:"#fff",
+                color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>
+              Zuruecksetzen
+            </button>
+            <button onClick={confirmAndSave} disabled={saving}
+              style={{flex:2,padding:"12px",borderRadius:11,border:"none",
+                background:saving?"#aaa":"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",
+                color:"#fff",fontWeight:800,fontSize:13,cursor:saving?"not-allowed":"pointer"}}>
+              {saving ? "Speichern..." : "Bestaetigen & Speichern"}
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+
 function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx}){
   const [tab,setTab]=useState("uebersicht");
   const [detailKey,setDetailKey]=useState(null);
