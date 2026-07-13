@@ -389,79 +389,68 @@ function useDienstplanCSV() {
 
 
 // ═══════════════════════════════════════════════════════════════
-//  PlanImage  — 완성형 이미지 뷰어 (v4)
+//  PlanImage  — v5 (Dynamic Aspect-Ratio Container)
 //
-//  · PDF는 업로드 시 이미지로 변환되어 저장됨 (← DienstplanUploadView)
-//  · 여기서는 순수 이미지만 처리 → naturalW/H로 완벽 fit-to-contain
-//  · 고정 컨테이너 (overflow:hidden) → 레이아웃 절대 밀림 없음
-//  · 더블탭/더블클릭 = 전체가 보이는 초기 상태로 완전 리셋
-//  · 핀치줌 + 마우스 휠 줌 (1× ~ 5×)
-//  · 확대 시에만 드래그 팬 활성화, 경계 clamp 적용
+//  · 컨테이너 높이가 이미지 비율에 맞춰 자동 결정 → 빈 공간 없음
+//  · width: 100%,  height = cw × (natH / natW)  (여백 0)
+//  · sc=1 상태에서 이미지가 컨테이너를 정확히 채움 (letterbox 없음)
+//  · 더블탭 = sc=1 리셋 (여백 없는 전체 이미지 상태)
+//  · 핀치줌/휠 줌 (1×~5×), 확대 시에만 드래그 팬, 경계 clamp
+//  · overflow:hidden → 레이아웃 절대 밀림 없음
 // ═══════════════════════════════════════════════════════════════
 function PlanImage({ src }) {
   const boxRef = useRef(null);
 
-  // ── 줌/팬 상태 (ref = stale closure 없음) ──────────────────
   const Z = useRef({
-    sc:1, tx:0, ty:0,          // 현재 유저 scale + offset(screen px)
-    sc0:1, tx0:0, ty0:0,       // 제스처 시작 스냅샷
-    d0:0,                       // 핀치 시작 거리
-    ptx:0, pty:0,               // 팬 시작 포인터
-    dragging:false,             // 마우스 드래그 중
-    lastTap:0                   // 더블탭 타이머
+    sc:1, tx:0, ty:0,
+    sc0:1, tx0:0, ty0:0,
+    d0:0, ptx:0, pty:0,
+    dragging:false, lastTap:0
   });
   const [xf, setXf] = useState({ sc:1, tx:0, ty:0 });
 
-  // ── 컨테이너 크기 (마운트 후 측정) ─────────────────────────
-  const [cw, setCw] = useState(375);
-  const [ch, setCh] = useState(600);
-
-  // ── 이미지 원본 크기 (onLoad 후 확정) ──────────────────────
+  // 이미지 원본 크기 (onLoad 후 확정)
   const [nat, setNat] = useState(null); // { w, h }
 
-  // Fit-to-Contain 기본 배율: 컨테이너에 가로/세로 모두 맞춤
-  // (naturalWidth/Height 모를 땐 기본 배율 1)
-  const fitSc = nat ? Math.min(cw / nat.w, ch / nat.h) : 1;
+  // 컨테이너 너비 (마운트 + nat 확정 후 재측정)
+  const [cw, setCw] = useState(375);
 
-  // 컨테이너 크기 측정
   React.useEffect(() => {
     const el = boxRef.current;
-    if (!el) return;
-    setCw(el.clientWidth  || 375);
-    setCh(el.clientHeight || 600);
-  }, []);
+    if (el) setCw(el.clientWidth || 375);
+  }, [nat]); // nat 바뀌면 컨테이너 크기 재측정
 
-  // ── 이벤트 핸들러 등록 ─────────────────────────────────────
+  // 동적 컨테이너 높이: 이미지 비율에 꼭 맞음
+  const containerH = nat ? Math.round(cw * nat.h / nat.w) : 200;
+
+  // fitSc: sc=1 일 때 이미지가 컨테이너를 정확히 채우는 배율
+  // (width 기준이면 nat.w → cw, height는 자동으로 맞음)
+  const fitSc = nat ? cw / nat.w : 1;
+
+  // ── 이벤트 핸들러 ─────────────────────────────────────────
   React.useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
     const z = Z.current;
 
-    // sc=1 이면 "전체 이미지가 보이는 초기 상태"
-    // 가로/세로 모두 fitSc 적용됨 → 어느 쪽도 잘리지 않음
     const commit = (sc, tx, ty) => {
-      // 실제 화면에서 콘텐츠 크기 (= 원본 * fitSc * sc)
-      const visW = (nat ? nat.w : cw) * fitSc * sc;
-      const visH = (nat ? nat.h : ch) * fitSc * sc;
-      // 컨테이너보다 클 때만 팬 허용 → clamp
-      const maxTx = Math.max(0, (visW - cw) / 2);
-      const maxTy = Math.max(0, (visH - ch) / 2);
-      const cl    = (v, m) => Math.max(-m, Math.min(m, v));
+      const totSc  = fitSc * sc;
+      const visW   = (nat ? nat.w : cw)         * totSc;
+      const visH   = (nat ? nat.h : containerH) * totSc;
+      const maxTx  = Math.max(0, (visW - cw)         / 2);
+      const maxTy  = Math.max(0, (visH - containerH) / 2);
+      const cl     = (v, m) => Math.max(-m, Math.min(m, v));
       z.sc = sc;
       z.tx = cl(tx, maxTx);
       z.ty = cl(ty, maxTy);
       setXf({ sc: z.sc, tx: z.tx, ty: z.ty });
     };
-
-    // 더블탭/더블클릭 → 초기 상태 (전체가 보임)
     const reset = () => commit(1, 0, 0);
-
-    const dist = ts => Math.hypot(
+    const dist  = ts => Math.hypot(
       ts[0].clientX - ts[1].clientX,
       ts[0].clientY - ts[1].clientY
     );
 
-    // Touch
     function onTouchStart(e) {
       if (e.touches.length === 2) {
         z.d0=dist(e.touches); z.sc0=z.sc; z.tx0=z.tx; z.ty0=z.ty;
@@ -474,14 +463,13 @@ function PlanImage({ src }) {
       }
     }
     function onTouchMove(e) {
-      e.preventDefault(); // passive:false 필수
+      e.preventDefault();
       if (e.touches.length === 2) {
         commit(
           Math.min(5, Math.max(1, z.sc0 * (dist(e.touches) / z.d0))),
           z.tx0, z.ty0
         );
       } else if (e.touches.length === 1 && z.sc > 1) {
-        // 확대 시에만 드래그 팬 허용
         commit(
           z.sc,
           z.tx0 + (e.touches[0].clientX - z.ptx),
@@ -490,29 +478,23 @@ function PlanImage({ src }) {
       }
     }
     function onTouchEnd(e) {
-      if (e.touches.length < 2) {
-        if (e.touches.length === 1) {
-          z.ptx=e.touches[0].clientX; z.pty=e.touches[0].clientY;
-        }
-        z.tx0=z.tx; z.ty0=z.ty;
+      z.tx0=z.tx; z.ty0=z.ty;
+      if (e.touches.length === 1) {
+        z.ptx=e.touches[0].clientX;
+        z.pty=e.touches[0].clientY;
       }
     }
-
-    // Mouse drag (확대 시에만)
     function onMouseDown(e) {
       if (z.sc <= 1) return;
       z.dragging=true;
-      z.ptx=e.clientX; z.pty=e.clientY;
-      z.tx0=z.tx; z.ty0=z.ty;
+      z.ptx=e.clientX; z.pty=e.clientY; z.tx0=z.tx; z.ty0=z.ty;
       e.preventDefault();
     }
     function onMouseMove(e) {
       if (!z.dragging) return;
       commit(z.sc, z.tx0+(e.clientX-z.ptx), z.ty0+(e.clientY-z.pty));
     }
-    function stopDrag() { z.dragging=false; }
-
-    // Mouse wheel
+    const stopDrag = () => { z.dragging=false; };
     function onWheel(e) {
       e.preventDefault();
       commit(
@@ -530,7 +512,6 @@ function PlanImage({ src }) {
     el.addEventListener("mouseleave",  stopDrag);
     el.addEventListener("wheel",       onWheel,       { passive: false });
     el.addEventListener("dblclick",    reset);
-
     return () => {
       el.removeEventListener("touchstart",  onTouchStart);
       el.removeEventListener("touchmove",   onTouchMove);
@@ -542,25 +523,19 @@ function PlanImage({ src }) {
       el.removeEventListener("wheel",       onWheel);
       el.removeEventListener("dblclick",    reset);
     };
-  }, [fitSc, nat, cw, ch]);
+  }, [fitSc, nat, cw, containerH]);
 
   if (!src) return null;
 
-  // ── CSS 계산 ──────────────────────────────────────────────
   const { sc, tx, ty } = xf;
-  const totSc = fitSc * sc; // 실제 렌더 배율
-
-  // 중앙 정렬 후 scale, 그 다음 팬
-  // translate(-50%,-50%): 자기 크기의 절반만큼 올라와 중앙 정렬
-  // scale(totSc): 배율 적용
-  // translate(tx/totSc, ty/totSc): 팬 (로컬 좌표계 보정)
+  const totSc    = fitSc * sc;
   const transform = `translate(-50%,-50%) scale(${totSc}) translate(${tx/totSc}px,${ty/totSc}px)`;
 
-  // 고정 컨테이너 (크기 절대 불변)
+  // 컨테이너: 이미지 비율에 딱 맞는 높이, 빈 공간 없음
   const box = {
     position:    "relative",
     width:       "100%",
-    height:      "85vh",
+    height:      containerH + "px",   // ← 동적! 이미지 비율에 맞춤
     overflow:    "hidden",
     background:  "#f0f0f0",
     touchAction: "none",
@@ -568,7 +543,6 @@ function PlanImage({ src }) {
     cursor:      sc > 1 ? "grab" : "default"
   };
 
-  // 내부 콘텐츠 공통 스타일
   const inner = {
     position:        "absolute",
     top:             "50%",
@@ -576,22 +550,24 @@ function PlanImage({ src }) {
     transformOrigin: "center center",
     transition:      "none",
     pointerEvents:   "none",
-    transform,
-    display:         "block"
+    display:         "block",
+    transform
   };
 
   return (
     <div ref={boxRef} style={box}>
-      <img src={src} alt="Dienstplan"
+      <img
+        src={src}
+        alt="Dienstplan"
         onLoad={e => {
           const nw=e.target.naturalWidth, nh=e.target.naturalHeight;
           if (nw && nh) setNat({ w:nw, h:nh });
         }}
-        style={nat ? {
-          ...inner, width: nat.w+"px", height: nat.h+"px"
-        } : {
-          ...inner, maxWidth:"100%", maxHeight:"100%", width:"auto", height:"auto"
-        }}
+        style={nat
+          ? { ...inner, width: nat.w+"px", height: nat.h+"px" }
+          : { ...inner, maxWidth:"100%", maxHeight:"100%",
+              width:"auto", height:"auto" }
+        }
       />
     </div>
   );
