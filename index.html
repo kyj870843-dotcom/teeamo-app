@@ -1630,16 +1630,16 @@ function SchichtboerseView({ userName, users, isAdmin }) {
                 </select>
               </div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-              <div>
+            <div style={{display:"flex",gap:8,marginBottom:8}}>
+              <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>VON</div>
                 <TimeInput value={fsTimeFrom} onChange={setFsTimeFrom}
-                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
+                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 6px",boxSizing:"border-box"}}/>
               </div>
-              <div>
+              <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>BIS</div>
                 <TimeInput value={fsTimeTo} onChange={setFsTimeTo}
-                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
+                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 6px",boxSizing:"border-box"}}/>
               </div>
             </div>
             <div style={{marginBottom:10}}>
@@ -2294,12 +2294,25 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
   //     
   useEffect(()=>{
-    try { localStorage.setItem(CLOCK_KEY, JSON.stringify({clockedIn, clockInTime:clockInTime?clockInTime.toISOString():null, clockFiliale})); } catch{}
-  },[clockedIn, clockInTime, clockFiliale]);
+    try { localStorage.setItem(CLOCK_KEY, JSON.stringify({
+      clockedIn, clockInTime:clockInTime?clockInTime.toISOString():null, clockFiliale,
+      isPaused, pauseStart:pauseStart?pauseStart.toISOString():null, totalPauseSec
+    })); } catch{}
+  },[clockedIn, clockInTime, clockFiliale, isPaused, pauseStart, totalPauseSec]);
 
   const [selFiliale,setSelFiliale]=useState(FILIALEN[0]);
   const [clockTyp,setClockTyp]=useState("normal"); // "normal" | "einspringen" | "onigiri"
   const [grund,setGrund]=useState("");
+  // ── Pause 상태 ──────────────────────────────────────────────
+  const [isPaused,setIsPaused]=useState(()=>{
+    try{const s=localStorage.getItem(CLOCK_KEY);return s?JSON.parse(s).isPaused||false:false;}catch{return false;}
+  });
+  const [pauseStart,setPauseStart]=useState(()=>{
+    try{const s=localStorage.getItem(CLOCK_KEY);const v=s?JSON.parse(s).pauseStart:null;return v?new Date(v):null;}catch{return null;}
+  });
+  const [totalPauseSec,setTotalPauseSec]=useState(()=>{
+    try{const s=localStorage.getItem(CLOCK_KEY);return s?JSON.parse(s).totalPauseSec||0:0;}catch{return 0;}
+  });
   const [elapsed,setElapsed]=useState(()=>{
     //        
     try {
@@ -2331,7 +2344,12 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
       return [...filtered,{id:tempId,user:user.vorname,date:today(),filiale:clockFiliale||selFiliale,ein:inStr,aus:null,note:"",typ:"normal"}];
     });
-    const t=setInterval(()=>setElapsed(e=>e+1),1000); return()=>clearInterval(t);
+    const t=setInterval(()=>{
+      setElapsed(e=>{
+        if(isPaused) return e; // 🔴 Pause 중 타이머 멈춤
+        return e+1;
+      });
+    },1000); return()=>clearInterval(t);
   },[clockedIn]);
 
   const displayName=user.vorname;
@@ -2344,7 +2362,10 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const normalH=myMonthRecs.filter(r=>!r.typ||r.typ==="normal").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
   const einsprH=myMonthRecs.filter(r=>r.typ==="einspringen").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
   const onigiriH=myMonthRecs.filter(r=>r.typ==="onigiri").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-  const totalH=normalH+einsprH+onigiriH;
+  // Pause 누적: record.pauseSec 필드에서 집계
+  const pauseH=myMonthRecs.reduce((a,r)=>a+((r.pauseSec||0)/3600),0);
+  // 총 근무 = (정규+Einspringen+Onigiri) - Pause
+  const totalH=Math.max(0,normalH+einsprH+onigiriH-pauseH);
   function fmtH(h){const hh=Math.floor(h);const mm=Math.round((h-hh)*60);return hh+"h"+String(mm).padStart(2,"0")+"m";}
   const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
 
@@ -2378,12 +2399,14 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     // 임시 record에서 typ 가져오기
     const existRec=(Array.isArray(records)?records:[]).find(r=>r.id===tempId);
     const typ=existRec?.typ||clockTyp||"normal";
+    const pauseH=totalPauseSec/3600; // 퇴근 시 pause 시간도 record에 저장
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
-      return [...filtered,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ}];
+      return [...filtered,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ,pauseSec:totalPauseSec}];
     });
     setClockedIn(false);setClockInTime(null);setElapsed(0);setGrund("");setModal(null);
-    setClockTyp("normal"); // 퇴근 후 리셋
+    setClockTyp("normal");
+    setIsPaused(false);setPauseStart(null);setTotalPauseSec(0);
     try{localStorage.removeItem(CLOCK_KEY);}catch{}
   }
   function submitNachtrag(){
@@ -2471,10 +2494,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               </div>
             </div>
           </div>
-          <button onClick={()=>{setModal("aus");setTab("home");}}
-            style={{fontSize:11,fontWeight:800,color:"#fff",background:"#3a9e68",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer"}}>
-            Ausstempeln
-          </button>
+
         </div>
       )}
 
@@ -2493,6 +2513,48 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             <div style={{marginTop:9,fontSize:12,color:C.muted}}>
               {clockedIn?<span>Eingecheckt: <span style={{color:C.mintDark,fontWeight:700}}>{clockFiliale}</span></span>:"Filiale wählen & einstempeln"}
             </div>
+
+            {/* Pause 버튼 (출근 중에만 표시) */}
+            {clockedIn&&(
+              <div style={{marginTop:14}}>
+                <button onClick={()=>{
+                  if(!isPaused){
+                    // Pause 시작
+                    setIsPaused(true);setPauseStart(new Date());
+                  } else {
+                    // Pause 종료 → totalPauseSec 누적
+                    if(pauseStart){
+                      const added=Math.floor((Date.now()-pauseStart.getTime())/1000);
+                      setTotalPauseSec(prev=>prev+added);
+                    }
+                    setIsPaused(false);setPauseStart(null);
+                  }
+                }}
+                  style={{
+                    padding:"10px 28px",borderRadius:24,border:"none",cursor:"pointer",
+                    fontWeight:700,fontSize:13,
+                    background:isPaused?"#f59e0b":"#e5e7eb",
+                    color:isPaused?"#fff":"#6b7280",
+                    boxShadow:isPaused?"0 4px 14px rgba(245,158,11,.4)":"none",
+                    transition:"all .2s"
+                  }}>
+                  {isPaused?"▶️ Pause beenden":"⏸️ Pause starten"}
+                </button>
+                {isPaused&&(
+                  <div style={{fontSize:10,color:"#f59e0b",marginTop:6,fontWeight:600}}>
+                    Pause läuft… {(()=>{
+                      const s=pauseStart?Math.floor((Date.now()-pauseStart.getTime())/1000):0;
+                      return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
+                    })()}
+                  </div>
+                )}
+                {totalPauseSec>0&&!isPaused&&(
+                  <div style={{fontSize:10,color:C.muted,marginTop:4}}>
+                    Pause heute: {String(Math.floor(totalPauseSec/60)).padStart(2,"0")}:{String(totalPauseSec%60).padStart(2,"0")}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           {!clockedIn&&(
             <div style={{...S.card,marginBottom:12}}>
@@ -2551,7 +2613,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                 padding:"8px 10px",borderRadius:9,background:normalH>0?C.mintLight:"#f8f8f8"}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:14}}>🏢</span>
+                  <span style={{fontSize:14}}>🧋</span>
                   <span style={{fontSize:11,fontWeight:700,color:C.text}}>Regulär</span>
                 </div>
                 <span style={{fontSize:13,fontWeight:800,color:normalH>0?C.mintDark:C.muted}}>
@@ -2576,6 +2638,22 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
                 </div>
                 <span style={{fontSize:13,fontWeight:800,color:onigiriH>0?"#9d174d":C.muted}}>
                   {onigiriH>0?fmtH(onigiriH):"—"}
+                </span>
+              </div>
+              {/* Pause 항목 — 총합에서 차감됨 표시 */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                padding:"8px 10px",borderRadius:9,
+                background:pauseH>0?"#fff7ed":"#f8f8f8",
+                border:pauseH>0?"1px solid #fed7aa":"none"}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:14}}>⏸️</span>
+                  <div>
+                    <span style={{fontSize:11,fontWeight:700,color:C.text}}>Pause</span>
+                    <span style={{fontSize:9,color:C.muted,marginLeft:4}}>(abgezogen)</span>
+                  </div>
+                </div>
+                <span style={{fontSize:13,fontWeight:800,color:pauseH>0?"#ea580c":C.muted}}>
+                  {pauseH>0?"− "+fmtH(pauseH):"—"}
                 </span>
               </div>
             </div>
@@ -5293,6 +5371,9 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
                 <div key={k} style={{...S.card,marginBottom:8,border:"2px solid "+C.red,background:C.redLight}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
+                      <div style={{fontSize:10,color:C.red,fontWeight:600,marginBottom:2}}>
+                        {new Date(n.ts).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+                      </div>
                       <div style={{fontSize:12,fontWeight:800,color:C.red}}>{"🚨 "+n.user}</div>
                       <div style={{fontSize:10,color:C.red,marginTop:2}}>{n.filiale+" · "+n.time+" — kein Einstempeln!"}</div>
                     </div>
@@ -5345,137 +5426,8 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       {tab==="schichtboerse_mgr"&&(
         <div style={{padding:"14px 0"}}>
           <SchichtboerseView userName={userKey} users={safeUsers} isAdmin={true}/>
-          {/*  Legacy freie Schichten UI entfernt — jetzt in SchichtboerseView  */}
-          <div style={{...S.card,marginBottom:14}}>
-            <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"➕ Freie Schicht eintragen"}</div>
-            <div style={{marginBottom:8}}>
-              <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Datum</div>
-              <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)}
-                style={{...S.input,width:"auto",fontSize:12}}/>
-              {fsDate&&<div style={{fontSize:11,fontWeight:700,color:C.mintDark,marginTop:4}}>
-                {new Date(fsDate).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
-              </div>}
-            </div>
-            <div style={{marginBottom:8}}>
-              <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Uhrzeit</div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <TimeInput value={fsTimeFrom} onChange={setFsTimeFrom} placeholder="von HH:MM"
-                  style={{...S.input,flex:1,fontSize:12,textAlign:"center"}}/>
-                <span style={{color:C.muted,fontWeight:700}}>–</span>
-                <TimeInput value={fsTimeTo} onChange={setFsTimeTo} placeholder="bis HH:MM"
-                  style={{...S.input,flex:1,fontSize:12,textAlign:"center"}}/>
-              </div>
-            </div>
-            <div style={{marginBottom:8}}>
-              <div style={{fontSize:9,color:C.muted,marginBottom:3}}>Filiale</div>
-              <div style={{display:"flex",gap:6}}>
-                {FILIALEN.map(f=>(
-                  <button key={f} onClick={()=>setFsFiliale(f)}
-                    style={{flex:1,padding:"7px 2px",borderRadius:8,fontSize:9,fontWeight:700,cursor:"pointer",
-                      border:`2px solid ${fsFiliale===f?C.mint:C.border}`,
-                      background:fsFiliale===f?C.mintLight:"#fff",
-                      color:fsFiliale===f?C.mintDark:C.muted}}>
-                    {f.replace("TEEAMO ","")}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <input value={fsNote} onChange={e=>setFsNote(e.target.value)} placeholder="Hinweis (optional)"
-              style={{...S.input,width:"100%",marginBottom:8}}/>
-            <button onClick={addFreieSchicht}
-              style={{width:"100%",padding:"10px",borderRadius:9,border:"none",
-                background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
-                color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
-              Schicht veröffentlichen
-            </button>
-          </div>
 
-          {/*     */}
-          {(Array.isArray(freieSchichten)?freieSchichten:[]).length>0&&(
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>{"Veröffentlichte Schichten"}</div>
-              {(Array.isArray(freieSchichten)?freieSchichten:[]).map(s=>(
-                <div key={s.id} style={{...S.card,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>{new Date(s.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}</div>
-                    <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?` · ${s.time}`:""}</div>
-                    {s.note&&<div style={{fontSize:9,color:C.muted}}>{s.note}</div>}
-                  </div>
-                  <button onClick={()=>setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==s.id))}
-                    style={{fontSize:10,color:C.red,border:`1px solid ${C.red}`,borderRadius:6,padding:"3px 8px",background:C.redLight,cursor:"pointer"}}>
-                    Löschen
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/*    (Offene Vorgnge) */}
-          {(pendingNotifs.length>0||offeneNachtraege.length>0) ? (
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:10,textTransform:"uppercase",letterSpacing:".05em"}}>
-                {"🔔 Offene Vorgänge ({pendingNotifs.length+offeneNachtraege.length})"}
-              </div>
-
-              {/* Nachtrag (antraege ) */}
-              {offeneNachtraege.map(a=>(
-                <div key={a.id} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.yellow}`}}>
-                  <div style={{fontSize:11,fontWeight:800,color:C.yellow,marginBottom:4}}>{"🕐 Nachtrag · "}{a.user}</div>
-                  <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
-                    {new Date(a.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
-                  </div>
-                  <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{a.filiale} · {a.ein} – {a.aus}</div>
-                  <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"📌"}{a.grund}"</div>
-                  <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>approveNachtrag(a.id,false)}
-                      style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
-                    <button onClick={()=>approveNachtrag(a.id,true)}
-                      style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"✅ Genehmigen"}</button>
-                  </div>
-                </div>
-              ))}
-
-              {/*  (tausch/absage/einspringen/prufen) */}
-              {pendingNotifs.map(([key,n])=>renderAlarmCard(key,n))}
-            </div>
-          ) : (
-            <div style={{...S.card,textAlign:"center",padding:"24px 16px",marginBottom:14}}>
-              <div style={{fontSize:24,marginBottom:6}}>{"✅"}</div>
-              <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Alles erledigt!</div>
-              <div style={{fontSize:11,color:C.muted}}>{"Keine offenen Vorgänge."}</div>
-            </div>
-          )}
-
-          {/*  Erledigt ( ,  ) */}
-          {myArchiv.length>0&&(
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>
-                {"✅ Erledigt ({myArchiv.length})"}
-              </div>
-              {myArchiv.map(([key,a])=>renderErledigtCard(key,a))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/*  NAVIGATION  */}
-      <div style={S.nav}>
-        {[{id:"uebersicht",icon:"👥",lbl:"Übersicht"},
-          {id:"dienstplan",icon:"📋",lbl:"Dienstplan"},
-          {id:"antraege",icon:"📂",lbl:"Anträge", badge:alarmCount},
-          {id:"schichtboerse_mgr",icon:"🔔",lbl:"Schichtbörse"},
-          {id:"statistik",icon:"📊",lbl:"Statistik"}].map(t=>(
-          <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
-            <div style={{position:"relative",display:"inline-block"}}>
-              <span style={{fontSize:19}}>{t.icon}</span>
-              {t.badge>0&&(
-                <span style={{position:"absolute",top:-4,right:-6,minWidth:16,height:16,borderRadius:99,
-                  background:C.red,color:"#fff",fontSize:9,fontWeight:800,
-                  display:"flex",alignItems:"center",justifyContent:"center",padding:"0 3px",lineHeight:1}}>
-                  {t.badge}
-                </span>
-              )}
-            </div>
+          {/* Freie Schicht Formular ist in SchichtboerseView */}
             <span style={{fontSize:9,fontWeight:600,color:tab===t.id?C.mintDark:C.muted}}>{t.lbl}</span>
             {tab===t.id&&<div style={{width:16,height:2,background:C.mint,borderRadius:99}}/>}
           </button>
