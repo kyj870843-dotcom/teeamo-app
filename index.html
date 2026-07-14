@@ -2098,6 +2098,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   },[clockedIn, clockInTime, clockFiliale]);
 
   const [selFiliale,setSelFiliale]=useState(FILIALEN[0]);
+  const [clockTyp,setClockTyp]=useState("normal"); // "normal" | "einspringen" | "onigiri"
   const [grund,setGrund]=useState("");
   const [elapsed,setElapsed]=useState(()=>{
     //        
@@ -2136,6 +2137,15 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const displayName=user.vorname;
   const myRecs=records.filter(r=>r.user===user.vorname);
   const myAntraege=antraege.filter(a=>a.user===user.vorname);
+  // 이번 달 records만
+  const curMo2=(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");})();
+  const myMonthRecs=myRecs.filter(r=>r.date&&r.date.startsWith(curMo2)&&r.aus);
+  // 유형별 분류
+  const normalH=myMonthRecs.filter(r=>!r.typ||r.typ==="normal").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+  const einsprH=myMonthRecs.filter(r=>r.typ==="einspringen").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+  const onigiriH=myMonthRecs.filter(r=>r.typ==="onigiri").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+  const totalH=normalH+einsprH+onigiriH;
+  function fmtH(h){const hh=Math.floor(h);const mm=Math.round((h-hh)*60);return hh+"h"+String(mm).padStart(2,"0")+"m";}
   const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
 
   // Dienstplan  :   Tausch  
@@ -2146,10 +2156,11 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   function handleEin(){
     const inStr=`${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`;
     const tempId="clock_"+user.vorname+"_"+today();
-    // einstempeln  aus:null  record    Aktiv    
+    const typ = clockTyp; // "normal" | "einspringen" | "onigiri"
+    // 출근 도장: aus:null 임시 record → Dienstplan에 즉시 카드 생성
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
-      return [...filtered,{id:tempId,user:user.vorname,date:today(),filiale:selFiliale,ein:inStr,aus:null,note:"",typ:"normal"}];
+      return [...filtered,{id:tempId,user:user.vorname,date:today(),filiale:selFiliale,ein:inStr,aus:null,note:"",typ}];
     });
     setClockedIn(true);setClockInTime(new Date());setClockFiliale(selFiliale);setModal(null);
   }
@@ -2157,12 +2168,15 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     const outStr=`${pad(now.getHours())}:${pad(now.getMinutes())}`;
     const inStr=`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`;
     const tempId="clock_"+user.vorname+"_"+today();
-    //  record(aus:null)  record 
+    // 임시 record에서 typ 가져오기
+    const existRec=(Array.isArray(records)?records:[]).find(r=>r.id===tempId);
+    const typ=existRec?.typ||clockTyp||"normal";
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
-      return [...filtered,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ:"normal"}];
+      return [...filtered,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ}];
     });
     setClockedIn(false);setClockInTime(null);setElapsed(0);setGrund("");setModal(null);
+    setClockTyp("normal"); // 퇴근 후 리셋
     try{localStorage.removeItem(CLOCK_KEY);}catch{}
   }
   function submitNachtrag(){
@@ -2240,7 +2254,11 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:9,height:9,borderRadius:"50%",background:"#3a9e68",boxShadow:"0 0 0 3px rgba(58,158,104,.25)",animation:"pulse 1.4s infinite"}}/>
             <div>
-              <div style={{fontSize:12,fontWeight:800,color:"#1a5c38"}}>{"Im Dienst · "}{clockFiliale}</div>
+              <div style={{fontSize:12,fontWeight:800,color:"#1a5c38"}}>
+                {"Im Dienst · "}{clockFiliale}
+                {(()=>{const t=(Array.isArray(records)?records:[]).find(r=>r.id==="clock_"+user.vorname+"_"+today())?.typ||"normal";
+                return t!=="normal"?<span style={{marginLeft:6,fontSize:10,padding:"2px 7px",borderRadius:99,background:t==="einspringen"?"#fef9c3":"#fce7f3",color:t==="einspringen"?"#92400e":"#9d174d"}}>{t==="einspringen"?"⚡ Einspringen":"🍙 Onigiri"}</span>:null;})()}
+              </div>
               <div style={{fontSize:10,color:"#3a7a55"}}>
                 {clockInTime?`seit ${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())} Uhr`:""} · {elStr}
               </div>
@@ -2272,11 +2290,38 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           {!clockedIn&&(
             <div style={{...S.card,marginBottom:12}}>
               <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:7}}>{"Filiale auswählen"}</div>
-              <div style={{display:"flex",gap:7}}>
+              <div style={{display:"flex",gap:7,marginBottom:10}}>
                 {FILIALEN.map(f=>(
-                  <button key={f} onClick={()=>setSelFiliale(f)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${selFiliale===f?C.mint:C.border}`,background:selFiliale===f?C.mintLight:"#fff",color:selFiliale===f?C.mintDark:C.muted}}>{f}</button>
+                  <button key={f} onClick={()=>setSelFiliale(f)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${selFiliale===f?C.mint:C.border}`,background:selFiliale===f?C.mintLight:"#fff",color:selFiliale===f?C.mintDark:C.muted}}>{f.replace("TEEAMO ","")}</button>
                 ))}
               </div>
+              {/* 근무 유형 선택 */}
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Arbeitstyp</div>
+              <div style={{display:"flex",gap:7}}>
+                {[
+                  {typ:"normal",    icon:"📋", lbl:"Normal"},
+                  {typ:"einspringen",icon:"⚡", lbl:"Einspringen"},
+                  {typ:"onigiri",   icon:"🍙", lbl:"Onigiri"},
+                ].map(({typ,icon,lbl})=>(
+                  <button key={typ} onClick={()=>setClockTyp(typ)}
+                    style={{flex:1,padding:"9px 4px",borderRadius:10,fontSize:10,fontWeight:700,
+                      cursor:"pointer",textAlign:"center",
+                      border:`2px solid ${clockTyp===typ?(typ==="einspringen"?"#f59e0b":typ==="onigiri"?"#ec4899":C.mint):C.border}`,
+                      background:clockTyp===typ?(typ==="einspringen"?"#fef9c3":typ==="onigiri"?"#fce7f3":C.mintLight):"#fff",
+                      color:clockTyp===typ?(typ==="einspringen"?"#92400e":typ==="onigiri"?"#9d174d":C.mintDark):C.muted
+                    }}>
+                    <div style={{fontSize:15}}>{icon}</div>
+                    <div style={{fontSize:9,marginTop:2}}>{lbl}</div>
+                  </button>
+                ))}
+              </div>
+              {clockTyp!=="normal"&&(
+                <div style={{marginTop:8,padding:"6px 10px",borderRadius:8,
+                  background:clockTyp==="einspringen"?"#fef9c3":"#fce7f3",
+                  fontSize:10,color:clockTyp==="einspringen"?"#92400e":"#9d174d",fontWeight:600}}>
+                  {clockTyp==="einspringen"?"⚡ Einspringen: Wird separat in der Statistik erfasst":"🍙 Onigiri: Sonderarbeit wird separat berechnet"}
+                </div>
+              )}
             </div>
           )}
           <div style={{...S.card,marginBottom:12}}>
@@ -2284,14 +2329,51 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             <textarea value={grund} onChange={e=>setGrund(e.target.value)} placeholder="z. B. früher erschienen wegen Lieferung…" style={{width:"100%",height:58,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
           </div>
           <div style={S.card}>
-            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:9,letterSpacing:".05em",textTransform:"uppercase"}}>{"Monatsübersicht"}</div>
-            {monthSummary.length===0?<div style={{fontSize:12,color:C.muted}}>{"Noch keine Einträge."}</div>:monthSummary.map(({f,h})=>(
-              <div key={f} style={{display:"flex",justifyContent:"space-between",paddingBottom:7,marginBottom:7,borderBottom:`1px solid ${C.border}`}}>
-                <span style={{fontSize:12,color:C.text}}>{f}</span>
-                <span style={{fontSize:12,fontWeight:700,color:C.mintDark}}>{h.toFixed(1)} Std.</span>
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:10,letterSpacing:".05em",textTransform:"uppercase"}}>📊 Monatsübersicht</div>
+
+            {/* 총 합산 근무 시간 — 가장 크게 */}
+            <div style={{textAlign:"center",padding:"12px 0 14px",borderBottom:`1px solid ${C.border}`,marginBottom:12}}>
+              <div style={{fontSize:10,color:C.muted,marginBottom:4}}>Gesamt gearbeitet</div>
+              <div style={{fontSize:28,fontWeight:900,color:C.navy,letterSpacing:"-.02em"}}>
+                {fmtH(totalH)}
               </div>
-            ))}
-            {monthSummary.length>0&&<div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,fontWeight:700,color:C.text}}>Gesamt</span><span style={{fontSize:12,fontWeight:800,color:C.navy}}>{monthSummary.reduce((a,x)=>a+x.h,0).toFixed(1)} Std.</span></div>}
+            </div>
+
+            {/* 유형별 분류 */}
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                padding:"8px 10px",borderRadius:9,background:normalH>0?C.mintLight:"#f8f8f8"}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:14}}>🏢</span>
+                  <span style={{fontSize:11,fontWeight:700,color:C.text}}>Regulär</span>
+                </div>
+                <span style={{fontSize:13,fontWeight:800,color:normalH>0?C.mintDark:C.muted}}>
+                  {normalH>0?fmtH(normalH):"—"}
+                </span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                padding:"8px 10px",borderRadius:9,background:einsprH>0?"#fef9c3":"#f8f8f8"}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:14}}>⚡</span>
+                  <span style={{fontSize:11,fontWeight:700,color:C.text}}>Einspringen</span>
+                </div>
+                <span style={{fontSize:13,fontWeight:800,color:einsprH>0?"#92400e":C.muted}}>
+                  {einsprH>0?fmtH(einsprH):"—"}
+                </span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                padding:"8px 10px",borderRadius:9,background:onigiriH>0?"#fce7f3":"#f8f8f8"}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:14}}>🍙</span>
+                  <span style={{fontSize:11,fontWeight:700,color:C.text}}>Onigiri</span>
+                </div>
+                <span style={{fontSize:13,fontWeight:800,color:onigiriH>0?"#9d174d":C.muted}}>
+                  {onigiriH>0?fmtH(onigiriH):"—"}
+                </span>
+              </div>
+            </div>
+
+            {totalH===0&&<div style={{fontSize:12,color:C.muted,textAlign:"center",marginTop:8}}>Noch keine Einträge diesen Monat.</div>}
           </div>
         </div>
       )}
