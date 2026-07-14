@@ -3724,224 +3724,214 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
     const file = e.target.files[0];
     if (!file) return;
     if (!apiKey) { setShowKeyInput(true); return; }
-
-    // HEIC/HEIF 
-    if (file.type === "image/heic" || file.type === "image/heif" || file.name.toLowerCase().endsWith(".heic")) {
-      setMsg({ type: "err", text: "❌ HEIC 형식은 지원되지 않아요. JPEG로 변환 후 업로드해주세요." });
-      return;
+    if (file.type==="image/heic"||file.type==="image/heif"||file.name.toLowerCase().endsWith(".heic")) {
+      setMsg({type:"err",text:"❌ HEIC nicht unterstützt. Bitte als JPEG speichern."}); return;
     }
-
-    const isPdf = file.type === "application/pdf";
-
-    //    (PDF 20MB,  5MB)
-    const maxSize = isPdf ? 20 * 1024 * 1024 : 5 * 1024 * 1024;
-    if (file.size > maxSize) {
-      setMsg({ type: "err", text: `❌ Datei zu groß (${(file.size/1024/1024).toFixed(1)}MB). Max: ${isPdf?"20MB":"5MB"}` });
-      return;
+    const isPdf = file.type==="application/pdf";
+    if (file.size > (isPdf?20:5)*1024*1024) {
+      setMsg({type:"err",text:`❌ Datei zu groß (${(file.size/1024/1024).toFixed(1)}MB). Max: ${isPdf?"20MB":"5MB"}`}); return;
     }
 
     setAnalyzing(true);
-    setMsg({ type: "info", text: "⏳ Analysiere… (kann 20–40 Sek. dauern)" });
+    setMsg({type:"info",text:"⏳ Schritt 1/3: Bild wird vorbereitet…"});
 
-    const b64 = await new Promise(res => {
-      const r = new FileReader();
-      r.onload = () => res(r.result.split(",")[1]);
-      r.readAsDataURL(file);
-    });
+    // ── b64 인코딩 ────────────────────────────────────────────────
+    let b64 = "";
+    try {
+      b64 = await new Promise((res,rej)=>{
+        const r=new FileReader();
+        r.onload=()=>res(r.result.split(",")[1]);
+        r.onerror=()=>rej(new Error("Lesefehler"));
+        r.readAsDataURL(file);
+      });
+    } catch(e) {
+      setMsg({type:"err",text:"❌ Datei konnte nicht gelesen werden: "+e.message});
+      setAnalyzing(false); return;
+    }
 
-    // PDF → 이미지 변환 (PDF.js 사용)
-    // PDF를 이미지로 변환하면 어떤 비율이든 완벽한 fit-to-contain 가능
+    // ── STEP A: PDF → JPEG 변환 (PDF.js) ─────────────────────────
     let dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
     if (isPdf && window.pdfjsLib) {
       try {
-        setMsg({ type:"info", text:"⏳ PDF wird in Bild umgewandelt…" });
-        const pdfLib = window.pdfjsLib;
-        pdfLib.GlobalWorkerOptions.workerSrc =
+        setMsg({type:"info",text:"⏳ Schritt 1/3: PDF wird konvertiert…"});
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
           "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        const raw = atob(b64);
-        const bytes = new Uint8Array(raw.length);
-        for (let i=0; i<raw.length; i++) bytes[i]=raw.charCodeAt(i);
-        const pdf  = await pdfLib.getDocument({ data: bytes }).promise;
-        const page = await pdf.getPage(1);
-        // 3x 해상도로 고화질 렌더
-        const viewport = page.getViewport({ scale: 3.0 });
-        const canvas   = document.createElement("canvas");
-        canvas.width   = viewport.width;
-        canvas.height  = viewport.height;
-        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-        dataUrl = canvas.toDataURL("image/jpeg", 0.93);
-        setMsg({ type:"info", text:"⏳ Analysiere… (kann 20–40 Sek. dauern)" });
+        const pdfBytes = Uint8Array.from(atob(b64), ch=>ch.charCodeAt(0));
+        const pdfDoc  = await window.pdfjsLib.getDocument({data:pdfBytes}).promise;
+        const page    = await pdfDoc.getPage(1);
+        const vp      = page.getViewport({scale:3.0});
+        const canvas  = document.createElement("canvas");
+        canvas.width  = vp.width;
+        canvas.height = vp.height;
+        await page.render({canvasContext:canvas.getContext("2d"),viewport:vp}).promise;
+        dataUrl = canvas.toDataURL("image/jpeg",0.92);
+        setLocalImgSrc(dataUrl); setLocalImgMonth(selMonth);
       } catch(pdfErr) {
-        console.warn("PDF→Image 변환 실패, PDF 원본 사용:", pdfErr);
+        console.warn("PDF→Image fehlgeschlagen, nutze Original:", pdfErr);
         dataUrl = `data:application/pdf;base64,${b64}`;
       }
+    } else if (!isPdf) {
+      setLocalImgSrc(dataUrl); setLocalImgMonth(selMonth);
     }
-    if (dataUrl) { setLocalImgSrc(dataUrl); setLocalImgMonth(selMonth); }
 
-    // 등록된 직원 목록 (힌트용) + 계정 없는 이름도 모두 추출하도록 프롬프트 설계
-    const registeredNames = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname).join(", ");
-    const curYear = new Date().getFullYear();
-
-    // ── STEP A: PDF 텍스트 레이어 추출 ──────────────────────────
+    // ── STEP B: PDF 텍스트 추출 (정확도 향상용) ──────────────────
     let extractedText = "";
     if (isPdf && window.pdfjsLib) {
       try {
-        setMsg({ type:"info", text:"Schritt 1/3: Textebene wird extrahiert..." });
-        const pdfLib = window.pdfjsLib;
-        pdfLib.GlobalWorkerOptions.workerSrc =
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
           "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        const rawB = atob(b64);
-        const bytesB = new Uint8Array(rawB.length);
-        for (let i=0;i<rawB.length;i++) bytesB[i]=rawB.charCodeAt(i);
-        const pdfDoc = await pdfLib.getDocument({data:bytesB}).promise;
-        const totalPages = Math.min(pdfDoc.numPages, 3);
-        const pageTexts = [];
-        for (let p=1; p<=totalPages; p++) {
-          const pg = await pdfDoc.getPage(p);
-          const tc = await pg.getTextContent();
-          const items = tc.items.map(it=>({text:it.str, x:Math.round(it.transform[4]), y:Math.round(it.transform[5])}));
-          const rowMap = {};
-          items.forEach(it=>{const yk=Math.round(it.y/8)*8; if(!rowMap[yk])rowMap[yk]=[]; rowMap[yk].push(it);});
-          const rows = Object.entries(rowMap)
-            .sort((a,b)=>Number(b[0])-Number(a[0]))
-            .map(([,cells])=>cells.sort((a,b)=>a.x-b.x).map(c=>c.text).join(" | "));
-          pageTexts.push(rows.join("\n"));
-        }
-        extractedText = pageTexts.join("\n---\n");
-        console.log("PDF Text:", extractedText.slice(0,500));
-      } catch(e) { console.warn("Textextraktion fehlgeschlagen:", e); }
-    }
-
-    // ── STEP B: Chain-of-Thought API-Aufruf ──────────────────────
-    setMsg({ type:"info", text:"Schritt 2/3: KI analysiert sorgfaeltig..." });
-    const textSection = extractedText
-      ? "\n\nDIREKT EXTRAHIERTER TEXT AUS PDF:\n" + extractedText + "\n"
-      : "";
-
-     const promptText =
-      "Du analysierst einen Mitarbeiter-Dienstplan. WICHTIGSTE REGEL: Extrahiere JEDEN Namen der im Plan steht.\n"
-      + "\n=== SCHRITT 1: TABELLENSTRUKTUR ===\n"
-      + "Wie viele Spalten (Wochentage/Daten)? Welche Daten stehen in den Spaltenkopfen?\n"
-      + "Wie viele Zeilen? Was steht links in jeder Zeile?\n"
-      + "\n=== SCHRITT 2: ALLE NAMEN LUECKENLOS ERFASSEN ===\n"
-      + "LESE JEDE ZELLE. Jeden Personennamen erfassen - EGAL ob bekannt oder nicht!\n"
-      + "Bekannte Mitarbeiter (NUR fuer Tippfehler-Korrektur, kein Filter!): " + registeredNames + "\n"
-      + "Fuer JEDEN gefundenen Namen notiere: Name | Datum " + curYear + "-MM-DD | Filiale | Zeit HH:MM-HH:MM\n"
-      + "Filialen: Arkaden->TEEAMO Arkaden | Aegidiimarkt->TEEAMO Aegidiimarkt | TEEnJOY/Teenjoy->TEEnJOY\n"
-      + textSection
-      + "\n=== SCHRITT 3: JSON AUSGABE ===\n"
-      + "JEDE Person bekommt EIGENEN Schluessel. Beispiel (so soll Output aussehen!):\n"
-      + "{\"Semi\":[{\"d\":\"" + curYear + "-07-01\",\"f\":\"TEEAMO Arkaden\",\"t\":\"09:00-15:00\"}],"
-      + "\"Teddy\":[{\"d\":\"" + curYear + "-07-01\",\"f\":\"TEEnJOY\",\"t\":\"11:30-18:00\"}],"
-      + "\"NeueMitarbeiter\":[{\"d\":\"" + curYear + "-07-02\",\"f\":\"TEEAMO Aegidiimarkt\",\"t\":\"15:00-20:00\"}]}\n"
-      + "Antworte im Format: <analyse>[Analyse]</analyse><json>{JSON}</json>\n"
-      + "PFLICHTREGELN: JEDE Person = eigener Schluessel. Datum: " + curYear + "-MM-DD. Zeit: HH:MM-HH:MM oder null.\n"
-      + "KEINEN Namen weglassen - auch neue/unbekannte Mitarbeiter erfassen!";
-
-    const contentBlock = dataUrl
-      ? { type:"image", source:{type:"base64", media_type:"image/jpeg", data: dataUrl.split(",")[1]} }
-      : { type:"document", source:{type:"base64", media_type:"application/pdf", data:b64} };
-
-    try {
-      let res;
-      try {
-        res = await fetch("https://api.anthropic.com/v1/messages", {
-          method:"POST",
-          headers:{
-            "Content-Type":"application/json",
-            "x-api-key":apiKey,
-            "anthropic-version":"2023-06-01",
-            "anthropic-dangerous-direct-browser-access":"true",
-          },
-          body: JSON.stringify({
-            model:"claude-sonnet-4-6",
-            max_tokens:8000,
-            messages:[{role:"user", content:[contentBlock,{type:"text",text:promptText}]}]
-          })
+        const pdfBytes2 = Uint8Array.from(atob(b64), ch=>ch.charCodeAt(0));
+        const pdfDoc2   = await window.pdfjsLib.getDocument({data:pdfBytes2}).promise;
+        const page2     = await pdfDoc2.getPage(1);
+        const tc        = await page2.getTextContent();
+        // Y축 기준 행 재구성
+        const rowMap2   = {};
+        tc.items.forEach(it=>{
+          const yk = Math.round(it.transform[5]/8)*8;
+          if (!rowMap2[yk]) rowMap2[yk]=[];
+          rowMap2[yk].push({text:it.str,x:it.transform[4]});
         });
-      } catch(fe) {
-        throw new Error("Netzwerkfehler: " + fe.message);
+        extractedText = Object.entries(rowMap2)
+          .sort((a,b)=>Number(b[0])-Number(a[0]))
+          .map(([,cells])=>cells.sort((a2,b2)=>a2.x-b2.x).map(cc=>cc.text).join("|"))
+          .join("\n")
+          .slice(0,3000); // 토큰 절약을 위해 3000자 제한
+      } catch(textErr) {
+        console.warn("Textextraktion fehlgeschlagen:", textErr);
       }
-      if (!res.ok) {
-        let eb=""; try{const j=await res.json();eb=j.error?.message||JSON.stringify(j);}catch{}
-        throw new Error("API " + res.status + ": " + eb);
-      }
-      const data = await res.json();
-      const fullText = data.content.map(c=>c.text||"").join("");
-      console.log("KI-Antwort:", fullText);
-
-      let jsonStr = "";
-      const jsonMatch = fullText.match(/<json>([\s\S]*?)<\/json>/i);
-      if (jsonMatch) { jsonStr = jsonMatch[1].trim(); }
-      else { const m=fullText.match(/\{[\s\S]*\}/); jsonStr=m?m[0]:""; }
-      jsonStr = jsonStr.replace(/```json|```/g,"").trim();
-
-      let parsed;
-      try {
-        const raw = JSON.parse(jsonStr);
-        parsed = {};
-        for (const [name, shifts] of Object.entries(raw)) {
-          parsed[name] = (shifts||[]).map(s=>({
-            date: s.date||s.d||"",
-            filiale: s.filiale||s.f||"",
-            time: s.time||s.t||null,
-          })).filter(s=>s.date);
-        }
-      } catch(pe) {
-        console.error("JSON Fehler:", jsonStr);
-        throw new Error("JSON-Fehler: " + jsonStr.slice(0,200));
-      }
-
-      // ── STEP C: 검수 UI 진입 (즉시 저장 안 함) ────────────────
-      // 직원 이름 퍼지 매칭: AI 오타를 등록된 직원으로 자동 보정
-      const empVornamen = (Array.isArray(users)?users:[])
-        .filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
-      function fuzzyMatchName(aiName) {
-        if (!aiName) return aiName;
-        // 1) 완전 일치 (대소문자만 보정) — 가장 안전
-        const exact = empVornamen.find(n=>n.toLowerCase()===aiName.toLowerCase());
-        if (exact) return exact;
-        // 2) 이름 길이가 5자 이상이고 Levenshtein 거리가 정확히 1인 경우만 보정
-        //    (공격적 매핑 방지: "Dayoung"→"Yaya" 같은 잘못된 매칭 차단)
-        function lev(a,b){
-          const m=a.length,n=b.length;
-          const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i?j?0:i:j));
-          for(let i=1;i<=m;i++) for(let j=1;j<=n;j++)
-            dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
-          return dp[m][n];
-        }
-        if (aiName.length >= 5) {
-          const byDist = empVornamen
-            .map(n=>({n, d:lev(n.toLowerCase(), aiName.toLowerCase())}))
-            .filter(x=>x.d===1) // 거리 1만 (명확한 오타만)
-            .sort((a,b)=>a.d-b.d);
-          if (byDist.length>0) return byDist[0].n;
-        }
-        // 3) 매칭 없으면 AI 이름 100% 그대로 보존
-        //    신규 직원, 미가입 직원 포함 — 이름 기반으로 데이터 저장됨
-        return aiName;
-      }
-
-      const rows = [];
-      for (const [name, shifts] of Object.entries(parsed)) {
-        const correctedName = fuzzyMatchName(name);
-        for (const s of shifts) {
-          rows.push({ id:Math.random().toString(36).slice(2),
-            name: correctedName,
-            date:s.date, filiale:s.filiale, time:s.time||"" });
-        }
-      }
-      rows.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.name<b.name?-1:1);
-      setPendingAnalysis({ parsed, dataUrl, selMonthAtTime: selMonth });
-      setEditRows(rows);
-      setMsg({ type:"review", text:"Analyse fertig! " + rows.length + " Schichten erkannt. Bitte pruefen." });
-    } catch(err) {
-      setMsg({ type:"err", text:"Fehler: " + err.message });
     }
+
+    // ── STEP C: AI 분석 프롬프트 (압축 최적화) ───────────────────
+    setMsg({type:"info",text:"⏳ Schritt 2/3: KI analysiert…"});
+    const regNames = (Array.isArray(users)?users:[])
+      .filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname).join(",");
+    const yr = new Date().getFullYear();
+
+    const promptText =
+      "Analysiere diesen Dienstplan. Extrahiere ALLE Namen - auch unbekannte.\n" +
+      "Referenz (nur Tippfehler korrigieren, kein Filter!): " + regNames + "\n" +
+      (extractedText ? "Extrahierter Text:\n" + extractedText + "\n" : "") +
+      "Filialen: Arkaden→TEEAMO Arkaden, Aegidiimarkt→TEEAMO Aegidiimarkt, TEEnJOY/Teenjoy→TEEnJOY\n" +
+      "Jede Person = eigener Schluessel. Format:\n" +
+      "<json>{\"Name\":[{\"d\":\""+yr+"-MM-DD\",\"f\":\"TEEAMO Arkaden\",\"t\":\"09:00-17:00\"}]}</json>\n" +
+      "REGELN: Datum "+yr+"-MM-DD. Zeit HH:MM-HH:MM oder null. KEINEN Namen weglassen!";
+
+    const contentBlock = dataUrl && !dataUrl.startsWith("data:application/pdf")
+      ? {type:"image",source:{type:"base64",media_type:"image/jpeg",data:dataUrl.split(",")[1]}}
+      : {type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}};
+
+    // ── STEP D: API 호출 ──────────────────────────────────────────
+    let parsed = {};
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "x-api-key":apiKey,
+          "anthropic-version":"2023-06-01",
+          "anthropic-dangerous-direct-browser-access":"true",
+        },
+        body:JSON.stringify({
+          model:"claude-sonnet-4-6",
+          max_tokens:4096,
+          messages:[{role:"user",content:[contentBlock,{type:"text",text:promptText}]}]
+        })
+      });
+
+      if (!res.ok) {
+        let errBody="";
+        try{ const j=await res.json(); errBody=j.error?.message||JSON.stringify(j); }catch{}
+        throw new Error("API "+res.status+": "+errBody);
+      }
+
+      const data = await res.json();
+      const fullText = (data.content||[]).map(cc=>cc.text||"").join("");
+      console.log("KI-Antwort:", fullText.slice(0,500));
+
+      // JSON 추출 — 여러 패턴 시도 (robust parsing)
+      let jsonStr = "";
+      const m1 = fullText.match(/<json>([\s\S]*?)<\/json>/i);
+      if (m1) { jsonStr = m1[1].trim(); }
+      else {
+        const m2 = fullText.match(/```json\s*([\s\S]*?)```/i);
+        if (m2) { jsonStr = m2[1].trim(); }
+        else {
+          const m3 = fullText.match(/\{[\s\S]*\}/);
+          if (m3) { jsonStr = m3[0]; }
+        }
+      }
+
+      if (!jsonStr) throw new Error("Kein JSON in der KI-Antwort gefunden.");
+
+      // JSON 파싱 — 안전한 try-catch
+      let rawParsed;
+      try {
+        rawParsed = JSON.parse(jsonStr);
+      } catch(jsonErr) {
+        // 마지막 시도: 불완전한 JSON 수정 후 재파싱
+        const fixed = jsonStr.replace(/,\s*\}$/,"}").replace(/,\s*\]$/,"]");
+        try { rawParsed = JSON.parse(fixed); }
+        catch { throw new Error("JSON-Fehler: "+jsonStr.slice(0,150)+" … ("+jsonErr.message+")"); }
+      }
+
+      // 이름-근무 정규화 + 퍼지 매칭
+      const empNames2 = (Array.isArray(users)?users:[])
+        .filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
+
+      function fuzzyMatch(aiName) {
+        if (!aiName) return aiName;
+        const exact = empNames2.find(n=>n.toLowerCase()===aiName.toLowerCase());
+        if (exact) return exact;
+        if (aiName.length>=5) {
+          function lev(a,b){
+            const dp=Array.from({length:a.length+1},(_,i)=>Array.from({length:b.length+1},(_,j)=>i||j?i&&j?0:i||j:0));
+            for(let i=1;i<=a.length;i++) for(let j=1;j<=b.length;j++)
+              dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+            return dp[a.length][b.length];
+          }
+          const best=empNames2.map(n=>({n,d:lev(n.toLowerCase(),aiName.toLowerCase())})).sort((a,b)=>a.d-b.d)[0];
+          if(best&&best.d===1) return best.n;
+        }
+        return aiName; // 미등록 이름도 그대로 보존
+      }
+
+      for (const [name, shifts] of Object.entries(rawParsed)) {
+        if (!Array.isArray(shifts)) continue;
+        const correctedName = fuzzyMatch(name);
+        parsed[correctedName] = shifts
+          .map(s=>({date:s.date||s.d||"",filiale:s.filiale||s.f||"",time:s.time||s.t||null}))
+          .filter(s=>s.date && s.filiale);
+      }
+
+    } catch(apiErr) {
+      setMsg({type:"err",text:"❌ Fehler: "+apiErr.message});
+      setAnalyzing(false); return;
+    }
+
+    // ── STEP E: 검수 UI 진입 ─────────────────────────────────────
+    if (Object.keys(parsed).length===0) {
+      setMsg({type:"err",text:"❌ Keine Schichten erkannt. Bild prüfen oder erneut versuchen."});
+      setAnalyzing(false); return;
+    }
+
+    const editRowsNew = [];
+    for (const [name, shifts] of Object.entries(parsed)) {
+      for (const s of shifts) {
+        editRowsNew.push({
+          id:Math.random().toString(36).slice(2),
+          name, date:s.date, filiale:s.filiale, time:s.time||""
+        });
+      }
+    }
+    editRowsNew.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.name<b.name?-1:1);
+
+    setPendingAnalysis({parsed, dataUrl, selMonthAtTime:selMonth});
+    setEditRows(editRowsNew);
+    setApprovedDates(new Set());
+    setMsg({type:"review",text:"✅ Analyse fertig — "+editRowsNew.length+" Schichten von "+Object.keys(parsed).length+" Personen erkannt."});
     setAnalyzing(false);
   }
 
-  // ── 검수 확인 후 Firebase 저장 ────────────────────────────────
   // ── 특정 날짜 개별 승인 ──────────────────────────────────
   async function confirmDate(date) {
     const dateRows = editRows.filter(r=>r.date===date && r.name && r.filiale);
