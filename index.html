@@ -3736,54 +3736,25 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
       ? "\n\nDIREKT EXTRAHIERTER TEXT AUS PDF:\n" + extractedText + "\n"
       : "";
 
-    const promptText = [
-      "Du analysierst einen Mitarbeiter-Dienstplan. WICHTIGSTE REGEL: Extrahiere JEDEN Namen der im Plan steht.",
-      "",
-      "=== SCHRITT 1: STRUKTUR ===",
-      "Wie viele Spalten (Wochentage/Daten)? Welche Daten?",
-      "Wie viele Zeilen? Was steht links in jeder Zeile (Filialname oder Mitarbeitername)?",
-      "",
-      "=== SCHRITT 2: JEDEN NAMEN ERFASSEN ===",
-      "LESE JEDE ZELLE DES PLANS. Wenn du einen Personennamen siehst, erfasse ihn.",
-      "EGAL ob der Name bekannt ist oder nicht - ALLE Namen muessen raus!",
-      "",
-      "Bekannte Namen zur Schreibkorrektur (NUR fuer offensichtliche Tippfehler wie 'Sami'->richtig 'Semi'):",
-      registeredNames,
-      "",
-      "Fuer JEDEN gefundenen Namen notiere:",
-      "  PersonName | Datum " + curYear + "-MM-DD | Filiale | Uhrzeit HH:MM-HH:MM",
-      "",
-      "Filialen-Mapping:",
-      "  Arkaden / TEEAMO Arkaden -> TEEAMO Arkaden",
-      "  Aegidiimarkt / Aegdiimarkt -> TEEAMO Aegidiimarkt",
-      "  TEEnJOY / Teenjoy -> TEEnJOY",
-      "",
-      textSection,
-      "",
-      "=== SCHRITT 3: JSON AUSGABE ===",
-      "JEDE Person bekommt einen EIGENEN Schluessel im JSON.",
-      "Format: { "Vorname1": [{"d":"YYYY-MM-DD","f":"TEEAMO Arkaden","t":"09:00-17:00"}, ...], "Vorname2": [...], ... }",
-      "",
-      "Beispiel mit 3 Personen (so soll es aussehen!):",
-      "{ "Semi": [{"d":"" + curYear + "-07-01","f":"TEEAMO Arkaden","t":"09:00-15:00"},{"d":"" + curYear + "-07-03","f":"TEEAMO Arkaden","t":"14:00-20:00"}],",
-      "  "Teddy": [{"d":"" + curYear + "-07-01","f":"TEEnJOY","t":"11:30-18:00"}],",
-      "  "NeuerMitarbeiter": [{"d":"" + curYear + "-07-02","f":"TEEAMO Aegidiimarkt","t":"15:00-20:00"}] }",
-      "",
-      "Antworte im Format:",
-      "<analyse>",
-      "[Schritt 1 Struktur + Schritt 2 alle gefundenen Namen]",
-      "</analyse>",
-      "<json>",
-      "{ ... }",
-      "</json>",
-      "",
-      "PFLICHTREGELN:",
-      "- JEDE Person = eigener Schluessel (NIEMALS alle unter einem Schluessel zusammenfassen!)",
-      "- Datum: " + curYear + "-MM-DD",
-      "- Zeit: HH:MM-HH:MM oder null wenn nicht angegeben",
-      "- Jeden Namen so schreiben wie im Plan (kleiner Tippfehler ok zu korrigieren per Referenzliste)",
-      "- KEINEN einzigen Namen weglassen - auch neue/unbekannte Mitarbeiter erfassen!"
-    ].join("\n");
+     const promptText =
+      "Du analysierst einen Mitarbeiter-Dienstplan. WICHTIGSTE REGEL: Extrahiere JEDEN Namen der im Plan steht.\n"
+      + "\n=== SCHRITT 1: TABELLENSTRUKTUR ===\n"
+      + "Wie viele Spalten (Wochentage/Daten)? Welche Daten stehen in den Spaltenkopfen?\n"
+      + "Wie viele Zeilen? Was steht links in jeder Zeile?\n"
+      + "\n=== SCHRITT 2: ALLE NAMEN LUECKENLOS ERFASSEN ===\n"
+      + "LESE JEDE ZELLE. Jeden Personennamen erfassen - EGAL ob bekannt oder nicht!\n"
+      + "Bekannte Mitarbeiter (NUR fuer Tippfehler-Korrektur, kein Filter!): " + registeredNames + "\n"
+      + "Fuer JEDEN gefundenen Namen notiere: Name | Datum " + curYear + "-MM-DD | Filiale | Zeit HH:MM-HH:MM\n"
+      + "Filialen: Arkaden->TEEAMO Arkaden | Aegidiimarkt->TEEAMO Aegidiimarkt | TEEnJOY/Teenjoy->TEEnJOY\n"
+      + textSection
+      + "\n=== SCHRITT 3: JSON AUSGABE ===\n"
+      + "JEDE Person bekommt EIGENEN Schluessel. Beispiel (so soll Output aussehen!):\n"
+      + "{\"Semi\":[{\"d\":\"" + curYear + "-07-01\",\"f\":\"TEEAMO Arkaden\",\"t\":\"09:00-15:00\"}],"
+      + "\"Teddy\":[{\"d\":\"" + curYear + "-07-01\",\"f\":\"TEEnJOY\",\"t\":\"11:30-18:00\"}],"
+      + "\"NeueMitarbeiter\":[{\"d\":\"" + curYear + "-07-02\",\"f\":\"TEEAMO Aegidiimarkt\",\"t\":\"15:00-20:00\"}]}\n"
+      + "Antworte im Format: <analyse>[Analyse]</analyse><json>{JSON}</json>\n"
+      + "PFLICHTREGELN: JEDE Person = eigener Schluessel. Datum: " + curYear + "-MM-DD. Zeit: HH:MM-HH:MM oder null.\n"
+      + "KEINEN Namen weglassen - auch neue/unbekannte Mitarbeiter erfassen!";
 
     const contentBlock = dataUrl
       ? { type:"image", source:{type:"base64", media_type:"image/jpeg", data: dataUrl.split(",")[1]} }
