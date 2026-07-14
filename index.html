@@ -3736,27 +3736,54 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
       ? "\n\nDIREKT EXTRAHIERTER TEXT AUS PDF:\n" + extractedText + "\n"
       : "";
 
-    const promptText = "Du bist ein praeziser Dienstplan-Analysator. Befolge diese Schritte EXAKT:\n\n"
-      + "=== BEKANNTE MITARBEITER (Referenzliste fuer Namenskorrektur) ===\n" + registeredNames + "\n"
-      + textSection
-      + "\n=== SCHRITT 1: TABELLENSTRUKTUR ===\n"
-      + "Beschreibe: Wie viele Spalten? Was steht in Spaltenkoepfen (Daten/Wochentage)? "
-      + "Wie viele Zeilen? Was steht in Zeilenkoepfen?\n\n"
-      + "=== SCHRITT 2: ZELLENWEISE AUSLESEN ===\n"
-      + "Lies JEDE Zelle systematisch. Fuer jeden Namen aus der Liste:\n"
-      + "Format: Name | Datum YYYY-MM-DD | Filiale | Zeit HH:MM-HH:MM\n"
-      + "Filialen: Arkaden/TEEAMO Arkaden -> TEEAMO Arkaden | Aegidiimarkt/TEEAMO Aegidiimarkt -> TEEAMO Aegidiimarkt | Teenjoy/TEEnJOY/Teenjoy -> TEEnJOY\n"
-      + "Jahr: " + curYear + "\n\n"
-      + "=== SCHRITT 3: JSON AUSGABE ===\n"
-      + "Antworte exakt so:\n"
-      + "<analyse>\n[Deine Analyse aus Schritt 1 und 2]\n</analyse>\n"
-      + "<json>\n"
-      + '{"VornameExakt":[{"d":"YYYY-MM-DD","f":"TEEAMO Arkaden","t":"09:00-17:00"}]}\n'
-      + "</json>\n\n"
-      + "REGELN: Datum YYYY-MM-DD. Zeit HH:MM-HH:MM oder null. "
-      + "WICHTIG: Extrahiere ALLE Namen aus dem Dienstplan, auch wenn sie nicht in der Referenzliste stehen. "
-      + "Nutze die Referenzliste NUR zur Schreibkorrektur (z.B. 'Sami' -> 'Semi' falls in Liste). "
-      + "Neue oder unbekannte Namen einfach so uebernehmen wie sie im Dienstplan stehen.";
+    const promptText = [
+      "Du analysierst einen Mitarbeiter-Dienstplan. WICHTIGSTE REGEL: Extrahiere JEDEN Namen der im Plan steht.",
+      "",
+      "=== SCHRITT 1: STRUKTUR ===",
+      "Wie viele Spalten (Wochentage/Daten)? Welche Daten?",
+      "Wie viele Zeilen? Was steht links in jeder Zeile (Filialname oder Mitarbeitername)?",
+      "",
+      "=== SCHRITT 2: JEDEN NAMEN ERFASSEN ===",
+      "LESE JEDE ZELLE DES PLANS. Wenn du einen Personennamen siehst, erfasse ihn.",
+      "EGAL ob der Name bekannt ist oder nicht - ALLE Namen muessen raus!",
+      "",
+      "Bekannte Namen zur Schreibkorrektur (NUR fuer offensichtliche Tippfehler wie 'Sami'->richtig 'Semi'):",
+      registeredNames,
+      "",
+      "Fuer JEDEN gefundenen Namen notiere:",
+      "  PersonName | Datum " + curYear + "-MM-DD | Filiale | Uhrzeit HH:MM-HH:MM",
+      "",
+      "Filialen-Mapping:",
+      "  Arkaden / TEEAMO Arkaden -> TEEAMO Arkaden",
+      "  Aegidiimarkt / Aegdiimarkt -> TEEAMO Aegidiimarkt",
+      "  TEEnJOY / Teenjoy -> TEEnJOY",
+      "",
+      textSection,
+      "",
+      "=== SCHRITT 3: JSON AUSGABE ===",
+      "JEDE Person bekommt einen EIGENEN Schluessel im JSON.",
+      "Format: { "Vorname1": [{"d":"YYYY-MM-DD","f":"TEEAMO Arkaden","t":"09:00-17:00"}, ...], "Vorname2": [...], ... }",
+      "",
+      "Beispiel mit 3 Personen (so soll es aussehen!):",
+      "{ "Semi": [{"d":"" + curYear + "-07-01","f":"TEEAMO Arkaden","t":"09:00-15:00"},{"d":"" + curYear + "-07-03","f":"TEEAMO Arkaden","t":"14:00-20:00"}],",
+      "  "Teddy": [{"d":"" + curYear + "-07-01","f":"TEEnJOY","t":"11:30-18:00"}],",
+      "  "NeuerMitarbeiter": [{"d":"" + curYear + "-07-02","f":"TEEAMO Aegidiimarkt","t":"15:00-20:00"}] }",
+      "",
+      "Antworte im Format:",
+      "<analyse>",
+      "[Schritt 1 Struktur + Schritt 2 alle gefundenen Namen]",
+      "</analyse>",
+      "<json>",
+      "{ ... }",
+      "</json>",
+      "",
+      "PFLICHTREGELN:",
+      "- JEDE Person = eigener Schluessel (NIEMALS alle unter einem Schluessel zusammenfassen!)",
+      "- Datum: " + curYear + "-MM-DD",
+      "- Zeit: HH:MM-HH:MM oder null wenn nicht angegeben",
+      "- Jeden Namen so schreiben wie im Plan (kleiner Tippfehler ok zu korrigieren per Referenzliste)",
+      "- KEINEN einzigen Namen weglassen - auch neue/unbekannte Mitarbeiter erfassen!"
+    ].join("\n");
 
     const contentBlock = dataUrl
       ? { type:"image", source:{type:"base64", media_type:"image/jpeg", data: dataUrl.split(",")[1]} }
@@ -3818,16 +3845,11 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
         .filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
       function fuzzyMatchName(aiName) {
         if (!aiName) return aiName;
-        // 1) 완전 일치 (대소문자 무시)
+        // 1) 완전 일치 (대소문자만 보정) — 가장 안전
         const exact = empVornamen.find(n=>n.toLowerCase()===aiName.toLowerCase());
         if (exact) return exact;
-        // 2) 포함 관계 (AI 이름이 등록 이름을 포함하거나 반대)
-        const contains = empVornamen.find(n=>
-          n.toLowerCase().includes(aiName.toLowerCase()) ||
-          aiName.toLowerCase().includes(n.toLowerCase())
-        );
-        if (contains) return contains;
-        // 3) 편집 거리(Levenshtein) 1~2이면 보정
+        // 2) 이름 길이가 5자 이상이고 Levenshtein 거리가 정확히 1인 경우만 보정
+        //    (공격적 매핑 방지: "Dayoung"→"Yaya" 같은 잘못된 매칭 차단)
         function lev(a,b){
           const m=a.length,n=b.length;
           const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i?j?0:i:j));
@@ -3835,11 +3857,15 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
             dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
           return dp[m][n];
         }
-        const byDist = empVornamen
-          .map(n=>({n, d:lev(n.toLowerCase(), aiName.toLowerCase())}))
-          .sort((a,b)=>a.d-b.d);
-        if (byDist.length>0 && byDist[0].d<=2) return byDist[0].n;
-        // 4) 매칭 없으면 AI 이름 그대로 저장 (계정 없어도 보존)
+        if (aiName.length >= 5) {
+          const byDist = empVornamen
+            .map(n=>({n, d:lev(n.toLowerCase(), aiName.toLowerCase())}))
+            .filter(x=>x.d===1) // 거리 1만 (명확한 오타만)
+            .sort((a,b)=>a.d-b.d);
+          if (byDist.length>0) return byDist[0].n;
+        }
+        // 3) 매칭 없으면 AI 이름 100% 그대로 보존
+        //    신규 직원, 미가입 직원 포함 — 이름 기반으로 데이터 저장됨
         return aiName;
       }
 
@@ -4107,7 +4133,8 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
                     const filRows = dayRows.filter(r=>r.filiale===fil);
                     const short = filShort[fil]||fil;
                     const icon  = filIcon[fil]||"🏢";
-                    const hasFilAlert = filRows.some(r=>r.name && !validNames.includes(r.name));
+                    // 미등록 이름 = 정보용 경고 (에러 아님)
+                    const hasFilAlert = false; // 모든 이름 허용
 
                     return (
                       <div key={fil} style={{
@@ -4141,7 +4168,9 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
                           </div>
                         ):filRows.map(row=>{
                           // 계정 없는 이름도 정상 — 단지 미등록 표시만
-                    const nameOk = !row.name || validNames.includes(row.name);
+                    // 미등록 이름도 정상 — 단지 정보 표시용 플래그
+                    const nameRegistered = validNames.includes(row.name);
+                    const nameOk = true; // 모든 이름 유효 (계정 없어도 저장 가능)
                           const empList = ["emplist",row.id].join("-");
                           return (
                             <div key={row.id} style={{
@@ -4161,12 +4190,17 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
                                   style={{
                                     ...S.input,width:"100%",fontSize:12,fontWeight:700,
                                     padding:"5px 7px",boxSizing:"border-box",
-                                    borderColor:approvedDates.has(date)?"#22c55e":nameOk?C.border:C.red,
-                                    background:approvedDates.has(date)?"#f0fdf4":nameOk?"#fff":C.redLight,
+                                    borderColor:approvedDates.has(date)?"#22c55e":C.border,
+                                    background:approvedDates.has(date)?"#f0fdf4":"#fff",
                                     cursor:approvedDates.has(date)?"default":"text"
                                   }}
                                 />
                                 <datalist id={empList}>
+                                  {/* AI가 분석한 원래 이름 (목록에 없어도 포함) */}
+                                  {row.name && !(Array.isArray(users)?users:[]).some(u=>u.vorname===row.name) && (
+                                    <option value={row.name}>{row.name} (AI erkannt)</option>
+                                  )}
+                                  {/* 등록된 직원 목록 */}
                                   {(Array.isArray(users)?users:[])
                                     .filter(u=>!MANAGERS.includes(u.key))
                                     .sort((a,b)=>a.vorname<b.vorname?-1:1)
@@ -4175,7 +4209,7 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
                                 </datalist>
                                 {!nameOk&&row.name&&(
                                   <div style={{fontSize:8,color:C.red,marginTop:2,fontWeight:700}}>
-                                    {"⚠ Nicht registriert"}
+                                    {"Noch kein Konto"}
                                   </div>
                                 )}
                               </div>
@@ -4257,7 +4291,7 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
                   const isSaving   = savingDate === date;
                   const pendingCount = dayRows.filter(r=>r.name&&r.filiale).length;
                   const validNames2 = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
-                  const alertCount2 = dayRows.filter(r=>r.name&&!validNames2.includes(r.name)).length;
+                  const alertCount2 = dayRows.filter(r=>!r.name||!r.date).length; // 빈 이름/날짜만
 
                   if (isApproved) return (
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
@@ -4359,7 +4393,7 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
           {/* 오류 개수 요약 */}
           {(()=>{
             const validNames=(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
-            const alertCount=editRows.filter(r=>r.name&&!validNames.includes(r.name)).length;
+            const alertCount=editRows.filter(r=>!r.name||!r.date).length; // 빈 이름/날짜만
             return alertCount>0?(
               <div style={{fontSize:10,color:C.red,fontWeight:700,textAlign:"center",marginBottom:6}}>
                 {"⚠ "+alertCount+" Eintrag"+(alertCount>1?"e":"")+" noch nicht korrekt – bitte pruefen!"}
