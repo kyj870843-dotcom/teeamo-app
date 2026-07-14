@@ -1411,7 +1411,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
 // · 여기서 Übernehmen → 내 Dienstplan에 "Normal" 근무로 추가됨
 function SchichtboerseView({ userName, users }) {
   const [freieSchichten, setFreieSchichten] = useFirebase("freieSchichten", []);
-  const [myTab, setMyTab] = useState("offen"); // "offen" | "anbieten"
+  const [myTab, setMyTab] = useState("offen");
   const [msg, setMsg] = useState(null);
   const [fsDate, setFsDate] = useState(today());
   const [fsFiliale, setFsFiliale] = useState(FILIALEN[0]);
@@ -1419,73 +1419,127 @@ function SchichtboerseView({ userName, users }) {
   const [fsTimeTo, setFsTimeTo] = useState("17:00");
   const [fsNote, setFsNote] = useState("");
 
-  // 근무 이어받기 (Übernehmen)
-  // → schedule에 Normal 근무로 추가 → Dienstplan에서 바로 보임
-  async function uebernehmen(schicht) {
-    const nm = schicht.angeboten_von ? `Diese Schicht war von ${schicht.angeboten_von}.` : "";
-    // 1) schedule에 추가 (root + 월별)
-    if (window._fbDb && window._fbRef && window._fbGet && window._fbSet) {
-      try {
-        const monthKey = "schedule_" + schicht.date.slice(0,7).replace("-","_");
-        // root schedule 업데이트
-        const rootSnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
-        const rootSched = rootSnap.val() ? JSON.parse(JSON.stringify(rootSnap.val())) : {};
-        if (!rootSched[userName]) rootSched[userName] = [];
-        if (!Array.isArray(rootSched[userName])) rootSched[userName] = Object.values(rootSched[userName]);
-        rootSched[userName] = rootSched[userName].filter(s=>(s.d||s.date)!==schicht.date);
-        rootSched[userName].push({d:schicht.date, f:schicht.filiale, t:schicht.time||null});
-        await window._fbSet(window._fbRef(window._fbDb, "schedule"), rootSched);
-        // 월별 schedule_YYYY_MM 업데이트
-        const mSnap = await window._fbGet(window._fbRef(window._fbDb, monthKey));
-        const mSched = mSnap.val() ? JSON.parse(JSON.stringify(mSnap.val())) : {};
-        const mArr = Object.values(mSched[userName]||{}).filter(s=>(s.date||s.d)!==schicht.date);
-        mArr.push({date:schicht.date, filiale:schicht.filiale, time:schicht.time||null});
-        mSched[userName] = Object.fromEntries(mArr.map((s,i)=>[String(i),s]));
-        await window._fbSet(window._fbRef(window._fbDb, monthKey), mSched);
-      } catch(e) { console.error("schedule update error:", e); }
-    }
-    // 2) freieSchichten에서 제거 (또는 besetzt 표시)
-    setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).map(s=>
-      s.id===schicht.id ? {...s, besetzt:true, uebernommen_von:userName} : s
-    ));
+  // ── 전체 직원 목록 (알림 발송용) ──────────────────────────────
+  const allStaff = (Array.isArray(users)?users:[]).filter(u=>!u.isAdmin&&u.vorname!==userName);
+  const allManagers = MANAGERS;
+
+  // ── [2] 근무 내놓기 → 전체 직원 실시간 알림 ──────────────────
+  function anbieten() {
+    if (!fsDate || !fsFiliale) return;
+    const id = Date.now();
+    const newSchicht = {
+      id, date:fsDate, filiale:fsFiliale,
+      time: fsTimeFrom&&fsTimeTo ? fsTimeFrom+"-"+fsTimeTo : null,
+      note:fsNote, besetzt:false, angeboten_von:userName, ts:id
+    };
+
+    // Firebase에 freieSchichten 저장
+    setFreieSchichten(prev=>[...(Array.isArray(prev)?prev:[]), newSchicht]);
     if (window._fbDb && window._fbRef && window._fbSet) {
-      window._fbSet(window._fbRef(window._fbDb, "freieSchichten/"+schicht.id), {
-        ...schicht, besetzt:true, uebernommen_von:userName
-      }).catch(()=>{});
-    }
-    // 3) 관리자 알림 (타입: "uebernehmen" - Einspringen과 구분)
-    const ts = Date.now();
-    if (window._fbDb && window._fbRef && window._fbSet) {
-      ["teddy","yeaji"].forEach(mgr=>{
+      window._fbSet(window._fbRef(window._fbDb, "freieSchichten/"+id), newSchicht).catch(()=>{});
+
+      // 📢 가입된 전체 직원에게 실시간 알림 발송 (당사자 제외)
+      const dateStr = new Date(fsDate).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"});
+      const timeStr = newSchicht.time||"";
+      const msgTxt  = "📢 [Schichtbörse] Neue Schicht von "+userName+"! "+dateStr+" · "+fsFiliale+(timeStr?" · "+timeStr:"")+" — Jetzt übernehmen!";
+
+      allStaff.forEach(staffUser=>{
+        // 각 직원 개인 알림 노드에 저장
         window._fbSet(window._fbRef(window._fbDb,
-          "notifications/uebernehmen_"+schicht.id+"_"+mgr), {
-          type:"uebernehmen", kategorie:"Schichtbörse",
-          user:userName, date:schicht.date, filiale:schicht.filiale, time:schicht.time,
-          angeboten_von:schicht.angeboten_von||"",
-          zustaendig:mgr, gelesen:false, ts
+          "notifications/boerse_new_"+id+"_"+staffUser.key), {
+          type: "schichtboerse_new",
+          kategorie: "Schichtbörse",
+          schichtId: id,
+          zielUser: staffUser.vorname,
+          zielKey:  staffUser.key,
+          angeboten_von: userName,
+          date: fsDate, filiale: fsFiliale, time: newSchicht.time,
+          text: msgTxt,
+          gelesen: false,
+          ts: id
         }).catch(()=>{});
       });
     }
-    setMsg("✅ Schicht übernommen! "+schicht.date+" in "+schicht.filiale+" ist jetzt in deinem Dienstplan.");
-    setTimeout(()=>setMsg(null), 5000);
+
+    setMsg("📢 Schicht eingestellt & alle Mitarbeiter benachrichtigt!");
+    setFsNote("");
+    setTimeout(()=>setMsg(null), 4000);
   }
 
-  // 내 근무 내놓기 (Anbieten)
-  function anbieten() {
-    if (!fsDate || !fsFiliale) return;
-    const newSchicht = {
-      id: Date.now(),
-      date: fsDate, filiale: fsFiliale,
-      time: fsTimeFrom && fsTimeTo ? fsTimeFrom+"-"+fsTimeTo : null,
-      note: fsNote, besetzt: false,
-      angeboten_von: userName, ts: Date.now()
-    };
-    setFreieSchichten(prev=>[...(Array.isArray(prev)?prev:[]), newSchicht]);
-    if (window._fbDb && window._fbRef && window._fbSet) {
-      window._fbSet(window._fbRef(window._fbDb, "freieSchichten/"+newSchicht.id), newSchicht).catch(()=>{});
+  // ── [3] 근무 이어받기 → 자동 승인 + 관리자 확인 알림 ─────────
+  async function uebernehmen(schicht) {
+    // 1) schedule 자동 업데이트 (관리자 승인 불필요)
+    if (window._fbDb && window._fbRef && window._fbGet && window._fbSet) {
+      try {
+        const monthKey = "schedule_"+schicht.date.slice(0,7).replace("-","_");
+        // root schedule
+        const rootSnap = await window._fbGet(window._fbRef(window._fbDb,"schedule"));
+        const rootSched = rootSnap.val()?JSON.parse(JSON.stringify(rootSnap.val())):{};
+        if (!rootSched[userName]) rootSched[userName]=[];
+        if (!Array.isArray(rootSched[userName])) rootSched[userName]=Object.values(rootSched[userName]);
+        rootSched[userName]=rootSched[userName].filter(s=>(s.d||s.date)!==schicht.date);
+        rootSched[userName].push({d:schicht.date,f:schicht.filiale,t:schicht.time||null});
+        await window._fbSet(window._fbRef(window._fbDb,"schedule"),rootSched);
+        // 월별 schedule_YYYY_MM
+        const mSnap=await window._fbGet(window._fbRef(window._fbDb,monthKey));
+        const mSched=mSnap.val()?JSON.parse(JSON.stringify(mSnap.val())):{};
+        const mArr=Object.values(mSched[userName]||{}).filter(s=>(s.date||s.d)!==schicht.date);
+        mArr.push({date:schicht.date,filiale:schicht.filiale,time:schicht.time||null});
+        mSched[userName]=Object.fromEntries(mArr.map((s,i)=>[String(i),s]));
+        await window._fbSet(window._fbRef(window._fbDb,monthKey),mSched);
+      } catch(e){console.error("schedule update error:",e);}
     }
-    setMsg("📢 Schicht eingestellt! Andere können sie jetzt übernehmen.");
-    setFsNote(""); setTimeout(()=>setMsg(null), 4000);
+
+    // 2) freieSchichten besetzt 처리
+    setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).map(s=>
+      s.id===schicht.id?{...s,besetzt:true,uebernommen_von:userName}:s
+    ));
+    if(window._fbDb&&window._fbRef&&window._fbSet){
+      window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+schicht.id),
+        {...schicht,besetzt:true,uebernommen_von:userName}).catch(()=>{});
+    }
+
+    // 3) 관리자에게 자동 승인 확인 알림 (단방향)
+    const ts=Date.now();
+    const dateStr=new Date(schicht.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"});
+    const confirmMsg=`✅ [Schichtbörse] ${dateStr} · ${schicht.filiale} — Schicht von "${schicht.angeboten_von||"?"}" wurde von "${userName}" übernommen und automatisch eingetragen.`;
+
+    if(window._fbDb&&window._fbRef&&window._fbSet){
+      allManagers.forEach(mgr=>{
+        window._fbSet(window._fbRef(window._fbDb,
+          "notifications/boerse_match_"+schicht.id+"_"+mgr),{
+          type:"schichtboerse_match",
+          kategorie:"Schichtbörse",
+          zustaendig:mgr,
+          angeboten_von:schicht.angeboten_von||"",
+          uebernommen_von:userName,
+          date:schicht.date, filiale:schicht.filiale, time:schicht.time,
+          text:confirmMsg,
+          gelesen:false, auto_approved:true, ts
+        }).catch(()=>{});
+      });
+
+      // 근무 내놓은 직원에게도 매칭 완료 알림
+      if(schicht.angeboten_von&&schicht.angeboten_von!==userName){
+        const origUser=(Array.isArray(users)?users:[]).find(u=>u.vorname===schicht.angeboten_von);
+        if(origUser){
+          window._fbSet(window._fbRef(window._fbDb,
+            "notifications/boerse_taken_"+schicht.id+"_"+origUser.key),{
+            type:"schichtboerse_taken",
+            kategorie:"Schichtbörse",
+            zielUser:schicht.angeboten_von,
+            zielKey:origUser.key,
+            uebernommen_von:userName,
+            date:schicht.date, filiale:schicht.filiale, time:schicht.time,
+            text:"✅ Deine Schicht am "+dateStr+" ("+schicht.filiale+") wurde von "+userName+" übernommen!",
+            gelesen:false, ts
+          }).catch(()=>{});
+        }
+      }
+    }
+
+    setMsg("✅ Schicht übernommen & in deinen Dienstplan eingetragen!");
+    setTimeout(()=>setMsg(null),5000);
   }
 
   const offene = (Array.isArray(freieSchichten)?freieSchichten:[]).filter(s=>!s.besetzt);
@@ -2301,10 +2355,17 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   function fmtH(h){const hh=Math.floor(h);const mm=Math.round((h-hh)*60);return hh+"h"+String(mm).padStart(2,"0")+"m";}
   const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
 
-  // Dienstplan  :   Tausch  
+  // 알림 카운트 (Schichtbörse 새 근무 + Tausch 요청)
   const [_notifications] = useFirebase("notifications", {});
   const pendingTauschCount = Object.values(_notifications||{})
     .filter(n => n.type==="tausch_anfrage" && n.targetUser===user.vorname && !n.gelesen).length;
+  // Schichtbörse 새 알림 (전체 직원 대상)
+  const pendingBoerseCount = Object.values(_notifications||{})
+    .filter(n => n.type==="schichtboerse_new" && n.zielUser===user.vorname && !n.gelesen).length;
+  // 매칭 완료 알림 (내가 내놓은 근무가 이어받아짐)
+  const pendingBoerseTakenCount = Object.values(_notifications||{})
+    .filter(n => n.type==="schichtboerse_taken" && n.zielUser===user.vorname && !n.gelesen).length;
+  const boerseBadge = pendingBoerseCount + pendingBoerseTakenCount;
 
   function handleEin(){
     const inStr=`${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`;
@@ -2539,15 +2600,25 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
 
 
-      {tab==="schichtboerse"&&(
-        <SchichtboerseView userName={user.vorname} users={users}/>
-      )}
+      {tab==="schichtboerse"&&(()=>{
+        // 탭 진입 시 Schichtbörse 알림 읽음 처리
+        if(window._fbDb&&window._fbRef&&window._fbSet){
+          Object.entries(_notifications||{})
+            .filter(([,n])=>
+              (n.type==="schichtboerse_new"||n.type==="schichtboerse_taken")&&
+              n.zielUser===user.vorname&&!n.gelesen)
+            .forEach(([k])=>
+              window._fbSet(window._fbRef(window._fbDb,"notifications/"+k+"/gelesen"),true).catch(()=>{})
+            );
+        }
+        return <SchichtboerseView userName={user.vorname} users={users}/>;
+      })()}
 
       <div style={S.nav}>
         {[
           {id:"home",       icon:"🏠", lbl:"Startseite"},
           {id:"dienstplan", icon:"📋", lbl:"Dienstplan", badge: pendingTauschCount},
-          {id:"schichtboerse",icon:"🔔", lbl:"Schichtbörse"},
+          {id:"schichtboerse",icon:"🔔", lbl:"Schichtbörse", badge:boerseBadge},
         ].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
             <div style={{position:"relative",display:"inline-block"}}>
@@ -4713,6 +4784,10 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   const [fsNote, setFsNote] = useState("");
 
   //     (Alarm  )
+  // Schichtbörse 자동 승인 알림은 확인용으로만 표시 (별도 처리 불필요)
+  const boerseMatchNotifs = Object.entries(notifications||{})
+    .filter(([,n])=>n.type==="schichtboerse_match"&&!n.gelesen&&MANAGERS.includes(n.zustaendig))
+    .sort(([,a],[,b])=>b.ts-a.ts);
   const pendingNotifs = Object.entries(notifications||{})
     .filter(([,n]) => n.zustaendig === userKey && !n.gelesen && !n.bearbeitetVon)
     .sort((a,b) => b[1].ts - a[1].ts);
