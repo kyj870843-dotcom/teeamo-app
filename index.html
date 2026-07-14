@@ -1309,53 +1309,44 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
               </div>
             )}
 
-            {/* ── 미래 근무: Absagen + Schichttausch 선택 화면 ── */}
-            {!shiftPassed&&modalTab==="future"&&(
+                        {/* ── 미래 근무: Schicht frei geben ── */}
+            {!shiftPassed&&(
               <div>
-                <div style={{fontSize:11,color:C.muted,marginBottom:14,textAlign:"center"}}>Was möchtest du tun?</div>
-                <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
-                  <button onClick={()=>setModalTab("absagen")}
-                    style={{width:"100%",padding:"14px",borderRadius:12,border:`1.5px solid ${C.red}`,
-                      background:"#fff",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:12}}>
-                    <span style={{fontSize:22}}>{"🚫"}</span>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:800,color:C.red}}>Absagen</div>
-                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>Schicht absagen & Manager benachrichtigen</div>
-                    </div>
-                  </button>
-                  <button onClick={()=>{ setShowModal(false); setShowTausch(true); }}
-                    style={{width:"100%",padding:"14px",borderRadius:12,border:`1.5px solid ${C.mint}`,
-                      background:"#fff",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:12}}>
-                    <span style={{fontSize:22}}>{"🔄"}</span>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:800,color:C.mintDark}}>Schichttausch</div>
-                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>Mit einem Kollegen tauschen</div>
-                    </div>
-                  </button>
+                <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>
+                  Schicht freigeben
                 </div>
-              </div>
-            )}
-
-            {/* Absagen 폼 */}
-            {modalTab==="absagen"&&(
-              <div>
-                <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>{"Grund "}<span style={{color:C.red}}>*</span></div>
-                <textarea value={absGrund} onChange={e=>{setAbsGrund(e.target.value);setAbsErr("");}}
-                  placeholder="z. B. Ich bin krank und kann nicht kommen…"
-                  style={{...S.input,width:"100%",minHeight:70,resize:"none",fontFamily:"inherit",marginBottom:8}}/>
-                {absErr&&<div style={{fontSize:11,color:C.red,marginBottom:8,fontWeight:600}}>{"⚠ "}{absErr}</div>}
-                <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{"ℹ️ Der Manager wird benachrichtigt."}</div>
-                <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>setShowModal(false)} style={{flex:1,padding:"11px",borderRadius:10,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
-                  <button onClick={()=>{
-                    if(!absGrund.trim()){setAbsErr("Bitte einen Grund angeben.");return;}
-                    const antrag={id:Date.now(),userName,date:d,filiale:f,time:t,grund:absGrund,status:"offen"};
-                    handleAbsagen(antrag);
-                    setShowModal(false);setAbsGrund("");
-                  }} style={{flex:2,padding:"11px",borderRadius:10,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
-                    Absagen & senden
-                  </button>
+                <div style={{fontSize:10,color:C.muted,marginBottom:12}}>
+                  Wird in der Schichtbörse veröffentlicht. Alle Kollegen werden benachrichtigt.
                 </div>
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>GRUND (optional)</div>
+                  <textarea value={absGrund} onChange={e=>setAbsGrund(e.target.value)}
+                    placeholder="z. B. Krankheit, privater Termin..."
+                    style={{width:"100%",minHeight:60,borderRadius:9,border:"1.5px solid "+C.border,
+                      padding:"8px 10px",fontSize:12,outline:"none",boxSizing:"border-box",resize:"none"}}/>
+                </div>
+                <button onClick={()=>{
+                  const schichtId=Date.now();
+                  const newFrei={id:schichtId,date:d,filiale:f,time:t||null,
+                    note:absGrund||"",besetzt:false,angeboten_von:userName,ts:schichtId};
+                  if(window._fbDb&&window._fbRef&&window._fbSet){
+                    window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+schichtId),newFrei).catch(()=>{});
+                    const dateStr=new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"});
+                    const msgTxt="📢 [Schichtbörse] "+userName+" gibt Schicht frei! "+dateStr+" · "+f+(t?" · "+t:"")+" — Jetzt übernehmen!";
+                    (Array.isArray(users)?users:[]).filter(u=>!u.isAdmin&&u.vorname!==userName).forEach(u=>{
+                      window._fbSet(window._fbRef(window._fbDb,"notifications/boerse_new_"+schichtId+"_"+u.key),{
+                        type:"schichtboerse_new",kategorie:"Schichtbörse",schichtId,
+                        zielUser:u.vorname,zielKey:u.key,angeboten_von:userName,
+                        date:d,filiale:f,time:t||null,text:msgTxt,gelesen:false,ts:schichtId
+                      }).catch(()=>{});
+                    });
+                  }
+                  setShowModal(false);setAbsGrund("");
+                }} style={{width:"100%",padding:"13px",borderRadius:11,border:"none",
+                  background:"linear-gradient(135deg,"+C.navy+",#444)",
+                  color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
+                  {"🔔 In Schichtbörse einstellen"}
+                </button>
               </div>
             )}
             {/* Nachtragen 탭 */}
@@ -1409,7 +1400,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
 // ── Schichtbörse: 대타 매칭 게시판 ─────────────────────────────
 // · Einspringen(당일 갑작스러운 출근)과 완전히 분리된 개념
 // · 여기서 Übernehmen → 내 Dienstplan에 "Normal" 근무로 추가됨
-function SchichtboerseView({ userName, users }) {
+function SchichtboerseView({ userName, users, isAdmin }) {
   const [freieSchichten, setFreieSchichten] = useFirebase("freieSchichten", []);
   const [myTab, setMyTab] = useState("offen");
   const [msg, setMsg] = useState(null);
@@ -1558,7 +1549,8 @@ function SchichtboerseView({ userName, users }) {
 
       {/* 탭 전환 */}
       <div style={{display:"flex",gap:0,marginBottom:14,borderRadius:10,overflow:"hidden",border:"1px solid "+C.border}}>
-        {[["offen","🔓 Offene Schichten ("+offene.length+")"],["anbieten","📢 Anbieten"]].map(([id,lbl])=>(
+        {(isAdmin?[["offen","🔓 Offene Schichten ("+offene.length+")"],["anbieten","📢 Anbieten (Admin)"]]:
+        [["offen","🔓 Offene Schichten ("+offene.length+")"]]).map(([id,lbl])=>(
           <button key={id} onClick={()=>setMyTab(id)}
             style={{flex:1,padding:"9px 4px",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
               background:myTab===id?C.navy:"#fff",color:myTab===id?"#fff":C.muted}}>
@@ -1601,10 +1593,11 @@ function SchichtboerseView({ userName, users }) {
                 </div>
               </div>
               {s.angeboten_von===userName ? (
-                <div style={{textAlign:"center",fontSize:11,color:C.muted,padding:"8px",
-                  background:C.bg,borderRadius:8}}>
-                  Das ist deine eigene Schicht
-                </div>
+                <button onClick={()=>uebernehmen(s)}
+                  style={{width:"100%",padding:"10px",borderRadius:10,border:`1.5px solid ${C.yellow}`,
+                    background:C.yellowLight,cursor:"pointer",fontWeight:700,fontSize:12,color:"#7c5c00"}}>
+                  {"↩️ Zurücknehmen (eigene Schicht)"}
+                </button>
               ) : (
                 <button onClick={()=>uebernehmen(s)}
                   style={{width:"100%",padding:"11px",borderRadius:10,border:"none",
@@ -2611,7 +2604,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               window._fbSet(window._fbRef(window._fbDb,"notifications/"+k+"/gelesen"),true).catch(()=>{})
             );
         }
-        return <SchichtboerseView userName={user.vorname} users={users}/>;
+        return <SchichtboerseView userName={user.vorname} users={users} isAdmin={false}/>;
       })()}
 
       <div style={S.nav}>
@@ -4761,6 +4754,58 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   const [openAId, setOpenAId] = useState(null);
   const [uTab, setUTab] = useState("all");
   const safeUsers=Array.isArray(users)&&users.length>0?users:INIT_USERS;
+
+  // 🚨 미출근 경보 시스템: 5분마다 근무 시작 시간 체크
+  React.useEffect(()=>{
+    function checkNoShow(){
+      if(!window._fbDb||!window._fbRef||!window._fbGet||!window._fbSet) return;
+      const now = new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
+      const todayStr = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
+      const nowMin = now.getHours()*60+now.getMinutes();
+      // 오늘 schedule에서 아직 출근 안 한 직원 체크
+      window._fbGet(window._fbRef(window._fbDb,"schedule")).then(snap=>{
+        const sched=snap.val()||{};
+        for(const [name, shifts] of Object.entries(sched)){
+          if(MANAGERS.includes(name.toLowerCase())) continue;
+          const todayShifts=(Array.isArray(shifts)?shifts:Object.values(shifts)).filter(s=>(s.d||s.date)===todayStr);
+          for(const sh of todayShifts){
+            const t=sh.t||sh.time;
+            if(!t||!t.includes("-")) continue;
+            const startTime=t.split("-")[0];
+            const [sh2,sm2]=startTime.split(":").map(Number);
+            if(isNaN(sh2)) continue;
+            const startMin=sh2*60+sm2;
+            // 15분 초과 && 아직 알림 안 보냄
+            if(nowMin-startMin<15) continue;
+            const alertKey="noshow_"+name+"_"+todayStr+"_"+startTime.replace(":","");
+            window._fbGet(window._fbRef(window._fbDb,"notifications/"+alertKey)).then(ex=>{
+              if(ex.val()) return; // 이미 알림 보냄
+              // 실제 출근 기록 체크
+              window._fbGet(window._fbRef(window._fbDb,"records")).then(recSnap=>{
+                const recs=Object.values(recSnap.val()||{});
+                const clocked=recs.some(r=>r.user===name&&r.date===todayStr&&r.ein);
+                if(clocked) return; // 이미 출근함
+                // 미출근 경보 발송
+                const alertMsg="🚨 [No-Show] "+name+"님 — "+sh.f||sh.filiale+"·"+startTime+" 출근 기록 없음.";
+                MANAGERS.forEach(mgr=>{
+                  window._fbSet(window._fbRef(window._fbDb,"notifications/"+alertKey+"_"+mgr),{
+                    type:"noshow_alert", kategorie:"🚨 NoShow",
+                    user:name, date:todayStr, filiale:sh.f||sh.filiale, time:startTime,
+                    text:alertMsg, gelesen:false, urgent:true,
+                    ts:Date.now(), zustaendig:mgr
+                  }).catch(()=>{});
+                });
+              }).catch(()=>{});
+            }).catch(()=>{});
+          }
+        }
+      }).catch(()=>{});
+    }
+    // 앱 시작 즉시 + 5분마다 체크
+    checkNoShow();
+    const iv=setInterval(checkNoShow,5*60*1000);
+    return()=>clearInterval(iv);
+  },[]);
   // userKey ,  key prefix fallback (  )
   const manager=safeUsers.find(u=>u.key===userKey)
     || {key:userKey, vorname:userKey?.split("_")[0]||"Manager", emoji:"", kuerzel:"M", role:"Admin"};
@@ -5236,7 +5281,46 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
       {/*  ANTRGE / ARCHIV  */}
       {tab==="antraege"&&(
-        <AntraegeTab
+        <div>
+          {/* 🚨 미출근 긴급 경보 */}
+          {Object.entries(notifications||{}).filter(([,n])=>n.type==="noshow_alert"&&!n.gelesen).length>0&&(
+            <div style={{padding:"14px 14px 0"}}>
+              <div style={{fontSize:10,fontWeight:800,color:C.red,marginBottom:8,textTransform:"uppercase"}}>
+                🚨 Mierschienen Alarm
+              </div>
+              {Object.entries(notifications||{}).filter(([,n])=>n.type==="noshow_alert"&&!n.gelesen)
+                .sort(([,a],[,b])=>b.ts-a.ts).map(([k,n])=>(
+                <div key={k} style={{...S.card,marginBottom:8,border:"2px solid "+C.red,background:C.redLight}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:800,color:C.red}}>{"🚨 "+n.user}</div>
+                      <div style={{fontSize:10,color:C.red,marginTop:2}}>{n.filiale+" · "+n.time+" — kein Einstempeln!"}</div>
+                    </div>
+                    <button onClick={()=>window._fbSet&&window._fbRef&&window._fbDb&&
+                      window._fbSet(window._fbRef(window._fbDb,"notifications/"+k+"/gelesen"),true).catch(()=>{})}
+                      style={{fontSize:9,padding:"4px 8px",borderRadius:7,border:"none",
+                        background:C.red,color:"#fff",cursor:"pointer",fontWeight:700}}>OK</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Schichtbörse 매칭 로그 */}
+          {Object.entries(notifications||{}).filter(([,n])=>n.type==="schichtboerse_match").slice(0,5).length>0&&(
+            <div style={{padding:"8px 14px 0"}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#1d4ed8",marginBottom:6,textTransform:"uppercase"}}>
+                🔔 Schichtbörse Log
+              </div>
+              {Object.entries(notifications||{}).filter(([,n])=>n.type==="schichtboerse_match")
+                .sort(([,a],[,b])=>b.ts-a.ts).slice(0,5).map(([k,n])=>(
+                <div key={k} style={{...S.card,marginBottom:6,border:"1px solid #bfdbfe",background:"#eff6ff",opacity:n.gelesen?0.6:1}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#1d4ed8"}}>{"✅ "+n.angeboten_von+" → "+n.uebernommen_von}</div>
+                  <div style={{fontSize:9,color:C.muted,marginTop:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <AntraegeTab
           antraege={antraege}
           setAntraege={setAntraege}
           tauschAntraege={tauschAntraege}
@@ -5257,10 +5341,10 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       {tab==="statistik"&&<StatistikTab records={records} users={users}/>}
 
       {/*  ALARM  */}
-      {tab==="benachrichtigungen"&&(
-        <div style={{padding:"14px"}}>
-
-          {/*  Freie Schicht eintragen     */}
+      {tab==="schichtboerse_mgr"&&(
+        <div style={{padding:"14px 0"}}>
+          <SchichtboerseView userName={userKey} users={safeUsers} isAdmin={true}/>
+          {/*  Legacy freie Schichten UI entfernt — jetzt in SchichtboerseView  */}
           <div style={{...S.card,marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:10}}>{"➕ Freie Schicht eintragen"}</div>
             <div style={{marginBottom:8}}>
@@ -5377,17 +5461,17 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       <div style={S.nav}>
         {[{id:"uebersicht",icon:"👥",lbl:"Übersicht"},
           {id:"dienstplan",icon:"📋",lbl:"Dienstplan"},
-          {id:"antraege",icon:"📂",lbl:"Anträge"},
-          {id:"benachrichtigungen",icon:"🔔",lbl:`Alarm${alarmCount>0?" ("+alarmCount+")":""}` },
+          {id:"antraege",icon:"📂",lbl:"Anträge", badge:alarmCount},
+          {id:"schichtboerse_mgr",icon:"🔔",lbl:"Schichtbörse"},
           {id:"statistik",icon:"📊",lbl:"Statistik"}].map(t=>(
           <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
             <div style={{position:"relative",display:"inline-block"}}>
               <span style={{fontSize:19}}>{t.icon}</span>
-              {t.id==="benachrichtigungen"&&alarmCount>0&&(
+              {t.badge>0&&(
                 <span style={{position:"absolute",top:-4,right:-6,minWidth:16,height:16,borderRadius:99,
                   background:C.red,color:"#fff",fontSize:9,fontWeight:800,
                   display:"flex",alignItems:"center",justifyContent:"center",padding:"0 3px",lineHeight:1}}>
-                  {alarmCount}
+                  {t.badge}
                 </span>
               )}
             </div>
