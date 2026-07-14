@@ -1406,84 +1406,237 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
 }
 
 //  EINSPRINGEN VIEW 
-function EinspringenView({ userName }) {
+// ── Schichtbörse: 대타 매칭 게시판 ─────────────────────────────
+// · Einspringen(당일 갑작스러운 출근)과 완전히 분리된 개념
+// · 여기서 Übernehmen → 내 Dienstplan에 "Normal" 근무로 추가됨
+function SchichtboerseView({ userName, users }) {
   const [freieSchichten, setFreieSchichten] = useFirebase("freieSchichten", []);
-  const [, setNotifications] = useFirebase("notifications", {});
-  const [schedule, setSchedule] = useFirebase("schedule", {});
+  const [myTab, setMyTab] = useState("offen"); // "offen" | "anbieten"
   const [msg, setMsg] = useState(null);
+  const [fsDate, setFsDate] = useState(today());
+  const [fsFiliale, setFsFiliale] = useState(FILIALEN[0]);
+  const [fsTimeFrom, setFsTimeFrom] = useState("09:00");
+  const [fsTimeTo, setFsTimeTo] = useState("17:00");
+  const [fsNote, setFsNote] = useState("");
 
-  function einspringen(schicht) {
-    //   
-    setSchedule(prev => {
-      const updated = { ...(prev||{}) };
-      if (!updated[userName]) updated[userName] = [];
-      updated[userName] = [...updated[userName], { d: schicht.date, f: schicht.filiale, t: schicht.time }];
-      return updated;
-    });
-    //   
-    setFreieSchichten(prev => (Array.isArray(prev)?prev:[]).filter(s => s.id !== schicht.id));
-    //  2  
+  // 근무 이어받기 (Übernehmen)
+  // → schedule에 Normal 근무로 추가 → Dienstplan에서 바로 보임
+  async function uebernehmen(schicht) {
+    const nm = schicht.angeboten_von ? `Diese Schicht war von ${schicht.angeboten_von}.` : "";
+    // 1) schedule에 추가 (root + 월별)
+    if (window._fbDb && window._fbRef && window._fbGet && window._fbSet) {
+      try {
+        const monthKey = "schedule_" + schicht.date.slice(0,7).replace("-","_");
+        // root schedule 업데이트
+        const rootSnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
+        const rootSched = rootSnap.val() ? JSON.parse(JSON.stringify(rootSnap.val())) : {};
+        if (!rootSched[userName]) rootSched[userName] = [];
+        if (!Array.isArray(rootSched[userName])) rootSched[userName] = Object.values(rootSched[userName]);
+        rootSched[userName] = rootSched[userName].filter(s=>(s.d||s.date)!==schicht.date);
+        rootSched[userName].push({d:schicht.date, f:schicht.filiale, t:schicht.time||null});
+        await window._fbSet(window._fbRef(window._fbDb, "schedule"), rootSched);
+        // 월별 schedule_YYYY_MM 업데이트
+        const mSnap = await window._fbGet(window._fbRef(window._fbDb, monthKey));
+        const mSched = mSnap.val() ? JSON.parse(JSON.stringify(mSnap.val())) : {};
+        const mArr = Object.values(mSched[userName]||{}).filter(s=>(s.date||s.d)!==schicht.date);
+        mArr.push({date:schicht.date, filiale:schicht.filiale, time:schicht.time||null});
+        mSched[userName] = Object.fromEntries(mArr.map((s,i)=>[String(i),s]));
+        await window._fbSet(window._fbRef(window._fbDb, monthKey), mSched);
+      } catch(e) { console.error("schedule update error:", e); }
+    }
+    // 2) freieSchichten에서 제거 (또는 besetzt 표시)
+    setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).map(s=>
+      s.id===schicht.id ? {...s, besetzt:true, uebernommen_von:userName} : s
+    ));
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      window._fbSet(window._fbRef(window._fbDb, "freieSchichten/"+schicht.id), {
+        ...schicht, besetzt:true, uebernommen_von:userName
+      }).catch(()=>{});
+    }
+    // 3) 관리자 알림 (타입: "uebernehmen" - Einspringen과 구분)
     const ts = Date.now();
     if (window._fbDb && window._fbRef && window._fbSet) {
-      ["teddy","yeaji"].forEach(mgr => {
-        window._fbSet(window._fbRef(window._fbDb, `notifications/einspringen_${schicht.id}_${mgr}`), {
-          type: "einspringen", kategorie: "Einspringen",
-          user: userName, date: schicht.date, filiale: schicht.filiale, time: schicht.time,
-          zustaendig: mgr, bearbeitetVon: null, gelesen: false, ts
-        }).catch(e => console.error(e));
+      ["teddy","yeaji"].forEach(mgr=>{
+        window._fbSet(window._fbRef(window._fbDb,
+          "notifications/uebernehmen_"+schicht.id+"_"+mgr), {
+          type:"uebernehmen", kategorie:"Schichtbörse",
+          user:userName, date:schicht.date, filiale:schicht.filiale, time:schicht.time,
+          angeboten_von:schicht.angeboten_von||"",
+          zustaendig:mgr, gelesen:false, ts
+        }).catch(()=>{});
       });
     }
-    setMsg(`✅ Du bist jetzt für ${new Date(schicht.date).toLocaleDateString("de-DE")} in ${schicht.filiale} eingeplant!`);
-    setTimeout(() => setMsg(null), 4000);
+    setMsg("✅ Schicht übernommen! "+schicht.date+" in "+schicht.filiale+" ist jetzt in deinem Dienstplan.");
+    setTimeout(()=>setMsg(null), 5000);
   }
 
-  const offene = (Array.isArray(freieSchichten)?freieSchichten:[]).filter(s => !s.besetzt);
+  // 내 근무 내놓기 (Anbieten)
+  function anbieten() {
+    if (!fsDate || !fsFiliale) return;
+    const newSchicht = {
+      id: Date.now(),
+      date: fsDate, filiale: fsFiliale,
+      time: fsTimeFrom && fsTimeTo ? fsTimeFrom+"-"+fsTimeTo : null,
+      note: fsNote, besetzt: false,
+      angeboten_von: userName, ts: Date.now()
+    };
+    setFreieSchichten(prev=>[...(Array.isArray(prev)?prev:[]), newSchicht]);
+    if (window._fbDb && window._fbRef && window._fbSet) {
+      window._fbSet(window._fbRef(window._fbDb, "freieSchichten/"+newSchicht.id), newSchicht).catch(()=>{});
+    }
+    setMsg("📢 Schicht eingestellt! Andere können sie jetzt übernehmen.");
+    setFsNote(""); setTimeout(()=>setMsg(null), 4000);
+  }
+
+  const offene = (Array.isArray(freieSchichten)?freieSchichten:[]).filter(s=>!s.besetzt);
+  const meineAngebote = (Array.isArray(freieSchichten)?freieSchichten:[]).filter(s=>s.angeboten_von===userName);
 
   return (
     <div style={{padding:"14px"}}>
-      <div style={{...S.card,marginBottom:12,background:`linear-gradient(135deg,${C.mintLight},#f0f7fa)`,border:`1.5px solid ${C.mint}`}}>
-        <div style={{fontSize:14,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"🙋 Freie Schichten"}</div>
-        <div style={{fontSize:11,color:C.muted}}>{"Hier kannst du offene Schichten übernehmen."}</div>
+      {/* 헤더 */}
+      <div style={{...S.card,marginBottom:12,background:"linear-gradient(135deg,#EEF4FF,#f0f7fa)",border:"1.5px solid "+C.navy}}>
+        <div style={{fontSize:14,fontWeight:800,color:C.navy,marginBottom:4}}>{"🔔 Schichtbörse"}</div>
+        <div style={{fontSize:11,color:C.muted}}>Offene Schichten übernehmen oder eigene anbieten.</div>
+        <div style={{fontSize:10,color:C.muted,marginTop:4,padding:"4px 8px",borderRadius:6,background:"rgba(0,0,0,.04)"}}>
+          ℹ️ Übernommene Schichten erscheinen als <b>Normal</b>-Schicht in deinem Dienstplan.
+        </div>
       </div>
 
-      {msg && (
-        <div style={{padding:"11px 14px",borderRadius:10,background:C.mintLight,border:`1px solid ${C.mint}`,
+      {/* 탭 전환 */}
+      <div style={{display:"flex",gap:0,marginBottom:14,borderRadius:10,overflow:"hidden",border:"1px solid "+C.border}}>
+        {[["offen","🔓 Offene Schichten ("+offene.length+")"],["anbieten","📢 Anbieten"]].map(([id,lbl])=>(
+          <button key={id} onClick={()=>setMyTab(id)}
+            style={{flex:1,padding:"9px 4px",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
+              background:myTab===id?C.navy:"#fff",color:myTab===id?"#fff":C.muted}}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+      {msg&&(
+        <div style={{padding:"10px 14px",borderRadius:10,background:C.mintLight,border:"1px solid "+C.mint,
           fontSize:12,fontWeight:600,color:C.mintDark,marginBottom:12}}>
           {msg}
         </div>
       )}
 
-      {offene.length === 0 ? (
-        <div style={{...S.card,textAlign:"center",padding:"32px 16px"}}>
-          <div style={{fontSize:28,marginBottom:8}}>{"🎉"}</div>
-          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Keine offenen Schichten</div>
-          <div style={{fontSize:11,color:C.muted}}>Aktuell sind alle Schichten besetzt.</div>
-        </div>
-      ) : (
-        offene.map(s => (
-          <div key={s.id} style={{...S.card,marginBottom:10,border:`1.5px solid ${C.border}`}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:800,color:C.text}}>
-                  {new Date(s.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+      {/* 오픈 근무 목록 */}
+      {myTab==="offen"&&(
+        offene.length===0 ? (
+          <div style={{...S.card,textAlign:"center",padding:"32px 16px"}}>
+            <div style={{fontSize:28,marginBottom:8}}>🎉</div>
+            <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>Keine offenen Schichten</div>
+            <div style={{fontSize:11,color:C.muted}}>Aktuell sind keine Schichten verfügbar.</div>
+          </div>
+        ) : (
+          offene.map(s=>(
+            <div key={s.id} style={{...S.card,marginBottom:10,border:"1.5px solid "+C.border}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:800,color:C.text}}>
+                    {new Date(s.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+                  </div>
+                  <div style={{fontSize:11,color:C.muted,marginTop:2}}>{s.filiale}</div>
+                  {s.time&&<div style={{fontSize:11,fontWeight:600,color:C.mintDark,marginTop:2}}>{"🕐 "}{s.time}</div>}
+                  {s.angeboten_von&&<div style={{fontSize:10,color:C.muted,marginTop:3}}>{"von "}{s.angeboten_von}</div>}
+                  {s.note&&<div style={{fontSize:10,color:C.muted,marginTop:4}}>{"📌 "}{s.note}</div>}
                 </div>
-                <div style={{fontSize:11,color:C.muted,marginTop:2}}>{s.filiale}</div>
-                {s.time&&<div style={{fontSize:11,fontWeight:600,color:C.mintDark,marginTop:2}}>{"🕐 "}{s.time}</div>}
-                {s.note&&<div style={{fontSize:10,color:C.muted,marginTop:4}}>{"📌 "}{s.note}</div>}
+                <div style={{width:40,height:40,borderRadius:10,background:"#EEF4FF",
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>
+                  {s.filiale==="TEEnJOY"?"🧋":s.filiale==="TEEAMO Aegidiimarkt"?"🏬":"🏪"}
+                </div>
               </div>
-              <div style={{width:40,height:40,borderRadius:10,background:C.mintLight,
-                display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>
-                {s.filiale==="TEEnJOY"?"🧋":"☕"}
+              {s.angeboten_von===userName ? (
+                <div style={{textAlign:"center",fontSize:11,color:C.muted,padding:"8px",
+                  background:C.bg,borderRadius:8}}>
+                  Das ist deine eigene Schicht
+                </div>
+              ) : (
+                <button onClick={()=>uebernehmen(s)}
+                  style={{width:"100%",padding:"11px",borderRadius:10,border:"none",
+                    background:"linear-gradient(135deg,"+C.navy+",#444)",
+                    color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
+                  {"✅ Übernehmen → Dienstplan"}
+                </button>
+              )}
+            </div>
+          ))
+        )
+      )}
+
+      {/* 내 근무 내놓기 */}
+      {myTab==="anbieten"&&(
+        <div>
+          <div style={{...S.card,marginBottom:10}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Schicht zur Börse einstellen</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+              <div>
+                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>DATUM</div>
+                <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)}
+                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
+              </div>
+              <div>
+                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>FILIALE</div>
+                <select value={fsFiliale} onChange={e=>setFsFiliale(e.target.value)}
+                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}>
+                  {FILIALEN.map(f=><option key={f} value={f}>{f.replace("TEEAMO ","")}</option>)}
+                </select>
               </div>
             </div>
-            <button onClick={()=>einspringen(s)}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+              <div>
+                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>VON</div>
+                <TimeInput value={fsTimeFrom} onChange={setFsTimeFrom}
+                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
+              </div>
+              <div>
+                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>BIS</div>
+                <TimeInput value={fsTimeTo} onChange={setFsTimeTo}
+                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
+              </div>
+            </div>
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>GRUND (optional)</div>
+              <input value={fsNote} onChange={e=>setFsNote(e.target.value)}
+                placeholder="z. B. Urlaub, privater Termin…"
+                style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
+            </div>
+            <button onClick={anbieten}
               style={{width:"100%",padding:"11px",borderRadius:10,border:"none",
-                background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,
+                background:"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",
                 color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
-              {"🙋 Ich springe ein!"}
+              {"📢 Schicht einstellen"}
             </button>
           </div>
-        ))
+
+          {/* 내가 내놓은 근무 목록 */}
+          {meineAngebote.length>0&&(
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>
+                Meine angebotenen Schichten
+              </div>
+              {meineAngebote.map(s=>(
+                <div key={s.id} style={{...S.card,marginBottom:8,border:"1px solid "+C.border,
+                  opacity:s.besetzt?0.6:1}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700}}>{new Date(s.date).toLocaleDateString("de-DE")}</div>
+                      <div style={{fontSize:10,color:C.muted}}>{s.filiale}{s.time?" · "+s.time:""}</div>
+                    </div>
+                    {s.besetzt
+                      ? <span style={{fontSize:10,padding:"3px 8px",borderRadius:99,background:C.mintLight,color:C.mintDark,fontWeight:700}}>
+                          {"✅ Übernommen"+(s.uebernommen_von?" von "+s.uebernommen_von:"")}
+                        </span>
+                      : <span style={{fontSize:10,padding:"3px 8px",borderRadius:99,background:"#fef9c3",color:"#92400e",fontWeight:700}}>
+                          Offen
+                        </span>
+                    }
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -2319,7 +2472,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
                 <div style={{marginTop:8,padding:"6px 10px",borderRadius:8,
                   background:clockTyp==="einspringen"?"#fef9c3":"#fce7f3",
                   fontSize:10,color:clockTyp==="einspringen"?"#92400e":"#9d174d",fontWeight:600}}>
-                  {clockTyp==="einspringen"?"⚡ Einspringen: Wird separat in der Statistik erfasst":"🍙 Onigiri: Sonderarbeit wird separat berechnet"}
+                  {clockTyp==="einspringen"?"⚡ Einspringen: Heute ungeplant ausgeholfen (nicht Schichtbörse)":"🍙 Onigiri: Sonderarbeit wird separat berechnet"}
                 </div>
               )}
             </div>
@@ -2386,15 +2539,15 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
 
 
-      {tab==="einspringen"&&(
-        <EinspringenView userName={user.vorname} users={users}/>
+      {tab==="schichtboerse"&&(
+        <SchichtboerseView userName={user.vorname} users={users}/>
       )}
 
       <div style={S.nav}>
         {[
           {id:"home",       icon:"🏠", lbl:"Startseite"},
           {id:"dienstplan", icon:"📋", lbl:"Dienstplan", badge: pendingTauschCount},
-          {id:"einspringen",icon:"🙋", lbl:"Einspringen"},
+          {id:"schichtboerse",icon:"🔔", lbl:"Schichtbörse"},
         ].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
             <div style={{position:"relative",display:"inline-block"}}>
@@ -4854,7 +5007,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   function renderErledigtCard(key, a) {
     const isOpen = erledigtExpanded[key];
     const label = a.kategorie || a.type || "Sonstige";
-    const emojiMap = {Schichtabsage:"🚫",Schichttausch:"🔄",Einspringen:"🙋",Nachtrag:"🕐"};
+    const emojiMap = {Schichtabsage:"🚫",Schichttausch:"🔄",Einspringen:"⚡","Schichtbörse":"🔔",Nachtrag:"🕐"};
     const emoji = emojiMap[label] || "📌";
     const eColor = a.entscheidung==="genehmigt"?C.mintDark:a.entscheidung==="abgelehnt"?C.red:C.muted;
     const eLabel = a.entscheidung==="genehmigt"?"✅ Genehmigt":a.entscheidung==="abgelehnt"?"❌ Abgelehnt":"✓ Bestätigt";
