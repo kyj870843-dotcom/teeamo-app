@@ -3759,12 +3759,12 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
         const pdfBytes = Uint8Array.from(atob(b64), ch=>ch.charCodeAt(0));
         const pdfDoc  = await window.pdfjsLib.getDocument({data:pdfBytes}).promise;
         const page    = await pdfDoc.getPage(1);
-        const vp      = page.getViewport({scale:3.0});
+        const vp      = page.getViewport({scale:1.5});  // 3.0→1.5 (파일크기 75% 감소)
         const canvas  = document.createElement("canvas");
         canvas.width  = vp.width;
         canvas.height = vp.height;
         await page.render({canvasContext:canvas.getContext("2d"),viewport:vp}).promise;
-        dataUrl = canvas.toDataURL("image/jpeg",0.92);
+        dataUrl = canvas.toDataURL("image/jpeg",0.82);
         setLocalImgSrc(dataUrl); setLocalImgMonth(selMonth);
       } catch(pdfErr) {
         console.warn("PDF→Image fehlgeschlagen, nutze Original:", pdfErr);
@@ -3816,14 +3816,38 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
       "<json>{\"Name\":[{\"d\":\""+yr+"-MM-DD\",\"f\":\"TEEAMO Arkaden\",\"t\":\"09:00-17:00\"}]}</json>\n" +
       "REGELN: Datum "+yr+"-MM-DD. Zeit HH:MM-HH:MM oder null. KEINEN Namen weglassen!";
 
-    const contentBlock = dataUrl && !dataUrl.startsWith("data:application/pdf")
-      ? {type:"image",source:{type:"base64",media_type:"image/jpeg",data:dataUrl.split(",")[1]}}
+    // 이미지 크기 체크 — 1.5MB 초과 시 추가 압축
+    let finalDataUrl = dataUrl;
+    if (finalDataUrl && !finalDataUrl.startsWith("data:application/pdf")) {
+      const sizeKB = Math.round(finalDataUrl.length * 3/4 / 1024);
+      if (sizeKB > 1500) {
+        // 추가 압축: 캔버스로 리사이즈
+        try {
+          const img2 = new Image();
+          await new Promise(res=>{ img2.onload=res; img2.src=finalDataUrl; });
+          const ratio = Math.min(1, Math.sqrt(1500*1024 / (img2.width*img2.height*0.5)));
+          const c2 = document.createElement("canvas");
+          c2.width = Math.round(img2.width*ratio);
+          c2.height = Math.round(img2.height*ratio);
+          c2.getContext("2d").drawImage(img2,0,0,c2.width,c2.height);
+          finalDataUrl = c2.toDataURL("image/jpeg",0.75);
+          console.log(`이미지 압축: ${sizeKB}KB → ${Math.round(finalDataUrl.length*3/4/1024)}KB`);
+        } catch(resizeErr) { console.warn("Resize fehlgeschlagen:", resizeErr); }
+      }
+    }
+
+    const contentBlock = finalDataUrl && !finalDataUrl.startsWith("data:application/pdf")
+      ? {type:"image",source:{type:"base64",media_type:"image/jpeg",data:finalDataUrl.split(",")[1]}}
       : {type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}};
 
     // ── STEP D: API 호출 ──────────────────────────────────────────
     let parsed = {};
     try {
+      // AbortController로 60초 타임아웃 설정
+      const controller = new AbortController();
+      const timeoutId  = setTimeout(()=>controller.abort(), 60000);
       const res = await fetch("https://api.anthropic.com/v1/messages",{
+        signal: controller.signal,
         method:"POST",
         headers:{
           "Content-Type":"application/json",
@@ -3838,6 +3862,7 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
         })
       });
 
+      clearTimeout(timeoutId);
       if (!res.ok) {
         let errBody="";
         try{ const j=await res.json(); errBody=j.error?.message||JSON.stringify(j); }catch{}
@@ -3917,7 +3942,12 @@ function DienstplanUploadView({ records, users, antraege, setAntraege, absagenLi
       }
 
     } catch(apiErr) {
-      setMsg({type:"err",text:"❌ Fehler: "+apiErr.message});
+      let errMsg = apiErr.message || "Unbekannter Fehler";
+      if (apiErr.name==="AbortError") errMsg = "Zeitüberschreitung (60s). Bitte erneut versuchen.";
+      else if (errMsg.includes("Load failed")||errMsg.includes("Failed to fetch")||errMsg.includes("NetworkError")) {
+        errMsg = "Netzwerkfehler — Bitte API-Schlüssel prüfen und WLAN-Verbindung kontrollieren.";
+      }
+      setMsg({type:"err",text:"❌ "+errMsg});
       setAnalyzing(false); return;
     }
 
