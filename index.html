@@ -654,6 +654,8 @@ function getShiftStatus(shift, actualRec, date) {
     return "ausstehend";
   }
   if (!actualRec.aus || actualRec.aus === "") return "aktiv";
+  if (actualRec.geprüft) return "gearbeitet";   // 관리자 OK 확인 완료 → 최종 Feierabend
+  if (actualRec.prüfen) return "prüfen";         // 조기 퇴근 → 확인 대기
   const planned = calcShiftMinutes(shift.time || shift.t);
   const actual = calcShiftMinutes(`${actualRec.ein}-${actualRec.aus}`);
   if (planned == null || actual == null) return "gearbeitet";
@@ -2314,6 +2316,10 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const [nAus,setNAus]=useState("17:00");
   const [nGrund,setNGrund]=useState("");
   const [nMsg,setNMsg]=useState("");
+  // 조기 퇴근(Vorzeitiges Ausstempeln) 관련
+  const [scheduleData]=useFirebase("schedule",{});
+  const [fruehData,setFruehData]=useState(null);  // {inStr,outStr} — 사유 입력 대기중인 퇴근 데이터
+  const [fruehGrund,setFruehGrund]=useState("");
 
   // 근무 상태를 localStorage에 저장 (새로고침 후 복원용)
   useEffect(()=>{
@@ -2389,31 +2395,37 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     });
     setClockedIn(true);setClockInTime(new Date());setClockFiliale(selFiliale);setModal(null);
   }
-  function handleAus(){
-    const outStr=`${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    const inStr=`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`;
+  // 오늘 예정 근무의 종료 시각(분) — 조기 퇴근 판정용
+  function getPlannedEndMin(){
+    const name=user.vorname, date=today();
+    const arr=!scheduleData[name]?[]:Array.isArray(scheduleData[name])?scheduleData[name]:Object.values(scheduleData[name]);
+    const sh=arr.find(s=>(s.d||s.date)===date);
+    const tm=sh&&(sh.t||sh.time);
+    if(!tm||!tm.includes("-")) return null;
+    return parseMinutes(tm.split("-")[1]);
+  }
+  // 실제 퇴근 처리: 임시 record 제거 + 완료 record 저장 (Pause 정산 + 조기퇴근 prüfen/사유 반영)
+  function finishAus(inStr, outStr, isFrueh, gr){
     const tempId="clock_"+user.vorname+"_"+today();
-    // 임시 record에서 typ 가져오기
     const existRec=(Array.isArray(records)?records:[]).find(r=>r.id===tempId);
     const typ=existRec?.typ||clockTyp||"normal";
-    // Pause가 진행 중인 상태로 퇴근하면 마지막 Pause 구간도 누적에 반영
     let finalPauseSec=totalPauseSec;
     if(isPaused&&pauseStart){ finalPauseSec+=Math.floor((Date.now()-pauseStart.getTime())/1000); }
     const finalId=Date.now();
-    const completed={id:finalId,user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ,pauseSec:finalPauseSec};
-    // 로컬 상태: 임시 record 제거 + 완료 record(aus 포함) 추가 → setRecords가 Firebase 전체 노드에 반영
+    const completed={id:finalId,user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,
+      note:(isFrueh?gr:grund)||"", typ, pauseSec:finalPauseSec,
+      prüfen:isFrueh?true:false, frühGrund:isFrueh?(gr||""):""};
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
       return [...filtered,completed];
     });
-    // 🛑 BUG2 방어: Firebase에 남아있을 수 있는 임시(aus:null) record 노드를 직접 제거해
-    //    관리자 화면에서 즉시 Aktiv 해제 + Feierabend 반영을 보장한다.
+    // 임시(aus:null) record 노드 직접 제거 → 관리자 화면 즉시 Aktiv 해제
     if(window._fbDb&&window._fbRef&&window._fbRemove){
       window._fbRemove(window._fbRef(window._fbDb,"records/"+tempId)).catch(()=>{});
     }
     setClockedIn(false);setClockInTime(null);setElapsed(0);setGrund("");setModal(null);
-    setClockTyp("normal");
-    setIsPaused(false);setPauseStart(null);setTotalPauseSec(0);
+    setClockTyp("normal");setIsPaused(false);setPauseStart(null);setTotalPauseSec(0);
+    setFruehData(null);setFruehGrund("");
     try{localStorage.removeItem(CLOCK_KEY);}catch{}
   }
   function submitNachtrag(){
@@ -2716,7 +2728,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
         ))}
       </div>
 
-      {modal&&(
+      {(modal==="ein"||modal==="aus")&&(
         <ClockModal
           modal={modal}
           now={now}
@@ -2728,11 +2740,51 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           onClose={()=>setModal(null)}
           onEin={(d)=>{setClockedIn(true);setClockInTime(d);setClockFiliale(selFiliale);setModal(null);}}
           onAus={(inStr,outStr)=>{
-            setRecords(prev=>[...prev,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ:"normal"}]);
-            setClockedIn(false);setClockInTime(null);setElapsed(0);setGrund("");setModal(null);
-            try{localStorage.removeItem(CLOCK_KEY);}catch{}
+            const plannedEnd=getPlannedEndMin();
+            const [oh,om]=outStr.split(":").map(Number);
+            const outMin=oh*60+om;
+            if(plannedEnd!=null && outMin < plannedEnd-1){
+              // ⏱ 조기 퇴근 → 사유 입력 모달 먼저 표시 (퇴근 처리는 사유 입력 후)
+              setFruehData({inStr,outStr});
+              setFruehGrund("");
+              setModal("fruehGrund");
+            } else {
+              finishAus(inStr,outStr,false,"");
+            }
           }}
         />
+      )}
+
+      {/* ⏱ 조기 퇴근 사유 입력 모달 */}
+      {modal==="fruehGrund"&&fruehData&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:210}}
+          onClick={e=>{if(e.target===e.currentTarget){setModal(null);setFruehData(null);setFruehGrund("");}}}>
+          <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,
+            padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))"}}>
+            <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 18px"}}/>
+            <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>{"⏱ Vorzeitiges Ausstempeln"}</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:14}}>
+              {"Du stempelst früher aus als geplant. Bitte kurz den Grund angeben."}
+            </div>
+            <div style={{...S.card,background:C.yellowLight,border:`1px solid ${C.yellow}`,marginBottom:14,padding:"9px 12px"}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.yellow}}>
+                {clockFiliale}{" · "}{fruehData.inStr}{" – "}{fruehData.outStr}
+              </div>
+            </div>
+            <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>{"Grund für vorzeitiges Ausstempeln"}</div>
+            <textarea value={fruehGrund} onChange={e=>setFruehGrund(e.target.value)}
+              placeholder="z. B. mit Yeaji gesprochen"
+              style={{...S.input,width:"100%",minHeight:70,resize:"none",fontFamily:"inherit",marginBottom:14,boxSizing:"border-box"}}/>
+            <div style={{display:"flex",gap:9}}>
+              <button onClick={()=>{setModal(null);setFruehData(null);setFruehGrund("");}}
+                style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
+              <button onClick={()=>finishAus(fruehData.inStr,fruehData.outStr,true,fruehGrund.trim())}
+                style={{flex:2,padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.yellow},#C99A2E)`,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
+                {"Ausstempeln & senden"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -3022,7 +3074,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
   );
 }
 
-function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab, userKey, safeUsers }) {
+function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab, userKey, safeUsers, onConfirmPruefen }) {
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
   const todayStr = today();
   const todayRecs = (Array.isArray(records)?records:[]).filter(r=>r.date===todayStr);
@@ -3161,6 +3213,24 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                           </div>
                           <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:99,color:sColor(st),background:sBg(st),flexShrink:0}}>{st}</span>
                         </button>
+                        {st==="Prüfen"&&(
+                          <div style={{marginTop:9,paddingTop:9,borderTop:`1px dashed ${C.yellow}`}}>
+                            {rec?.frühGrund&&(
+                              <div style={{fontSize:11,color:C.text,background:C.yellowLight,borderRadius:8,padding:"7px 10px",marginBottom:8}}>
+                                {"📝 "}{rec.frühGrund}
+                              </div>
+                            )}
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                              <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{"⏱ Vorzeitig ausgestempelt"}</span>
+                              <button onClick={()=>onConfirmPruefen&&onConfirmPruefen(rec)}
+                                style={{padding:"7px 20px",borderRadius:9,border:"none",
+                                  background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",
+                                  fontWeight:800,fontSize:12,cursor:"pointer"}}>
+                                {"OK"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -3968,7 +4038,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
   const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
   const empOptions = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort(byName);
   const QUICK = ["09:30","11:30","12:30","14:00","15:00","16:00","18:00","19:00","20:00"];
-  const DRAFT_KEY = "teeamo_schicht_draft";
+  const DRAFT_KEY = "teeamo_schicht_draft_v2";
   const filShort = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt", "TEEnJOY":"TEEnJOY" };
 
   // 선택된 월의 스케줄 (실시간)
@@ -3981,11 +4051,9 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
 
   // ── Draft 복원 ────────────────────────────────────────────────
   const draft0 = (()=>{ try{const s=localStorage.getItem(DRAFT_KEY);return s?JSON.parse(s):null;}catch{return null;} })();
-  const [selEmp,  setSelEmp]  = useState(draft0?.emp || "");
-  const [selFil,  setSelFil]  = useState(draft0?.fil || FILIALEN[0]);
-  const [selDates,setSelDates]= useState(Array.isArray(draft0?.dates)?draft0.dates:[]);
-  const [von, setVon]         = useState(draft0?.von || "");
-  const [bis, setBis]         = useState(draft0?.bis || "");
+  const [selEmp, setSelEmp] = useState(draft0?.emp || "");
+  // 날짜별 설정: { "YYYY-MM-DD": { filiale, von, bis } }
+  const [dateConfigs, setDateConfigs] = useState(draft0?.configs && typeof draft0.configs==="object" ? draft0.configs : {});
 
   // 달력 표시 월
   const [calYM, setCalYM] = useState(()=>{
@@ -3993,59 +4061,67 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
     const d=new Date(); return {y:d.getFullYear(), m:d.getMonth()};
   });
 
-  // ── Draft 자동 저장 (localStorage) ─────────────────────────────
+  // ── Draft 자동 저장 ───────────────────────────────────────────
   useEffect(()=>{
-    try{ localStorage.setItem(DRAFT_KEY, JSON.stringify({emp:selEmp,fil:selFil,dates:selDates,von,bis})); }catch{}
-  },[selEmp,selFil,selDates,von,bis]);
+    try{ localStorage.setItem(DRAFT_KEY, JSON.stringify({emp:selEmp, configs:dateConfigs})); }catch{}
+  },[selEmp, dateConfigs]);
 
-  const hasDraft = !!(selEmp || selDates.length>0 || von || bis);
+  const selDates = Object.keys(dateConfigs).sort();
+  const hasDraft = !!(selEmp || selDates.length>0);
 
   function toggleDate(d){
-    setSelDates(prev=> prev.includes(d) ? prev.filter(x=>x!==d) : [...prev,d].sort());
+    setDateConfigs(prev=>{
+      const next={...prev};
+      if(next[d]) delete next[d];
+      else next[d]={filiale:FILIALEN[0], von:"", bis:""};
+      return next;
+    });
+  }
+  function updateConfig(d, field, val){
+    setDateConfigs(prev=>({...prev, [d]:{...(prev[d]||{filiale:FILIALEN[0],von:"",bis:""}), [field]:val}}));
   }
   function clearForm(){
-    setSelEmp(""); setSelFil(FILIALEN[0]); setSelDates([]); setVon(""); setBis("");
+    setSelEmp(""); setDateConfigs({});
     try{localStorage.removeItem(DRAFT_KEY);}catch{}
   }
 
-  // ── 저장: root schedule({d,f,t}) + 월별 schedule({date,filiale,time}) 동시 기록 ──
+  // ── 저장: 날짜별 개별 지점/시간을 root + 월별 두 노드에 기록 ──
   async function saveShifts(){
     if(!selEmp){ setMsg({t:"err",m:"Bitte zuerst eine/n Mitarbeiter/in wählen."}); return; }
-    if(selDates.length===0){ setMsg({t:"err",m:"Bitte mindestens ein Datum wählen."}); return; }
-    if(!von || !bis){ setMsg({t:"err",m:"Bitte VON- und BIS-Zeit angeben."}); return; }
-    if(!(window._fbDb&&window._fbRef&&window._fbGet&&window._fbSet)){
-      setMsg({t:"err",m:"Keine Verbindung zur Datenbank."}); return;
-    }
-    const timeStr = von+"-"+bis;
+    const dates=Object.keys(dateConfigs);
+    if(dates.length===0){ setMsg({t:"err",m:"Bitte mindestens ein Datum wählen."}); return; }
+    const incomplete=dates.filter(d=>!dateConfigs[d].von || !dateConfigs[d].bis);
+    if(incomplete.length>0){ setMsg({t:"err",m:"Bitte für ALLE Tage VON und BIS ausfüllen."}); return; }
+    if(!(window._fbDb&&window._fbRef&&window._fbGet&&window._fbSet)){ setMsg({t:"err",m:"Keine Verbindung zur Datenbank."}); return; }
     setSaving(true); setMsg(null);
     try{
-      // 날짜를 달(month)별로 그룹핑
-      const byMonth = {};
-      selDates.forEach(d=>{ const mk=d.slice(0,7).replace("-","_"); (byMonth[mk]=byMonth[mk]||[]).push(d); });
+      // 월(month)별 그룹
+      const byMonth={};
+      dates.forEach(d=>{ const mk=d.slice(0,7).replace("-","_"); (byMonth[mk]=byMonth[mk]||[]).push(d); });
 
-      // 1) 월별 노드 저장 (+ 부모 즉시 갱신)
-      for(const [mk, dates] of Object.entries(byMonth)){
+      // 1) 월별 노드
+      for(const [mk, ds] of Object.entries(byMonth)){
         const key="schedule_"+mk;
         const snap=await window._fbGet(window._fbRef(window._fbDb,key));
         const ex=snap.val()?JSON.parse(JSON.stringify(snap.val())):{};
         let arr=Array.isArray(ex[selEmp])?ex[selEmp]:Object.values(ex[selEmp]||{});
-        dates.forEach(d=>{ arr=arr.filter(s=>(s.date||s.d)!==d); arr.push({date:d,filiale:selFil,time:timeStr}); });
+        ds.forEach(d=>{ const c=dateConfigs[d]; arr=arr.filter(s=>(s.date||s.d)!==d); arr.push({date:d,filiale:c.filiale,time:c.von+"-"+c.bis}); });
         ex[selEmp]=Object.fromEntries(arr.map((s,i)=>[String(i),s]));
         await window._fbSet(window._fbRef(window._fbDb,key),ex);
         const pd={}; for(const [n,sh] of Object.entries(ex)){ pd[n]=norm(sh); }
         if(onScheduleSaved) onScheduleSaved(mk, pd);
       }
 
-      // 2) root schedule 저장 (직원 앱이 읽는 노드)
+      // 2) root schedule
       const rsnap=await window._fbGet(window._fbRef(window._fbDb,"schedule"));
       const root=rsnap.val()?JSON.parse(JSON.stringify(rsnap.val())):{};
       let rarr=Array.isArray(root[selEmp])?root[selEmp]:Object.values(root[selEmp]||{});
-      selDates.forEach(d=>{ rarr=rarr.filter(s=>(s.d||s.date)!==d); rarr.push({d:d,f:selFil,t:timeStr}); });
+      dates.forEach(d=>{ const c=dateConfigs[d]; rarr=rarr.filter(s=>(s.d||s.date)!==d); rarr.push({d:d,f:c.filiale,t:c.von+"-"+c.bis}); });
       root[selEmp]=rarr;
       await window._fbSet(window._fbRef(window._fbDb,"schedule"),root);
 
       setSaving(false);
-      setMsg({t:"ok",m:"✅ "+selDates.length+" Schicht(en) für "+selEmp+" gespeichert."});
+      setMsg({t:"ok",m:"✅ "+dates.length+" Schicht(en) für "+selEmp+" gespeichert."});
       clearForm();
       setShowAdd(false);
     }catch(e){
@@ -4054,7 +4130,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
     }
   }
 
-  // ── 삭제: 두 노드에서 해당 (직원·날짜) shift 제거 ──
+  // ── 삭제 ──
   async function deleteShift(name, date){
     if(!(window._fbDb&&window._fbRef&&window._fbGet&&window._fbSet)) return;
     try{
@@ -4088,12 +4164,8 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
     norm(sh).forEach(s=>{
       const d=s.date||s.d; if(!d) return;
       (byDate[d]=byDate[d]||[]).push({
-        name,
-        filiale:s.filiale||s.f||"",
-        time:s.time||s.t||"",
-        status:s.status||null,
-        getauschtMit:s.getauschtMit||null,
-        getauschtVon:s.getauschtVon||null
+        name, filiale:s.filiale||s.f||"", time:s.time||s.t||"",
+        status:s.status||null, getauschtMit:s.getauschtMit||null, getauschtVon:s.getauschtVon||null
       });
     });
   }
@@ -4101,14 +4173,35 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
 
   // ── 달력 셀 ──
   const daysInMonth=new Date(calYM.y, calYM.m+1, 0).getDate();
-  const firstDow=(new Date(calYM.y, calYM.m, 1).getDay()+6)%7; // Mo=0 … So=6
+  const firstDow=(new Date(calYM.y, calYM.m, 1).getDay()+6)%7;
   const cells=[]; for(let i=0;i<firstDow;i++) cells.push(null);
   for(let d=1;d<=daysInMonth;d++) cells.push(d);
   const ymStr=(d)=>calYM.y+"-"+String(calYM.m+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
   const calLabel=new Date(calYM.y, calYM.m, 1).toLocaleDateString("de-DE",{month:"long",year:"numeric"});
   const todayStr=today();
 
-  const inp = {...S.input, width:"100%", fontSize:13, padding:"10px 12px", boxSizing:"border-box"};
+  const inp = {...S.input, width:"100%", fontSize:13, padding:"9px 11px", boxSizing:"border-box"};
+
+  // 날짜별 카드 안의 시간 입력 + 퀵 버튼 (일반 함수 — 중첩 컴포넌트가 아니라 포커스 유지)
+  const timeField = (d, field, label) => {
+    const val=(dateConfigs[d]||{})[field]||"";
+    return (
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{label}</div>
+        <input value={val} onChange={e=>updateConfig(d,field,e.target.value)} placeholder="--:--"
+          inputMode="numeric"
+          style={{...S.input,width:"100%",fontSize:14,fontWeight:700,textAlign:"center",padding:"8px 6px",boxSizing:"border-box"}}/>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:5}}>
+          {QUICK.map(q=>(
+            <button key={field+q} onClick={()=>updateConfig(d,field,q)}
+              style={{fontSize:10,fontWeight:700,padding:"5px 7px",borderRadius:7,cursor:"pointer",flex:"0 0 auto",
+                border:"1px solid "+(val===q?C.mintDark:C.border),
+                background:val===q?C.mintDark:"#fff",color:val===q?"#fff":C.text}}>{q}</button>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -4116,7 +4209,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,gap:10}}>
         <div>
           <div style={{fontSize:14,fontWeight:800,color:C.text}}>{"📋 Dienstplan"}</div>
-          <div style={{fontSize:10,color:C.muted,marginTop:1}}>Schichten manuell hinzufügen & verwalten</div>
+          <div style={{fontSize:10,color:C.muted,marginTop:1}}>Pro Tag Filiale & Zeit einzeln festlegen</div>
         </div>
         <button onClick={()=>{setShowAdd(true);setMsg(null);}}
           style={{flexShrink:0,padding:"10px 16px",borderRadius:10,border:"none",
@@ -4148,132 +4241,123 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
         </div>
       )}
 
-      {/* ── Schicht hinzufügen 모달 ── */}
+      {/* ── Schicht hinzufügen 모달 (날짜별 Matrix) ── */}
       {showAdd && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:200,
           display:"flex",alignItems:"flex-end",justifyContent:"center"}}
           onClick={()=>setShowAdd(false)}>
           <div onClick={e=>e.stopPropagation()}
             style={{background:"#fff",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:480,
-              maxHeight:"92vh",overflowY:"auto",padding:"18px 16px calc(18px + env(safe-area-inset-bottom,0px))"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-              <div style={{fontSize:16,fontWeight:800,color:C.text}}>Schicht hinzufügen</div>
-              <button onClick={()=>setShowAdd(false)}
-                style={{border:"none",background:"none",fontSize:22,color:C.muted,cursor:"pointer",lineHeight:1}}>{"×"}</button>
-            </div>
-
-            {/* Mitarbeiter */}
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>MITARBEITER/IN</div>
-              <select value={selEmp} onChange={e=>setSelEmp(e.target.value)} style={inp}>
-                <option value="">— auswählen —</option>
-                {empOptions.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
-              </select>
-            </div>
-
-            {/* Filiale */}
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>FILIALE</div>
-              <select value={selFil} onChange={e=>setSelFil(e.target.value)} style={inp}>
-                {FILIALEN.map(f=><option key={f} value={f}>{filShort[f]||f}</option>)}
-              </select>
-            </div>
-
-            {/* 다중 날짜 선택 (달력) */}
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>
-                DATEN (Mehrfachauswahl){selDates.length>0?" · "+selDates.length+" gewählt":""}
+              height:"92vh",display:"flex",flexDirection:"column"}}>
+            {/* 고정 헤더 */}
+            <div style={{padding:"16px 16px 10px",borderBottom:"1px solid "+C.border,flexShrink:0}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div style={{fontSize:16,fontWeight:800,color:C.text}}>Schicht hinzufügen</div>
+                <button onClick={()=>setShowAdd(false)}
+                  style={{border:"none",background:"none",fontSize:22,color:C.muted,cursor:"pointer",lineHeight:1}}>{"×"}</button>
               </div>
-              <div style={{border:"1px solid "+C.border,borderRadius:12,padding:"10px"}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-                  <button onClick={()=>setCalYM(p=>{const m=p.m-1;return m<0?{y:p.y-1,m:11}:{y:p.y,m};})}
-                    style={{border:"none",background:C.bg,borderRadius:8,width:30,height:30,fontSize:15,cursor:"pointer",color:C.text}}>{"‹"}</button>
-                  <div style={{fontSize:12,fontWeight:800,color:C.text}}>{calLabel}</div>
-                  <button onClick={()=>setCalYM(p=>{const m=p.m+1;return m>11?{y:p.y+1,m:0}:{y:p.y,m};})}
-                    style={{border:"none",background:C.bg,borderRadius:8,width:30,height:30,fontSize:15,cursor:"pointer",color:C.text}}>{"›"}</button>
+            </div>
+
+            {/* 스크롤 영역 */}
+            <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
+              {/* Mitarbeiter */}
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>MITARBEITER/IN</div>
+                <select value={selEmp} onChange={e=>setSelEmp(e.target.value)} style={inp}>
+                  <option value="">— auswählen —</option>
+                  {empOptions.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
+                </select>
+              </div>
+
+              {/* 달력 다중 선택 */}
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>
+                  DATEN WÄHLEN{selDates.length>0?" · "+selDates.length+" Tag(e)":""}
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:4}}>
-                  {["Mo","Di","Mi","Do","Fr","Sa","So"].map(w=>(
-                    <div key={w} style={{textAlign:"center",fontSize:8,fontWeight:700,color:C.muted}}>{w}</div>
-                  ))}
+                <div style={{border:"1px solid "+C.border,borderRadius:12,padding:"10px"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                    <button onClick={()=>setCalYM(p=>{const m=p.m-1;return m<0?{y:p.y-1,m:11}:{y:p.y,m};})}
+                      style={{border:"none",background:C.bg,borderRadius:8,width:30,height:30,fontSize:15,cursor:"pointer",color:C.text}}>{"‹"}</button>
+                    <div style={{fontSize:12,fontWeight:800,color:C.text}}>{calLabel}</div>
+                    <button onClick={()=>setCalYM(p=>{const m=p.m+1;return m>11?{y:p.y+1,m:0}:{y:p.y,m};})}
+                      style={{border:"none",background:C.bg,borderRadius:8,width:30,height:30,fontSize:15,cursor:"pointer",color:C.text}}>{"›"}</button>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:4}}>
+                    {["Mo","Di","Mi","Do","Fr","Sa","So"].map(w=>(
+                      <div key={w} style={{textAlign:"center",fontSize:8,fontWeight:700,color:C.muted}}>{w}</div>
+                    ))}
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+                    {cells.map((d,i)=>{
+                      if(d===null) return <div key={"e"+i}/>;
+                      const ds=ymStr(d);
+                      const on=!!dateConfigs[ds];
+                      const isToday=ds===todayStr;
+                      return(
+                        <button key={ds} onClick={()=>toggleDate(ds)}
+                          style={{aspectRatio:"1",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:on?800:600,
+                            border:isToday&&!on?"1.5px solid "+C.mint:"1px solid "+(on?C.mintDark:C.border),
+                            background:on?C.mintDark:"#fff",color:on?"#fff":C.text,
+                            display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
-                  {cells.map((d,i)=>{
-                    if(d===null) return <div key={"e"+i}/>;
-                    const ds=ymStr(d);
-                    const on=selDates.includes(ds);
-                    const isToday=ds===todayStr;
+              </div>
+
+              {/* 날짜별 설정 카드 (핵심) */}
+              {selDates.length===0 ? (
+                <div style={{textAlign:"center",padding:"18px 10px",color:C.muted,fontSize:11,
+                  background:C.bg,borderRadius:10,marginBottom:6}}>
+                  Oben im Kalender Tage antippen — für jeden Tag erscheint hier eine eigene Karte.
+                </div>
+              ) : (
+                <div style={{marginBottom:6}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6}}>PRO TAG: FILIALE & ZEIT</div>
+                  {selDates.map(d=>{
+                    const c=dateConfigs[d]||{};
                     return(
-                      <button key={ds} onClick={()=>toggleDate(ds)}
-                        style={{aspectRatio:"1",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:on?800:600,
-                          border:isToday&&!on?"1.5px solid "+C.mint:"1px solid "+(on?C.mintDark:C.border),
-                          background:on?C.mintDark:"#fff",color:on?"#fff":C.text,
-                          display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>
-                        {d}
-                      </button>
+                      <div key={d} style={{border:"1.5px solid "+C.border,borderRadius:12,padding:"11px 12px",marginBottom:10,background:"#fff"}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                          <div style={{fontSize:12,fontWeight:800,color:C.navy}}>
+                            {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+                          </div>
+                          <button onClick={()=>toggleDate(d)}
+                            style={{border:"none",background:C.redLight,color:C.red,borderRadius:7,width:24,height:24,
+                              fontSize:13,fontWeight:800,cursor:"pointer",lineHeight:1}}>{"×"}</button>
+                        </div>
+                        {/* Filiale */}
+                        <div style={{marginBottom:10}}>
+                          <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>FILIALE</div>
+                          <select value={c.filiale||FILIALEN[0]} onChange={e=>updateConfig(d,"filiale",e.target.value)}
+                            style={{...S.input,width:"100%",fontSize:13,padding:"9px 11px",boxSizing:"border-box"}}>
+                            {FILIALEN.map(f=><option key={f} value={f}>{filShort[f]||f}</option>)}
+                          </select>
+                        </div>
+                        {/* VON / BIS + 개별 퀵버튼 */}
+                        <div style={{display:"flex",gap:12}}>
+                          {timeField(d,"von","VON")}
+                          {timeField(d,"bis","BIS")}
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
-              </div>
-              {selDates.length>0 && (
-                <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:8}}>
-                  {selDates.map(d=>(
-                    <span key={d} onClick={()=>toggleDate(d)}
-                      style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,
-                        background:C.mintLight,color:C.mintDark,cursor:"pointer",border:"1px solid "+C.mint}}>
-                      {new Date(d).toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit"})} ✕
-                    </span>
-                  ))}
+              )}
+
+              {msg && (
+                <div style={{fontSize:11,fontWeight:700,padding:"9px 12px",borderRadius:9,marginBottom:6,
+                  background:msg.t==="ok"?"#dcfce7":"#fee2e2",color:msg.t==="ok"?"#15803d":C.red}}>
+                  {msg.m}
                 </div>
               )}
             </div>
 
-            {/* VON */}
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>VON</div>
-              <input value={von} onChange={e=>setVon(e.target.value)} placeholder="z. B. 09:30"
-                inputMode="numeric" style={{...inp,marginBottom:6}}/>
-              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                {QUICK.map(q=>(
-                  <button key={"v"+q} onClick={()=>setVon(q)}
-                    style={{fontSize:11,fontWeight:700,padding:"6px 9px",borderRadius:8,cursor:"pointer",
-                      border:"1px solid "+(von===q?C.mintDark:C.border),
-                      background:von===q?C.mintDark:"#fff",color:von===q?"#fff":C.text}}>{q}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* BIS */}
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>BIS</div>
-              <input value={bis} onChange={e=>setBis(e.target.value)} placeholder="z. B. 17:00"
-                inputMode="numeric" style={{...inp,marginBottom:6}}/>
-              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                {QUICK.map(q=>(
-                  <button key={"b"+q} onClick={()=>setBis(q)}
-                    style={{fontSize:11,fontWeight:700,padding:"6px 9px",borderRadius:8,cursor:"pointer",
-                      border:"1px solid "+(bis===q?C.mintDark:C.border),
-                      background:bis===q?C.mintDark:"#fff",color:bis===q?"#fff":C.text}}>{q}</button>
-                ))}
-              </div>
-            </div>
-
-            {msg && (
-              <div style={{fontSize:11,fontWeight:700,padding:"9px 12px",borderRadius:9,marginBottom:12,
-                background:msg.t==="ok"?"#dcfce7":"#fee2e2",color:msg.t==="ok"?"#15803d":C.red}}>
-                {msg.m}
-              </div>
-            )}
-
-            {/* 미리보기 */}
-            {selEmp&&selDates.length>0&&von&&bis&&(
-              <div style={{fontSize:11,color:C.muted,marginBottom:12,padding:"8px 12px",background:C.bg,borderRadius:9}}>
-                <b style={{color:C.text}}>{selEmp}</b> · {filShort[selFil]||selFil} · {von}-{bis}
-                {" · "}{selDates.length} Tag(e)
-              </div>
-            )}
-
-            <div style={{display:"flex",gap:8}}>
+            {/* 고정 하단 액션 */}
+            <div style={{padding:"12px 16px calc(12px + env(safe-area-inset-bottom,0px))",borderTop:"1px solid "+C.border,
+              display:"flex",gap:8,flexShrink:0}}>
               <button onClick={clearForm}
                 style={{flex:1,padding:"12px",borderRadius:11,border:"1px solid "+C.border,
                   background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>
@@ -4283,7 +4367,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
                 style={{flex:2,padding:"12px",borderRadius:11,border:"none",
                   background:saving?"#aaa":"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",
                   color:"#fff",fontWeight:800,fontSize:13,cursor:saving?"not-allowed":"pointer"}}>
-                {saving?"⏳ Speichern…":"✅ Speichern"}
+                {saving?"⏳ Speichern…":"✅ Schichten hinzufügen"+(selDates.length?" ("+selDates.length+")":"")}
               </button>
             </div>
           </div>
@@ -4415,14 +4499,20 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   const getStatus=name=>{
     const recs=todayRecs.filter(x=>x.user===name&&x.ein);
     if(recs.length===0) return "Nicht erschienen";
-    // 진행 중(퇴근 전, aus 없음)인 record가 하나라도 있으면 Aktiv,
-    // 모든 record가 완료(aus 있음)면 Feierabend
+    // 진행 중(퇴근 전, aus 없음)인 record가 하나라도 있으면 Aktiv
     if(recs.some(r=>!r.aus||r.aus==="")) return "Aktiv";
+    // 조기 퇴근으로 확인 대기(prüfen)인 record가 있고 아직 확인 전이면 Prüfen
+    if(recs.some(r=>r.aus&&r.prüfen&&!r.geprüft)) return "Prüfen";
     return "Feierabend";
   };
+  // 조기 퇴근 확인(OK): record를 geprüft 처리 → 직원 화면도 Feierabend로 즉시 전환
+  function confirmPruefen(rec){
+    if(!rec||!rec.id) return;
+    setRecords(prev=>(Array.isArray(prev)?prev:[]).map(r=>r.id===rec.id?{...r,prüfen:false,geprüft:true}:r));
+  }
   const getBranch=name=>{const r=todayRecs.find(x=>x.user===name);return r?.filiale||null;};
-  const sColor=s=>s==="Aktiv"?C.mintDark:s==="Feierabend"?C.muted:C.red;
-  const sBg=s=>s==="Aktiv"?C.mintLight:s==="Feierabend"?"#F0F0F0":C.redLight;
+  const sColor=s=>s==="Aktiv"?C.mintDark:s==="Feierabend"?C.muted:s==="Prüfen"?C.yellow:C.red;
+  const sBg=s=>s==="Aktiv"?C.mintLight:s==="Feierabend"?"#F0F0F0":s==="Prüfen"?C.yellowLight:C.redLight;
 
   const [notifications, setNotifications] = useFirebase("notifications", {});
   const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
@@ -4784,6 +4874,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           setDeleteConfirm={setDeleteConfirm}
           uTab={uTab}
           setUTab={setUTab}
+          onConfirmPruefen={confirmPruefen}
         />
       )}
 
