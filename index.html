@@ -2306,16 +2306,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     try{const s=localStorage.getItem(CLOCK_KEY);return s?JSON.parse(s).totalPauseSec||0:0;}catch{return 0;}
   });
   const [elapsed,setElapsed]=useState(()=>{
-    //        
+    // 복원: 저장된 출근 시간 기준으로 경과 초 계산
     try {
-  //     
-  useEffect(()=>{
-    try { localStorage.setItem(CLOCK_KEY, JSON.stringify({
-      clockedIn, clockInTime:clockInTime?clockInTime.toISOString():null, clockFiliale,
-      isPaused, pauseStart:pauseStart?pauseStart.toISOString():null, totalPauseSec
-    })); } catch{}
-  },[clockedIn, clockInTime, clockFiliale, isPaused, pauseStart, totalPauseSec]);
-
       const s=localStorage.getItem(CLOCK_KEY); const v=s?JSON.parse(s):null;
       if(v&&v.clockedIn&&v.clockInTime) return Math.floor((Date.now()-new Date(v.clockInTime).getTime())/1000);
     } catch{}
@@ -2328,6 +2320,14 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const [nAus,setNAus]=useState("17:00");
   const [nGrund,setNGrund]=useState("");
   const [nMsg,setNMsg]=useState("");
+
+  // 근무 상태를 localStorage에 저장 (새로고침 후 복원용)
+  useEffect(()=>{
+    try { localStorage.setItem(CLOCK_KEY, JSON.stringify({
+      clockedIn, clockInTime:clockInTime?clockInTime.toISOString():null, clockFiliale,
+      isPaused, pauseStart:pauseStart?pauseStart.toISOString():null, totalPauseSec
+    })); } catch{}
+  },[clockedIn, clockInTime, clockFiliale, isPaused, pauseStart, totalPauseSec]);
 
   useEffect(()=>{
     if(!clockedIn){
