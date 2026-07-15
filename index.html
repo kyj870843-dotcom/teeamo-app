@@ -1096,48 +1096,32 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
   );
 }
 
-//  ABSAGEN MODAL 
-function AbsagenModal({ shift, userName, onClose, onSubmit }) {
-  const [grund, setGrund] = useState("");
-  const [err, setErr] = useState("");
-  const d = shift.d || shift.date;
-  const f = shift.f || shift.filiale;
-  const t = shift.t || shift.time;
-
-  function doSubmit() {
-    if (!grund.trim()) { setErr("Bitte einen Grund angeben."); return; }
-    onSubmit({ id: Date.now(), userName, date: d, filiale: f, time: t, grund, status: "offen" });
-    onClose();
-  }
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
-      <div style={{background:C.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:500,padding:"24px 22px 32px",paddingBottom:"max(32px,env(safe-area-inset-bottom))"}}>
-        <div style={{width:36,height:4,background:C.border,borderRadius:99,margin:"0 auto 20px"}}/>
-        <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>Schicht absagen</div>
-        <div style={{...S.card,background:C.redLight,border:`1px solid ${C.red}`,marginBottom:14}}>
-          <div style={{fontSize:12,fontWeight:700,color:C.red}}>
-            {new Date(d).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
-          </div>
-          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{f}{t?` · ${t}`:""}</div>
-        </div>
-        <div style={{marginBottom:14}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Grund <span style={{color:C.red}}>*</span></div>
-          <textarea value={grund} onChange={e=>{setGrund(e.target.value);setErr("");}}
-            placeholder="z. B. Ich bin krank und kann nicht kommen…"
-            style={{...S.input,width:"100%",minHeight:80,resize:"none",fontFamily:"inherit"}}/>
-        </div>
-        {err&&<div style={{fontSize:11,color:C.red,marginBottom:10,fontWeight:600}}>{"⚠ "}{err}</div>}
-        <div style={{fontSize:10,color:C.muted,marginBottom:14}}>
-          {"ℹ️ Der Manager wird benachrichtigt. Nach Genehmigung wird deine Schicht als freie Schicht veröffentlicht."}
-        </div>
-        <div style={{display:"flex",gap:9}}>
-          <button onClick={onClose} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
-          <button onClick={doSubmit} style={{flex:2,padding:"12px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>Absagen & senden</button>
-        </div>
-      </div>
-    </div>
-  );
+// ── 스케줄 shift 부분 수정 헬퍼: root schedule({d,f,t}) + 월별({date,filiale,time}) 두 노드에서
+//    (직원 name · 날짜 date)에 해당하는 shift를 찾아 patch(status/getauschtMit/getauschtVon 등)를 병합 저장.
+//    교환(Freigeben/Getauscht) 히스토리를 스케줄 자체에 기록하여 직원·관리자 모든 화면에 실시간 반영한다.
+async function patchScheduleShift(name, date, patch) {
+  if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet)) return;
+  try {
+    // 1) root schedule
+    const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
+    const root = rsnap.val() ? JSON.parse(JSON.stringify(rsnap.val())) : {};
+    if (root[name]) {
+      let arr = Array.isArray(root[name]) ? root[name] : Object.values(root[name] || {});
+      arr = arr.map(s => (s.d || s.date) === date ? { ...s, ...patch } : s);
+      root[name] = arr;
+      await window._fbSet(window._fbRef(window._fbDb, "schedule"), root);
+    }
+    // 2) 월별 schedule_YYYY_MM
+    const mk = "schedule_" + date.slice(0, 7).replace("-", "_");
+    const msnap = await window._fbGet(window._fbRef(window._fbDb, mk));
+    const mdata = msnap.val() ? JSON.parse(JSON.stringify(msnap.val())) : null;
+    if (mdata && mdata[name]) {
+      let arr = Array.isArray(mdata[name]) ? mdata[name] : Object.values(mdata[name] || {});
+      arr = arr.map(s => (s.date || s.d) === date ? { ...s, ...patch } : s);
+      mdata[name] = Object.fromEntries(arr.map((s, i) => [String(i), s]));
+      await window._fbSet(window._fbRef(window._fbDb, mk), mdata);
+    }
+  } catch (e) { console.error("patchScheduleShift error:", e); }
 }
 
 function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
@@ -1148,7 +1132,13 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
   const status = getShiftStatus({ time: t }, actualRec, d);
   const [showModal, setShowModal] = useState(false);
   const [modalTab, setModalTab] = useState("absagen"); // "absagen" | "nachtrag"
-  const [absagenList, setAbsagenList] = useFirebase("absagen", []);
+  // ── 교환(Freigeben/Getauscht) 상태: 스케줄 shift에 얹힌 필드 ──
+  const sStatus      = s.status || null;        // "freigegeben" | "getauscht" | null
+  const getauschtMit = s.getauschtMit || null;  // 넘긴 근무를 받은 사람 (원 소유자 카드)
+  const getauschtVon = s.getauschtVon || null;  // 이 근무의 원래 주인 (인수자 카드)
+  const isReleased = sStatus === "freigegeben";
+  const isSwapped  = sStatus === "getauscht";
+  const translucent = isReleased || isSwapped;
   const [antraege, setAntraege] = useFirebase("antraege", []);
   const [tauschAntraege] = useFirebase("schichttausch", []);
   const [, setNotif] = useFirebase("notifications", {});
@@ -1180,9 +1170,6 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
     }
   }, [status]);
 
-  const alreadyAbgesagt = (Array.isArray(absagenList)?absagenList:[])
-    .find(a => a.userName === userName && a.date === d);
-
   // Tausch    (initiator  A)
   const myTausch = (Array.isArray(tauschAntraege)?tauschAntraege:[])
     .find(t => t.initiator === userName && t.initiatorDate === d);
@@ -1201,11 +1188,6 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
     abgelehnt_partner:       `❌ Tausch abgelehnt`,
   }[partnerTausch.status] || null) : null;
 
-  function handleAbsagen(antrag) {
-    setAbsagenList(prev => [...(Array.isArray(prev)?prev:[]), antrag]);
-    // Dienstplan에서 직접 처리 - Alarm 알림 없음
-  }
-
   //   
   const badge = {
     gearbeitet: { color: C.mintDark, bg: C.mintLight, label: "Gearbeitet" },
@@ -1213,37 +1195,40 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
     aktiv:      { color: C.yellow,   bg: "#FFF9E6",    label: "Im Dienst" },
     ausstehend: { color: C.muted,    bg: C.bg,         label: "Ausstehend"},
     "nicht erschienen": { color: C.red, bg: C.redLight, label: "Nicht erschienen"},
-  }[alreadyAbgesagt ? "ausstehend" : status] || { color: C.red, bg: C.redLight, label: "Nicht erschienen" };
+  }[status] || { color: C.red, bg: C.redLight, label: "Nicht erschienen" };
 
   return (
     <>
-      <div style={{borderRadius:10,overflow:"hidden",marginBottom:6,
-        border:`1px solid ${alreadyAbgesagt?C.red:status==="aktiv"||status==="gearbeitet"?C.mint:C.border}`}}>
+      <div style={{borderRadius:10,overflow:"hidden",marginBottom:6,opacity:translucent?0.6:1,
+        border:`1px solid ${translucent?C.border:status==="aktiv"||status==="gearbeitet"?C.mint:C.border}`}}>
 
         {/*    */}
         <div onClick={()=>{
-            // 과거: Nachtragen / 미래: Absagen + Schichttausch
+            if(translucent) return; // 이미 넘긴/교환된 근무는 재조작 불가 (기록만 유지)
+            // 과거: Nachtragen / 미래: Schicht frei geben
             if(shiftPassed) { setModalTab("nachtrag"); setShowModal(true); }
-            else if(!alreadyAbgesagt) { setModalTab("future"); setShowModal(true); }
+            else { setModalTab("future"); setShowModal(true); }
           }}
           style={{display:"flex",alignItems:"center",justifyContent:"space-between",
             padding:"10px 12px",
-            background:alreadyAbgesagt?C.redLight:C.card,
-            cursor:(!alreadyAbgesagt||shiftPassed)?"pointer":"default"}}>
-          <div style={{fontSize:12,fontWeight:600,color:alreadyAbgesagt?C.red:C.text}}>
+            background:C.card,
+            cursor:translucent?"default":"pointer"}}>
+          <div style={{fontSize:12,fontWeight:600,color:C.text}}>
             {f}{t ? ` · ${t}` : ""}
-            {alreadyAbgesagt && <span style={{fontSize:10,color:C.red,marginLeft:6}}>{"🚫 Absage "}{alreadyAbgesagt.status==="offen"?"beantragt":alreadyAbgesagt.status==="genehmigt"?"genehmigt":"abgelehnt"}</span>}
-          {tauschLabel && <div style={{fontSize:9,color:C.mintDark,marginTop:3,fontWeight:600}}>{tauschLabel}</div>}
+            {isReleased && <div style={{fontSize:10,color:"#b45309",marginTop:3,fontWeight:700}}>{"🔄 Freigegeben · wartet auf Tausch"}</div>}
+            {isSwapped && <div style={{fontSize:10,color:C.mintDark,marginTop:3,fontWeight:700}}>{"🔄 Getauscht mit "+(getauschtMit||"?")}</div>}
+            {getauschtVon && !isSwapped && <div style={{fontSize:10,color:C.mintDark,marginTop:3,fontWeight:700}}>{"✔️ Getauscht mit "+getauschtVon}</div>}
+            {tauschLabel && <div style={{fontSize:9,color:C.mintDark,marginTop:3,fontWeight:600}}>{tauschLabel}</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
-            {(!alreadyAbgesagt||shiftPassed)&&(
+            {!translucent&&(
               <span style={{fontSize:8,color:C.muted}}>tippen</span>
             )}
             <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
-              color:alreadyAbgesagt?C.red:badge.color,
-              background:alreadyAbgesagt?"#fff":badge.bg,
-              border:`1px solid ${alreadyAbgesagt?C.red:badge.color}`}}>
-              {alreadyAbgesagt?"🚫 Abgesagt":badge.label}
+              color:translucent?C.muted:badge.color,
+              background:translucent?"#f0f0f0":badge.bg,
+              border:`1px solid ${translucent?C.border:badge.color}`}}>
+              {isReleased?"🔄 Frei":isSwapped?"↔ Getauscht":badge.label}
             </span>
           </div>
         </div>
@@ -1341,6 +1326,8 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
                       }).catch(()=>{});
                     });
                   }
+                  // 🔄 스케줄 shift를 삭제하지 않고 그대로 두되 'freigegeben' 상태로 표시 (반투명 + 교환 대기중)
+                  patchScheduleShift(userName, d, {status:"freigegeben", freigabeGrund:absGrund||""});
                   setShowModal(false);setAbsGrund("");
                 }} style={{width:"100%",padding:"13px",borderRadius:11,border:"none",
                   background:"linear-gradient(135deg,"+C.navy+",#444)",
@@ -1469,13 +1456,13 @@ function SchichtboerseView({ userName, users, isAdmin }) {
         if (!rootSched[userName]) rootSched[userName]=[];
         if (!Array.isArray(rootSched[userName])) rootSched[userName]=Object.values(rootSched[userName]);
         rootSched[userName]=rootSched[userName].filter(s=>(s.d||s.date)!==schicht.date);
-        rootSched[userName].push({d:schicht.date,f:schicht.filiale,t:schicht.time||null});
+        rootSched[userName].push({d:schicht.date,f:schicht.filiale,t:schicht.time||null,getauschtVon:schicht.angeboten_von||null});
         await window._fbSet(window._fbRef(window._fbDb,"schedule"),rootSched);
         // 월별 schedule_YYYY_MM
         const mSnap=await window._fbGet(window._fbRef(window._fbDb,monthKey));
         const mSched=mSnap.val()?JSON.parse(JSON.stringify(mSnap.val())):{};
         const mArr=Object.values(mSched[userName]||{}).filter(s=>(s.date||s.d)!==schicht.date);
-        mArr.push({date:schicht.date,filiale:schicht.filiale,time:schicht.time||null});
+        mArr.push({date:schicht.date,filiale:schicht.filiale,time:schicht.time||null,getauschtVon:schicht.angeboten_von||null});
         mSched[userName]=Object.fromEntries(mArr.map((s,i)=>[String(i),s]));
         await window._fbSet(window._fbRef(window._fbDb,monthKey),mSched);
       } catch(e){console.error("schedule update error:",e);}
@@ -1488,6 +1475,12 @@ function SchichtboerseView({ userName, users, isAdmin }) {
     if(window._fbDb&&window._fbRef&&window._fbSet){
       window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+schicht.id),
         {...schicht,besetzt:true,uebernommen_von:userName}).catch(()=>{});
+    }
+
+    // 2b) 🔄 원 소유자의 스케줄 shift를 삭제하지 않고 'getauscht'로 갱신 (반투명 + 원 주인 추적)
+    if(schicht.angeboten_von && schicht.angeboten_von!==userName){
+      await patchScheduleShift(schicht.angeboten_von, schicht.date,
+        {status:"getauscht", getauschtMit:userName});
     }
 
     // 3) 관리자에게 자동 승인 확인 알림 (단방향)
@@ -3183,13 +3176,11 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
 
 //  ADMIN ANTRGE VIEW 
 //  ANTRGE CARD ( ) 
-function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege, absagenList, setAbsagenList, records, setRecords, aTab, setATab, openAId, setOpenAId, userKey }) {
+function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege, records, setRecords, aTab, setATab, openAId, setOpenAId, userKey }) {
   const nList = Array.isArray(antraege) ? antraege : [];
   const tList = Array.isArray(tauschAntraege) ? tauschAntraege : [];
-  const abList = Array.isArray(absagenList) ? absagenList : [];
   const nOffene = nList.filter(a=>a.status==="offen").length;
   const tOffene = tList.filter(a=>a.status==="ausstehend_manager"||a.status==="partner_ok").length;
-  const abOffene = abList.filter(a=>a.status==="offen").length;
 
   function decideNachtrag(a, ok) {
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:ok?"genehmigt":"abgelehnt"}:x));
@@ -3224,11 +3215,6 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(a=>a.id===id?{...a,status:"offen"}:a));
     setOpenAId(null);
   }
-  function decideAbsage(a, ok) {
-    setAbsagenList(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:ok?"genehmigt":"abgelehnt"}:x));
-    setOpenAId(null);
-  }
-
   const tabs = [
     {id:"tausch", l:"Schichttausch", n:tOffene},
   ];
@@ -3508,8 +3494,14 @@ function NachDatumFilRow({name, d, t, schedule, users, records, todayStr, C, S})
   const accountExists = Array.isArray(users)&&users.some(u=>u.vorname===name);
   const emp = accountExists?(Array.isArray(users)?users:[]).find(u=>u.vorname===name):null;
   const rec = accountExists?records.find(r=>r.user===name&&r.date===d):null;
+  const sSt = shift?.status||null, gMit = shift?.getauschtMit||null, gVon = shift?.getauschtVon||null;
+  const transl = sSt==="freigegeben"||sSt==="getauscht";
   let statusLabel, statusColor, statusBg;
-  if(!accountExists){
+  if(sSt==="freigegeben"){
+    statusLabel="🔄 Frei"; statusColor="#b45309"; statusBg="#fef3c7";
+  } else if(sSt==="getauscht"){
+    statusLabel="↔ Getauscht"; statusColor=C.mintDark; statusBg=C.mintLight;
+  } else if(!accountExists){
     statusLabel="Ausstehend"; statusColor=C.muted; statusBg=C.border;
   } else if(rec?.aus){
     statusLabel="Feierabend"; statusColor=C.mintDark; statusBg=C.mintLight;
@@ -3522,7 +3514,7 @@ function NachDatumFilRow({name, d, t, schedule, users, records, todayStr, C, S})
   }
   return(
     <div style={{display:"flex",justifyContent:"space-between",
-      alignItems:"center",padding:"10px 14px",
+      alignItems:"center",padding:"10px 14px",opacity:transl?0.55:1,
       borderBottom:`1px solid ${C.border}`}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <div style={{width:30,height:30,borderRadius:"50%",
@@ -3536,6 +3528,9 @@ function NachDatumFilRow({name, d, t, schedule, users, records, todayStr, C, S})
           {(shift?.time||shift?.t)&&(
             <div style={{fontSize:10,color:C.muted}}>{shift.time||shift.t}</div>
           )}
+          {sSt==="freigegeben"&&<div style={{fontSize:9,fontWeight:700,color:"#b45309",marginTop:1}}>wartet auf Tausch</div>}
+          {sSt==="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>Getauscht mit {gMit||"?"}</div>}
+          {gVon&&sSt!=="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>✔️ Getauscht mit {gVon}</div>}
         </div>
       </div>
       <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,
@@ -3546,15 +3541,13 @@ function NachDatumFilRow({name, d, t, schedule, users, records, todayStr, C, S})
   );
 }
 
-function NachMitarbeiterAntrag({name, d, nList, abList, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage}) {
+function NachMitarbeiterAntrag({name, d, nList, approveNachtrag, rejectNachtrag}) {
   const [exp, setExp] = useState(false);
   const pN = nList.find(a=>a.user===name&&a.date===d&&a.status==="offen");
   const dN = nList.find(a=>a.user===name&&a.date===d&&a.status!=="offen");
-  const pA = abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status==="offen");
-  const dA = abList.find(a=>(a.userName===name||a.user===name)&&a.date===d&&a.status!=="offen");
-  if(!pN&&!dN&&!pA&&!dA) return null;
+  if(!pN&&!dN) return null;
   return(
-    <div style={{borderTop:`1px solid ${pN||pA?C.yellow:C.border}`,marginTop:0}}>
+    <div style={{borderTop:`1px solid ${pN?C.yellow:C.border}`,marginTop:0}}>
       {pN&&(
         <div style={{padding:"8px 10px",background:C.yellowLight}}>
           <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:3}}>{"🕐 Nachtrag · "}{pN.ein}{" – "}{pN.aus}</div>
@@ -3585,28 +3578,11 @@ function NachMitarbeiterAntrag({name, d, nList, abList, approveNachtrag, rejectN
           )}
         </div>
       )}
-      {pA&&(
-        <div style={{padding:"8px 10px",background:C.yellowLight,borderTop:pN?`1px solid ${C.yellow}`:"none"}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.yellow,marginBottom:3}}>{"🚫 Absage beantragt"}</div>
-          {pA.grund&&<div style={{fontSize:9,color:C.muted,marginBottom:6}}>{"📝 "}{pA.grund}</div>}
-          <div style={{display:"flex",gap:6}}>
-            <button onClick={()=>rejectAbsage(pA)} style={{flex:1,padding:"5px",borderRadius:7,border:`1px solid ${C.red}`,background:"#fff",color:C.red,fontWeight:700,fontSize:10,cursor:"pointer"}}>{"✕ Ablehnen"}</button>
-            <button onClick={()=>approveAbsage(pA)} style={{flex:1,padding:"5px",borderRadius:7,border:"none",background:C.mintDark,color:"#fff",fontWeight:700,fontSize:10,cursor:"pointer"}}>{"✓ Genehmigen"}</button>
-          </div>
-        </div>
-      )}
-      {!pA&&dA&&(
-        <div style={{padding:"6px 10px",background:dA.status==="genehmigt"?C.redLight:C.bg}}>
-          <span style={{fontSize:9,fontWeight:700,color:dA.status==="genehmigt"?C.red:C.muted}}>
-            {"🚫 Absage "}{dA.status==="genehmigt"?"genehmigt ✓":"abgelehnt ✕"}
-          </span>
-        </div>
-      )}
     </div>
   );
 }
 
-function AdminDienstplanView({ records, setRecords, users, userKey, manager, csvCtx, schedule, antraege, setAntraege, absagenList, setAbsagenList }) {
+function AdminDienstplanView({ records, setRecords, users, userKey, manager, csvCtx, schedule, antraege, setAntraege }) {
   const [viewMode, setViewMode] = useState("plan");
   const [openEmp, setOpenEmp] = useState(null);
   const [openDate, setOpenDate] = useState(null);
@@ -3640,20 +3616,29 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
     });
   },[]);
 
+  // 선택된 달의 스케줄을 실시간 구독 (Freigeben/Getauscht 상태 변경이 즉시 반영되도록)
+  const liveScheduleKey = selMonth ? "schedule_"+selMonth : "schedule";
+  const [liveMonthSched] = useFirebase(liveScheduleKey, {});
+
   // 선택된 월의 schedule (월별 독립 — 다른 달 데이터 유출 없음)
   const activeSchedule = React.useMemo(()=>{
-    const hasMonthly = Object.keys(allMonthSchedules).length > 0;
-    if (!hasMonthly) return schedule||{};  // 초기: 월별 데이터 없으면 root 사용
-    if (!selMonth) return {};
-    const raw = allMonthSchedules[selMonth];
-    if (!raw) return {};  // 해당 달 데이터 없음 → 빈 스케줄
+    // 우선순위: 선택된 달의 실시간 노드 → 마운트 시 로드한 allMonthSchedules → root schedule
+    let raw = null;
+    if (liveMonthSched && Object.keys(liveMonthSched).length > 0) {
+      raw = liveMonthSched;
+    } else if (Object.keys(allMonthSchedules).length > 0) {
+      raw = selMonth ? allMonthSchedules[selMonth] : null;
+    } else {
+      raw = schedule || {};
+    }
+    if (!raw) return {};
     // Firebase object → array 변환
     const result={};
     for(const [name,shifts] of Object.entries(raw)){
       result[name]=Array.isArray(shifts)?shifts:Object.values(shifts||{});
     }
     return result;
-  },[selMonth, allMonthSchedules, schedule]);
+  },[selMonth, allMonthSchedules, schedule, liveMonthSched]);
 
   // 사용 가능한 월 목록
   const availableMonths = React.useMemo(()=>{
@@ -3685,7 +3670,6 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 
   const todayStr = today();
   const nList = Array.isArray(antraege) ? antraege : [];
-  const abList = Array.isArray(absagenList) ? absagenList : [];
 
   function approveNachtrag(a) {
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"genehmigt"}:x));
@@ -3696,12 +3680,6 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
   }
   function rejectNachtrag(a) {
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"abgelehnt"}:x));
-  }
-  function approveAbsage(a) {
-    setAbsagenList(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"genehmigt"}:x));
-  }
-  function rejectAbsage(a) {
-    setAbsagenList(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"abgelehnt"}:x));
   }
 
   function getEmpStatus(vorname) {
@@ -3806,11 +3784,14 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                       <div style={{padding:"12px 14px",fontSize:12,color:C.muted}}>Keine Schichten eingetragen.</div>
                     ):shifts.map((s,i)=>{
                       const d=s.date||s.d, f=s.filiale||s.f, t=s.time||s.t;
+                      const sSt=s.status||null, gMit=s.getauschtMit||null, gVon=s.getauschtVon||null;
+                      const transl=sSt==="freigegeben"||sSt==="getauscht";
                       const rec=accountExists?records.find(r=>r.user===name&&r.date===d):null;
                       return(
                         <React.Fragment key={i}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                           padding:"10px 14px",borderBottom:i<shifts.length-1?`1px solid ${C.border}`:"none",
+                          opacity:transl?0.55:1,
                           background:rec?.aus?C.mintLight:rec?.ein?C.yellowLight:"#fff"}}>
                           <div style={{display:"flex",gap:10,alignItems:"center"}}>
                             <div style={{width:34,height:34,borderRadius:8,background:"rgba(255,255,255,.7)",
@@ -3823,6 +3804,9 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                                 {new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
                               </div>
                               <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                              {sSt==="freigegeben"&&<div style={{fontSize:9,fontWeight:700,color:"#b45309",marginTop:2}}>🔄 Freigegeben · wartet auf Tausch</div>}
+                              {sSt==="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:2}}>🔄 Getauscht mit {gMit||"?"}</div>}
+                              {gVon&&sSt!=="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:2}}>✔️ Getauscht mit {gVon}</div>}
                             </div>
                           </div>
                           <div style={{textAlign:"right"}}>
@@ -3839,9 +3823,8 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                             )}
                           </div>
                         </div>
-                        <NachMitarbeiterAntrag name={name} d={d} nList={nList} abList={abList}
-                            approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag}
-                            approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}/>
+                        <NachMitarbeiterAntrag name={name} d={d} nList={nList}
+                            approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag}/>
                         </React.Fragment>
                       );
                     })}
@@ -3965,9 +3948,8 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                           </div>
                         )}
                       </div>
-                      <NachMitarbeiterAntrag name={name} d={d} nList={nList} abList={abList}
-                        approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag}
-                        approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}/>
+                      <NachMitarbeiterAntrag d={d} nList={nList}
+                        approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag}/>
                       </React.Fragment>
                     );
                   })}
@@ -4445,7 +4427,6 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   const [notifications, setNotifications] = useFirebase("notifications", {});
   const [tauschAntraege, setTauschAntraege] = useFirebase("schichttausch", []);
   const [freieSchichten, setFreieSchichten] = useFirebase("freieSchichten", []);
-  const [absagenList, setAbsagenList] = useFirebase("absagen", []);
   const [schedule, setSchedule] = useFirebase("schedule", {});
   const [archiv, setArchiv] = useFirebase("archiv", {});
   const [fsDate, setFsDate] = useState(today());
@@ -4546,51 +4527,6 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
     setTab("antraege"); setATab("tausch");
   }
 
-  function handleAbsagenNotif(notifKey, n, ok) {
-    const empName = n.userName || n.user;
-    if (ok) {
-      setSchedule(prev => {
-        const updated = {...(prev||{})};
-        if (updated[empName]) updated[empName] = updated[empName].filter(s=>(s.d||s.date)!==n.date);
-        return updated;
-      });
-      setFreieSchichten(prev => [...(Array.isArray(prev)?prev:[]), {
-        id: Date.now(), date: n.date, filiale: n.filiale,
-        time: n.time||null, note: `Abgesagt von ${empName}`, besetzt: false
-      }]);
-    }
-    setAbsagenList(prev=>(Array.isArray(prev)?prev:[]).map(a=>
-      a.id===n.absageId?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
-
-    const entscheidung = ok ? "genehmigt" : "abgelehnt";
-    ["teddy","yeaji"].forEach(mgr => {
-      const k = `absagen_${n.absageId}_${mgr}`;
-      if (window._fbDb && window._fbRef && window._fbSet) {
-        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/bearbeitetVon`), userKey).catch(()=>{});
-        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/gelesen`), true).catch(()=>{});
-        window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/entscheidung`), entscheidung).catch(()=>{});
-      }
-    });
-    markRead(notifKey);
-    // absagenList   (  list  )
-    if (n.absageId) {
-      setAbsagenList(prev => {
-        const list = Array.isArray(prev)?prev:[];
-        if (!list.find(a=>a.id===n.absageId)) {
-          return [...list, {id:n.absageId, userName:empName, user:empName, date:n.date, filiale:n.filiale, time:n.time, grund:n.grund||"", status:ok?"genehmigt":"abgelehnt"}];
-        }
-        return list;
-      });
-    }
-    if (window._fbDb && window._fbRef && window._fbSet) {
-      window._fbSet(window._fbRef(window._fbDb, `archiv/${notifKey}`), {
-        ...n, entscheidung, bearbeitetVon: userKey, archiviertTs: Date.now(), gelesen: true
-      }).catch(e=>console.error(e));
-    }
-    // Antraege  
-    setTab("antraege"); setATab("absage");
-  }
-
   function handleNachtragNotif(notifKey, n, ok) {
     setAntraege(prev=>prev.map(a=>a.id===n.antragId?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
     const entscheidung = ok ? "genehmigt" : "abgelehnt";
@@ -4654,33 +4590,15 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
   //  Alarm    
   function renderAlarmCard(key, n) {
-    const isAbsagen   = n.type==="absagen"||n.kategorie==="Schichtabsage";
     const isTausch    = n.type==="tausch_manager"||n.kategorie==="Schichttausch";
     const isEinspring = n.type==="einspringen"||n.kategorie==="Einspringen";
     const isNachtrag  = n.type==="nachtrag"||n.kategorie==="Nachtrag";
     const isPrufen    = n.type==="prüfen";
 
-    const borderColor = isAbsagen?C.red:isTausch?C.mint:isEinspring?C.mint:isNachtrag?C.yellow:C.yellow;
+    const borderColor = isTausch?C.mint:isEinspring?C.mint:isNachtrag?C.yellow:C.yellow;
 
     return (
       <div key={key} style={{...S.card,marginBottom:10,border:`1.5px solid ${borderColor}`}}>
-        {/* Schichtabsage */}
-        {isAbsagen && <>
-          <div style={{fontSize:11,fontWeight:800,color:C.red,marginBottom:4}}>{"🚫 Schichtabsage · "}{n.user||n.userName}</div>
-          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>
-            {new Date(n.date).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
-          </div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{n.filiale}{n.time?` · ${n.time}`:""}</div>
-          <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"📌"}{n.grund}</div>
-          <div style={{fontSize:9,color:C.muted,marginBottom:8}}>{"ℹ️ Bei Genehmigung wird die Schicht als freie Schicht veröffentlicht."}</div>
-          <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>handleAbsagenNotif(key,n,false)}
-              style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
-            <button onClick={()=>handleAbsagenNotif(key,n,true)}
-              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.red},#A8432E)`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"✅ Genehmigen & Freigeben"}</button>
-          </div>
-        </>}
-
         {/* Schichttausch */}
         {isTausch && <>
           <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:6}}>{"🔄 Schichttausch · Partner bestätigt"}</div>
@@ -4900,8 +4818,6 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           schedule={schedule}
           antraege={antraege}
           setAntraege={setAntraege}
-          absagenList={absagenList}
-          setAbsagenList={setAbsagenList}
         />
       )}
 
@@ -4958,8 +4874,6 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           setAntraege={setAntraege}
           tauschAntraege={tauschAntraege}
           setTauschAntraege={setTauschAntraege}
-          absagenList={absagenList}
-          setAbsagenList={setAbsagenList}
           records={records}
           setRecords={setRecords}
           aTab={aTab}
