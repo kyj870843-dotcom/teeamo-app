@@ -5422,12 +5422,35 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       {/*  STATISTIK  */}
       {tab==="statistik"&&<StatistikTab records={records} users={users}/>}
 
-      {/*  ALARM  */}
+      {/*  SCHICHTBRSE (Admin)  */}
       {tab==="schichtboerse_mgr"&&(
         <div style={{padding:"14px 0"}}>
           <SchichtboerseView userName={userKey} users={safeUsers} isAdmin={true}/>
-
           {/* Freie Schicht Formular ist in SchichtboerseView */}
+        </div>
+      )}
+
+      {/*  BOTTOM NAV (Admin)  */}
+      <div style={S.nav}>
+        {[
+          {id:"uebersicht",       icon:"👥", lbl:"Übersicht"},
+          {id:"dienstplan",       icon:"📋", lbl:"Dienstplan"},
+          {id:"antraege",         icon:"📥", lbl:"Anträge", badge:alarmCount},
+          {id:"statistik",        icon:"📊", lbl:"Statistik"},
+          {id:"schichtboerse_mgr",icon:"🔔", lbl:"Schichtbörse", badge:boerseMatchNotifs.length},
+        ].map(t=>(
+          <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
+            <div style={{position:"relative",display:"inline-block"}}>
+              <span style={{fontSize:19}}>{t.icon}</span>
+              {t.badge>0&&(
+                <span style={{position:"absolute",top:-4,right:-6,minWidth:16,height:16,borderRadius:99,
+                  background:C.red,color:"#fff",fontSize:9,fontWeight:800,
+                  display:"flex",alignItems:"center",justifyContent:"center",padding:"0 3px",
+                  lineHeight:1}}>
+                  {t.badge}
+                </span>
+              )}
+            </div>
             <span style={{fontSize:9,fontWeight:600,color:tab===t.id?C.mintDark:C.muted}}>{t.lbl}</span>
             {tab===t.id&&<div style={{width:16,height:2,background:C.mint,borderRadius:99}}/>}
           </button>
