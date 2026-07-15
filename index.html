@@ -1616,30 +1616,31 @@ function SchichtboerseView({ userName, users, isAdmin }) {
         <div>
           <div style={{...S.card,marginBottom:10}}>
             <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Schicht zur Börse einstellen</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-              <div>
-                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>DATUM</div>
-                <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)}
-                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}/>
-              </div>
-              <div>
-                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>FILIALE</div>
-                <select value={fsFiliale} onChange={e=>setFsFiliale(e.target.value)}
-                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 8px",boxSizing:"border-box"}}>
-                  {FILIALEN.map(f=><option key={f} value={f}>{f.replace("TEEAMO ","")}</option>)}
-                </select>
-              </div>
+            {/* DATUM — 한 줄 전체 폭 */}
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>DATUM</div>
+              <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)}
+                style={{...S.input,width:"100%",fontSize:13,padding:"10px 12px",boxSizing:"border-box"}}/>
             </div>
-            <div style={{display:"flex",gap:8,marginBottom:8}}>
+            {/* FILIALE — 한 줄 전체 폭 */}
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>FILIALE</div>
+              <select value={fsFiliale} onChange={e=>setFsFiliale(e.target.value)}
+                style={{...S.input,width:"100%",fontSize:13,padding:"10px 12px",boxSizing:"border-box"}}>
+                {FILIALEN.map(f=><option key={f} value={f}>{f.replace("TEEAMO ","")}</option>)}
+              </select>
+            </div>
+            {/* VON / BIS — 나란히, 넉넉한 간격과 padding으로 겹침 방지 */}
+            <div style={{display:"flex",gap:14,marginBottom:10}}>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>VON</div>
+                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>VON</div>
                 <TimeInput value={fsTimeFrom} onChange={setFsTimeFrom}
-                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 6px",boxSizing:"border-box"}}/>
+                  style={{...S.input,width:"100%",fontSize:14,padding:"10px 12px",boxSizing:"border-box"}}/>
               </div>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>BIS</div>
+                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>BIS</div>
                 <TimeInput value={fsTimeTo} onChange={setFsTimeTo}
-                  style={{...S.input,width:"100%",fontSize:12,padding:"6px 6px",boxSizing:"border-box"}}/>
+                  style={{...S.input,width:"100%",fontSize:14,padding:"10px 12px",boxSizing:"border-box"}}/>
               </div>
             </div>
             <div style={{marginBottom:10}}>
@@ -2329,13 +2330,12 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     })); } catch{}
   },[clockedIn, clockInTime, clockFiliale, isPaused, pauseStart, totalPauseSec]);
 
+  // 출근 시 임시 record 생성(aus:null) / 퇴근 시 경과시간 리셋
   useEffect(()=>{
     if(!clockedIn){
-      // /   record  (aus:null )
       setElapsed(0);
       return;
     }
-    //  einstempeln      record 
     const tempId="clock_"+user.vorname+"_"+today();
     const inStr=clockInTime?`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`:"??:??";
     setRecords(prev=>{
@@ -2344,13 +2344,17 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
       return [...filtered,{id:tempId,user:user.vorname,date:today(),filiale:clockFiliale||selFiliale,ein:inStr,aus:null,note:"",typ:"normal"}];
     });
-    const t=setInterval(()=>{
-      setElapsed(e=>{
-        if(isPaused) return e; // 🔴 Pause 중 타이머 멈춤
-        return e+1;
-      });
-    },1000); return()=>clearInterval(t);
   },[clockedIn]);
+
+  // 🕒 근무 타이머: 출근 중(clockedIn)이고 Pause가 아닐 때만 1초씩 증가.
+  //    isPaused를 의존성에 포함해야 Pause 시작 즉시 interval이 정지되고,
+  //    Pause 종료 시 다시 시작된다. (기존엔 [clockedIn]만 있어 낡은 isPaused가
+  //    클로저에 갇혀 타이머가 멈추지 않던 버그가 있었음)
+  useEffect(()=>{
+    if(!clockedIn || isPaused) return;
+    const t=setInterval(()=>{ setElapsed(e=>e+1); },1000);
+    return()=>clearInterval(t);
+  },[clockedIn, isPaused]);
 
   const displayName=user.vorname;
   const myRecs=records.filter(r=>r.user===user.vorname);
@@ -2399,11 +2403,21 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     // 임시 record에서 typ 가져오기
     const existRec=(Array.isArray(records)?records:[]).find(r=>r.id===tempId);
     const typ=existRec?.typ||clockTyp||"normal";
-    const pauseH=totalPauseSec/3600; // 퇴근 시 pause 시간도 record에 저장
+    // Pause가 진행 중인 상태로 퇴근하면 마지막 Pause 구간도 누적에 반영
+    let finalPauseSec=totalPauseSec;
+    if(isPaused&&pauseStart){ finalPauseSec+=Math.floor((Date.now()-pauseStart.getTime())/1000); }
+    const finalId=Date.now();
+    const completed={id:finalId,user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ,pauseSec:finalPauseSec};
+    // 로컬 상태: 임시 record 제거 + 완료 record(aus 포함) 추가 → setRecords가 Firebase 전체 노드에 반영
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
-      return [...filtered,{id:Date.now(),user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,note:grund,typ,pauseSec:totalPauseSec}];
+      return [...filtered,completed];
     });
+    // 🛑 BUG2 방어: Firebase에 남아있을 수 있는 임시(aus:null) record 노드를 직접 제거해
+    //    관리자 화면에서 즉시 Aktiv 해제 + Feierabend 반영을 보장한다.
+    if(window._fbDb&&window._fbRef&&window._fbRemove){
+      window._fbRemove(window._fbRef(window._fbDb,"records/"+tempId)).catch(()=>{});
+    }
     setClockedIn(false);setClockInTime(null);setElapsed(0);setGrund("");setModal(null);
     setClockTyp("normal");
     setIsPaused(false);setPauseStart(null);setTotalPauseSec(0);
@@ -4889,7 +4903,14 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
     || {key:userKey, vorname:userKey?.split("_")[0]||"Manager", emoji:"", kuerzel:"M", role:"Admin"};
   const empList=safeUsers.filter(u=>!MANAGERS.includes(u.key)).sort(byName);
   const todayRecs=records.filter(r=>r.date===today());
-  const getStatus=name=>{const r=todayRecs.find(x=>x.user===name);if(!r||!r.ein)return"Nicht erschienen";if(!r.aus||r.aus==="")return"Aktiv";return"Feierabend";};
+  const getStatus=name=>{
+    const recs=todayRecs.filter(x=>x.user===name&&x.ein);
+    if(recs.length===0) return "Nicht erschienen";
+    // 진행 중(퇴근 전, aus 없음)인 record가 하나라도 있으면 Aktiv,
+    // 모든 record가 완료(aus 있음)면 Feierabend
+    if(recs.some(r=>!r.aus||r.aus==="")) return "Aktiv";
+    return "Feierabend";
+  };
   const getBranch=name=>{const r=todayRecs.find(x=>x.user===name);return r?.filiale||null;};
   const sColor=s=>s==="Aktiv"?C.mintDark:s==="Feierabend"?C.muted:C.red;
   const sBg=s=>s==="Aktiv"?C.mintLight:s==="Feierabend"?"#F0F0F0":C.redLight;
@@ -5377,8 +5398,12 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
                       <div style={{fontSize:12,fontWeight:800,color:C.red}}>{"🚨 "+n.user}</div>
                       <div style={{fontSize:10,color:C.red,marginTop:2}}>{n.filiale+" · "+n.time+" — kein Einstempeln!"}</div>
                     </div>
-                    <button onClick={()=>window._fbSet&&window._fbRef&&window._fbDb&&
-                      window._fbSet(window._fbRef(window._fbDb,"notifications/"+k+"/gelesen"),true).catch(()=>{})}
+                    <button onClick={()=>{
+                      // 낙관적 업데이트: 로컬 상태 먼저 반영 → 하단 탭 배지 & 경보 배너 즉시 차감
+                      setNotifications(prev=>({...(prev||{}),[k]:{...((prev||{})[k]||{}),gelesen:true}}));
+                      if(window._fbSet&&window._fbRef&&window._fbDb)
+                        window._fbSet(window._fbRef(window._fbDb,"notifications/"+k+"/gelesen"),true).catch(()=>{});
+                    }}
                       style={{fontSize:9,padding:"4px 8px",borderRadius:7,border:"none",
                         background:C.red,color:"#fff",cursor:"pointer",fontWeight:700}}>OK</button>
                   </div>
@@ -5436,8 +5461,8 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           {id:"uebersicht",       icon:"👥", lbl:"Übersicht"},
           {id:"dienstplan",       icon:"📋", lbl:"Dienstplan"},
           {id:"antraege",         icon:"📥", lbl:"Anträge", badge:alarmCount},
-          {id:"statistik",        icon:"📊", lbl:"Statistik"},
           {id:"schichtboerse_mgr",icon:"🔔", lbl:"Schichtbörse", badge:boerseMatchNotifs.length},
+          {id:"statistik",        icon:"📊", lbl:"Statistik"},
         ].map(t=>(
           <button key={t.id} onClick={()=>{setTab(t.id);setDetailKey(null);}} style={{flex:1,border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"3px 0",position:"relative"}}>
             <div style={{position:"relative",display:"inline-block"}}>
