@@ -3757,7 +3757,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
               <KalenderView csvCtx={csvCtx} userName={manager.vorname} records={records} users={users}/>
             </div>
           )}
-          <DienstplanUploadView records={records} users={users} antraege={antraege} setAntraege={setAntraege} absagenList={absagenList} setAbsagenList={setAbsagenList} setRecords={setRecords} approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag} approveAbsage={approveAbsage} rejectAbsage={rejectAbsage}
+          <DienstplanUploadView users={users}
             selMonth={selMonth}
             onScheduleSaved={(mk, pd) => {
               // allMonthSchedules 즉시 갱신 (Firebase 재로드 불필요)
@@ -3982,854 +3982,381 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 }
 
 //  DIENSTPLAN UPLOAD + AI ANALYSE 
-function DienstplanUploadView({ records, users, antraege, setAntraege, absagenList, setAbsagenList, setRecords, approveNachtrag, rejectNachtrag, approveAbsage, rejectAbsage, selMonth, onScheduleSaved }) {
-  const nList = Array.isArray(antraege) ? antraege : [];
-  const abList = Array.isArray(absagenList) ? absagenList : [];
-  const [apiKey, setApiKey] = usePersist("teeamo_apikey", "");
-  // 로컬 업로드 상태 (월별로 따로 관리)
-  const [localImgSrc, setLocalImgSrc] = useState(null);  // 방금 업로드한 이미지 미리보기
-  const [localImgMonth, setLocalImgMonth] = useState(null); // 어느 달 이미지인지
-  const [analyzing, setAnalyzing] = useState(false);
-  const [msg, setMsg] = useState(null);
-  const [showKeyInput, setShowKeyInput] = useState(false);
-  const fileRef = useRef(null);
-  // 검수 보정 UI 상태
-  const [pendingAnalysis, setPendingAnalysis] = useState(null);
-  // schedule 변경 시 editRows 자동 초기화
-  React.useEffect(()=>{
-    if (pendingAnalysis) return;
-    if (!schedule || Object.keys(schedule).length===0) return;
-    const rows = [];
-    for (const [name, rawShifts] of Object.entries(schedule)) {
-      const shifts = Array.isArray(rawShifts)?rawShifts:Object.values(rawShifts||{});
-      for (const s of shifts) {
-        rows.push({id:Math.random().toString(36).slice(2),
-          name, date:s.date||s.d||"", filiale:s.filiale||s.f||"", time:s.time||s.t||""});
-      }
-    }
-    rows.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.name<b.name?-1:1);
-    setEditRows(rows);
-  }, [selMonth, schedule, pendingAnalysis]);
+function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
+  const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
+  const empOptions = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort(byName);
+  const QUICK = ["09:30","11:30","12:30","14:00","15:00","16:00","18:00","19:00","20:00"];
+  const DRAFT_KEY = "teeamo_schicht_draft";
+  const filShort = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt", "TEEnJOY":"TEEnJOY" };
 
-  const [editRows, setEditRows] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [approvedDates, setApprovedDates] = useState(new Set()); // 승인 완료된 날짜들
-  const [savingDate, setSavingDate] = useState(null); // 저장 중인 날짜
-
-  // 선택된 월의 plan 이미지 Firebase 로드
-  const planImgKey = selMonth ? "planImage_"+selMonth : "planImage";
-  const [planImg] = useFirebase(planImgKey, null);
-  // 선택된 월의 schedule Firebase 로드
+  // 선택된 월의 스케줄 (실시간)
   const scheduleKey = selMonth ? "schedule_"+selMonth : "schedule";
-  const [monthScheduleData] = useFirebase(scheduleKey, {});
+  const [monthSched] = useFirebase(scheduleKey, {});
 
-  // 현재 표시할 이미지: 방금 업로드한 달과 선택된 달이 같으면 로컬, 아니면 Firebase
-  const displayImg = (localImgSrc && localImgMonth === selMonth) ? localImgSrc : planImg;
-  // 현재 표시할 schedule
-  const schedule = monthScheduleData || {};
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [msg, setMsg]         = useState(null);
 
-  //    
-  async function handleFile(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (!apiKey) { setShowKeyInput(true); return; }
-    if (file.type==="image/heic"||file.type==="image/heif"||file.name.toLowerCase().endsWith(".heic")) {
-      setMsg({type:"err",text:"❌ HEIC nicht unterstützt. Bitte als JPEG speichern."}); return;
+  // ── Draft 복원 ────────────────────────────────────────────────
+  const draft0 = (()=>{ try{const s=localStorage.getItem(DRAFT_KEY);return s?JSON.parse(s):null;}catch{return null;} })();
+  const [selEmp,  setSelEmp]  = useState(draft0?.emp || "");
+  const [selFil,  setSelFil]  = useState(draft0?.fil || FILIALEN[0]);
+  const [selDates,setSelDates]= useState(Array.isArray(draft0?.dates)?draft0.dates:[]);
+  const [von, setVon]         = useState(draft0?.von || "");
+  const [bis, setBis]         = useState(draft0?.bis || "");
+
+  // 달력 표시 월
+  const [calYM, setCalYM] = useState(()=>{
+    if(selMonth){ const [y,m]=selMonth.split("_"); return {y:+y, m:(+m)-1}; }
+    const d=new Date(); return {y:d.getFullYear(), m:d.getMonth()};
+  });
+
+  // ── Draft 자동 저장 (localStorage) ─────────────────────────────
+  useEffect(()=>{
+    try{ localStorage.setItem(DRAFT_KEY, JSON.stringify({emp:selEmp,fil:selFil,dates:selDates,von,bis})); }catch{}
+  },[selEmp,selFil,selDates,von,bis]);
+
+  const hasDraft = !!(selEmp || selDates.length>0 || von || bis);
+
+  function toggleDate(d){
+    setSelDates(prev=> prev.includes(d) ? prev.filter(x=>x!==d) : [...prev,d].sort());
+  }
+  function clearForm(){
+    setSelEmp(""); setSelFil(FILIALEN[0]); setSelDates([]); setVon(""); setBis("");
+    try{localStorage.removeItem(DRAFT_KEY);}catch{}
+  }
+
+  // ── 저장: root schedule({d,f,t}) + 월별 schedule({date,filiale,time}) 동시 기록 ──
+  async function saveShifts(){
+    if(!selEmp){ setMsg({t:"err",m:"Bitte zuerst eine/n Mitarbeiter/in wählen."}); return; }
+    if(selDates.length===0){ setMsg({t:"err",m:"Bitte mindestens ein Datum wählen."}); return; }
+    if(!von || !bis){ setMsg({t:"err",m:"Bitte VON- und BIS-Zeit angeben."}); return; }
+    if(!(window._fbDb&&window._fbRef&&window._fbGet&&window._fbSet)){
+      setMsg({t:"err",m:"Keine Verbindung zur Datenbank."}); return;
     }
-    const isPdf = file.type==="application/pdf";
-    if (file.size > (isPdf?20:5)*1024*1024) {
-      setMsg({type:"err",text:`❌ Datei zu groß (${(file.size/1024/1024).toFixed(1)}MB). Max: ${isPdf?"20MB":"5MB"}`}); return;
+    const timeStr = von+"-"+bis;
+    setSaving(true); setMsg(null);
+    try{
+      // 날짜를 달(month)별로 그룹핑
+      const byMonth = {};
+      selDates.forEach(d=>{ const mk=d.slice(0,7).replace("-","_"); (byMonth[mk]=byMonth[mk]||[]).push(d); });
+
+      // 1) 월별 노드 저장 (+ 부모 즉시 갱신)
+      for(const [mk, dates] of Object.entries(byMonth)){
+        const key="schedule_"+mk;
+        const snap=await window._fbGet(window._fbRef(window._fbDb,key));
+        const ex=snap.val()?JSON.parse(JSON.stringify(snap.val())):{};
+        let arr=Array.isArray(ex[selEmp])?ex[selEmp]:Object.values(ex[selEmp]||{});
+        dates.forEach(d=>{ arr=arr.filter(s=>(s.date||s.d)!==d); arr.push({date:d,filiale:selFil,time:timeStr}); });
+        ex[selEmp]=Object.fromEntries(arr.map((s,i)=>[String(i),s]));
+        await window._fbSet(window._fbRef(window._fbDb,key),ex);
+        const pd={}; for(const [n,sh] of Object.entries(ex)){ pd[n]=norm(sh); }
+        if(onScheduleSaved) onScheduleSaved(mk, pd);
+      }
+
+      // 2) root schedule 저장 (직원 앱이 읽는 노드)
+      const rsnap=await window._fbGet(window._fbRef(window._fbDb,"schedule"));
+      const root=rsnap.val()?JSON.parse(JSON.stringify(rsnap.val())):{};
+      let rarr=Array.isArray(root[selEmp])?root[selEmp]:Object.values(root[selEmp]||{});
+      selDates.forEach(d=>{ rarr=rarr.filter(s=>(s.d||s.date)!==d); rarr.push({d:d,f:selFil,t:timeStr}); });
+      root[selEmp]=rarr;
+      await window._fbSet(window._fbRef(window._fbDb,"schedule"),root);
+
+      setSaving(false);
+      setMsg({t:"ok",m:"✅ "+selDates.length+" Schicht(en) für "+selEmp+" gespeichert."});
+      clearForm();
+      setShowAdd(false);
+    }catch(e){
+      setSaving(false);
+      setMsg({t:"err",m:"Fehler beim Speichern: "+(e.message||e)});
     }
+  }
 
-    setAnalyzing(true);
-    setMsg({type:"info",text:"⏳ Schritt 1/3: Bild wird vorbereitet…"});
+  // ── 삭제: 두 노드에서 해당 (직원·날짜) shift 제거 ──
+  async function deleteShift(name, date){
+    if(!(window._fbDb&&window._fbRef&&window._fbGet&&window._fbSet)) return;
+    try{
+      const mk=date.slice(0,7).replace("-","_");
+      const key="schedule_"+mk;
+      const snap=await window._fbGet(window._fbRef(window._fbDb,key));
+      const ex=snap.val()?JSON.parse(JSON.stringify(snap.val())):{};
+      if(ex[name]){
+        let arr=Array.isArray(ex[name])?ex[name]:Object.values(ex[name]||{});
+        arr=arr.filter(s=>(s.date||s.d)!==date);
+        ex[name]=Object.fromEntries(arr.map((s,i)=>[String(i),s]));
+        await window._fbSet(window._fbRef(window._fbDb,key),ex);
+        const pd={}; for(const [n,sh] of Object.entries(ex)){ pd[n]=norm(sh); }
+        if(onScheduleSaved) onScheduleSaved(mk, pd);
+      }
+      const rsnap=await window._fbGet(window._fbRef(window._fbDb,"schedule"));
+      const root=rsnap.val()?JSON.parse(JSON.stringify(rsnap.val())):{};
+      if(root[name]){
+        let rarr=Array.isArray(root[name])?root[name]:Object.values(root[name]||{});
+        rarr=rarr.filter(s=>(s.d||s.date)!==date);
+        root[name]=rarr;
+        await window._fbSet(window._fbRef(window._fbDb,"schedule"),root);
+      }
+    }catch(e){ console.error("deleteShift", e); }
+  }
 
-    // ── b64 인코딩 ────────────────────────────────────────────────
-    let b64 = "";
-    try {
-      b64 = await new Promise((res,rej)=>{
-        const r=new FileReader();
-        r.onload=()=>res(r.result.split(",")[1]);
-        r.onerror=()=>rej(new Error("Lesefehler"));
-        r.readAsDataURL(file);
+  // ── 현재 월 플랜: 날짜별 그룹 ──
+  const byDate = {};
+  for(const [name, sh] of Object.entries(monthSched||{})){
+    if(MANAGERS.includes((name||"").toLowerCase())) continue;
+    norm(sh).forEach(s=>{
+      const d=s.date||s.d; if(!d) return;
+      (byDate[d]=byDate[d]||[]).push({
+        name,
+        filiale:s.filiale||s.f||"",
+        time:s.time||s.t||"",
+        status:s.status||null,
+        getauschtMit:s.getauschtMit||null,
+        getauschtVon:s.getauschtVon||null
       });
-    } catch(e) {
-      setMsg({type:"err",text:"❌ Datei konnte nicht gelesen werden: "+e.message});
-      setAnalyzing(false); return;
-    }
-
-    // ── STEP A: PDF → JPEG 변환 (PDF.js) ─────────────────────────
-    let dataUrl = isPdf ? null : `data:${file.type};base64,${b64}`;
-    if (isPdf && window.pdfjsLib) {
-      try {
-        setMsg({type:"info",text:"⏳ Schritt 1/3: PDF wird konvertiert…"});
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        const pdfBytes = Uint8Array.from(atob(b64), ch=>ch.charCodeAt(0));
-        const pdfDoc  = await window.pdfjsLib.getDocument({data:pdfBytes}).promise;
-        const page    = await pdfDoc.getPage(1);
-        const vp      = page.getViewport({scale:1.5});  // 3.0→1.5 (파일크기 75% 감소)
-        const canvas  = document.createElement("canvas");
-        canvas.width  = vp.width;
-        canvas.height = vp.height;
-        await page.render({canvasContext:canvas.getContext("2d"),viewport:vp}).promise;
-        dataUrl = canvas.toDataURL("image/jpeg",0.82);
-        setLocalImgSrc(dataUrl); setLocalImgMonth(selMonth);
-      } catch(pdfErr) {
-        console.warn("PDF→Image fehlgeschlagen, nutze Original:", pdfErr);
-        dataUrl = `data:application/pdf;base64,${b64}`;
-      }
-    } else if (!isPdf) {
-      setLocalImgSrc(dataUrl); setLocalImgMonth(selMonth);
-    }
-
-    // ── STEP B: PDF 텍스트 추출 (정확도 향상용) ──────────────────
-    let extractedText = "";
-    if (isPdf && window.pdfjsLib) {
-      try {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-        const pdfBytes2 = Uint8Array.from(atob(b64), ch=>ch.charCodeAt(0));
-        const pdfDoc2   = await window.pdfjsLib.getDocument({data:pdfBytes2}).promise;
-        const page2     = await pdfDoc2.getPage(1);
-        const tc        = await page2.getTextContent();
-        // Y축 기준 행 재구성
-        const rowMap2   = {};
-        tc.items.forEach(it=>{
-          const yk = Math.round(it.transform[5]/8)*8;
-          if (!rowMap2[yk]) rowMap2[yk]=[];
-          rowMap2[yk].push({text:it.str,x:it.transform[4]});
-        });
-        extractedText = Object.entries(rowMap2)
-          .sort((a,b)=>Number(b[0])-Number(a[0]))
-          .map(([,cells])=>cells.sort((a2,b2)=>a2.x-b2.x).map(cc=>cc.text).join("|"))
-          .join("\n")
-          .slice(0,3000); // 토큰 절약을 위해 3000자 제한
-      } catch(textErr) {
-        console.warn("Textextraktion fehlgeschlagen:", textErr);
-      }
-    }
-
-    // ── STEP C: AI 분석 프롬프트 (압축 최적화) ───────────────────
-    setMsg({type:"info",text:"⏳ Schritt 2/3: KI analysiert…"});
-    const regNames = (Array.isArray(users)?users:[])
-      .filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname).join(",");
-    const yr = new Date().getFullYear();
-
-    const promptText =
-      "Analysiere diesen Dienstplan. Extrahiere ALLE Namen - auch unbekannte.\n" +
-      "Referenz (nur Tippfehler korrigieren, kein Filter!): " + regNames + "\n" +
-      (extractedText ? "Extrahierter Text:\n" + extractedText + "\n" : "") +
-      "Filialen: Arkaden→TEEAMO Arkaden, Aegidiimarkt→TEEAMO Aegidiimarkt, TEEnJOY/Teenjoy→TEEnJOY\n" +
-      "Jede Person = eigener Schluessel. Format:\n" +
-      "<json>{\"Name\":[{\"d\":\""+yr+"-MM-DD\",\"f\":\"TEEAMO Arkaden\",\"t\":\"09:00-17:00\"}]}</json>\n" +
-      "REGELN: Datum "+yr+"-MM-DD. Zeit HH:MM-HH:MM oder null. KEINEN Namen weglassen!";
-
-    // 이미지 크기 체크 — 1.5MB 초과 시 추가 압축
-    let finalDataUrl = dataUrl;
-    if (finalDataUrl && !finalDataUrl.startsWith("data:application/pdf")) {
-      const sizeKB = Math.round(finalDataUrl.length * 3/4 / 1024);
-      if (sizeKB > 1500) {
-        // 추가 압축: 캔버스로 리사이즈
-        try {
-          const img2 = new Image();
-          await new Promise(res=>{ img2.onload=res; img2.src=finalDataUrl; });
-          const ratio = Math.min(1, Math.sqrt(1500*1024 / (img2.width*img2.height*0.5)));
-          const c2 = document.createElement("canvas");
-          c2.width = Math.round(img2.width*ratio);
-          c2.height = Math.round(img2.height*ratio);
-          c2.getContext("2d").drawImage(img2,0,0,c2.width,c2.height);
-          finalDataUrl = c2.toDataURL("image/jpeg",0.75);
-          console.log(`이미지 압축: ${sizeKB}KB → ${Math.round(finalDataUrl.length*3/4/1024)}KB`);
-        } catch(resizeErr) { console.warn("Resize fehlgeschlagen:", resizeErr); }
-      }
-    }
-
-    const contentBlock = finalDataUrl && !finalDataUrl.startsWith("data:application/pdf")
-      ? {type:"image",source:{type:"base64",media_type:"image/jpeg",data:finalDataUrl.split(",")[1]}}
-      : {type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}};
-
-    // ── STEP D: API 호출 ──────────────────────────────────────────
-    let parsed = {};
-    try {
-      // AbortController로 60초 타임아웃 설정
-      const controller = new AbortController();
-      const timeoutId  = setTimeout(()=>controller.abort(), 60000);
-      const res = await fetch("https://api.anthropic.com/v1/messages",{
-        signal: controller.signal,
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "x-api-key":apiKey,
-          "anthropic-version":"2023-06-01",
-          "anthropic-dangerous-direct-browser-access":"true",
-        },
-        body:JSON.stringify({
-          model:"claude-sonnet-4-6",
-          max_tokens:8192,
-          messages:[{role:"user",content:[contentBlock,{type:"text",text:promptText}]}]
-        })
-      });
-
-      clearTimeout(timeoutId);
-      if (!res.ok) {
-        let errBody="";
-        try{ const j=await res.json(); errBody=j.error?.message||JSON.stringify(j); }catch{}
-        throw new Error("API "+res.status+": "+errBody);
-      }
-
-      const data = await res.json();
-      const fullText = (data.content||[]).map(cc=>cc.text||"").join("");
-      console.log("KI-Antwort:", fullText.slice(0,500));
-
-      // JSON 추출 — 여러 패턴 시도 (robust parsing)
-      let jsonStr = "";
-      const m1 = fullText.match(/<json>([\s\S]*?)<\/json>/i);
-      if (m1) { jsonStr = m1[1].trim(); }
-      else {
-        const m2 = fullText.match(/```json\s*([\s\S]*?)```/i);
-        if (m2) { jsonStr = m2[1].trim(); }
-        else {
-          const m3 = fullText.match(/\{[\s\S]*\}/);
-          if (m3) { jsonStr = m3[0]; }
-        }
-      }
-
-      if (!jsonStr) throw new Error("Kein JSON in der KI-Antwort gefunden.");
-
-      // JSON 파싱 — 안전한 try-catch + 잘린 JSON 복구
-      let rawParsed;
-      try {
-        rawParsed = JSON.parse(jsonStr);
-      } catch(jsonErr) {
-        // max_tokens 초과로 잘린 JSON 복구 시도
-        let fixed = jsonStr;
-        // 마지막 불완전 항목 제거 후 배열/객체 닫기
-        fixed = fixed.replace(/,\s*\{[^}]*$/, "");  // 마지막 불완전 객체 제거
-        fixed = fixed.replace(/,\s*"[^"]*$/, "");    // 마지막 불완전 문자열 제거
-        fixed = fixed.replace(/,\s*\[$/, "");          // 마지막 빈 배열 시작 제거
-        // 열린 배열/객체 닫기
-        const opens = (fixed.match(/\[/g)||[]).length - (fixed.match(/\]/g)||[]).length;
-        const objs  = (fixed.match(/\{/g)||[]).length - (fixed.match(/\}/g)||[]).length;
-        for(let i=0;i<opens;i++) fixed += "]";
-        for(let i=0;i<objs;i++)  fixed += "}";
-        try {
-          rawParsed = JSON.parse(fixed);
-          console.warn("JSON wurde repariert (wahrscheinlich durch max_tokens abgeschnitten)");
-        } catch(e2) {
-          throw new Error("JSON-Fehler: "+jsonStr.slice(0,200)+" … ("+jsonErr.message+")");
-        }
-      }
-
-      // 이름-근무 정규화 + 퍼지 매칭
-      const empNames2 = (Array.isArray(users)?users:[])
-        .filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
-
-      function fuzzyMatch(aiName) {
-        if (!aiName) return aiName;
-        const exact = empNames2.find(n=>n.toLowerCase()===aiName.toLowerCase());
-        if (exact) return exact;
-        if (aiName.length>=5) {
-          function lev(a,b){
-            const dp=Array.from({length:a.length+1},(_,i)=>Array.from({length:b.length+1},(_,j)=>i||j?i&&j?0:i||j:0));
-            for(let i=1;i<=a.length;i++) for(let j=1;j<=b.length;j++)
-              dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
-            return dp[a.length][b.length];
-          }
-          const best=empNames2.map(n=>({n,d:lev(n.toLowerCase(),aiName.toLowerCase())})).sort((a,b)=>a.d-b.d)[0];
-          if(best&&best.d===1) return best.n;
-        }
-        return aiName; // 미등록 이름도 그대로 보존
-      }
-
-      for (const [name, shifts] of Object.entries(rawParsed)) {
-        if (!Array.isArray(shifts)) continue;
-        const correctedName = fuzzyMatch(name);
-        parsed[correctedName] = shifts
-          .map(s=>({date:s.date||s.d||"",filiale:s.filiale||s.f||"",time:s.time||s.t||null}))
-          .filter(s=>s.date && s.filiale);
-      }
-
-    } catch(apiErr) {
-      let errMsg = apiErr.message || "Unbekannter Fehler";
-      if (apiErr.name==="AbortError") errMsg = "Zeitüberschreitung (60s). Bitte erneut versuchen.";
-      else if (errMsg.includes("Load failed")||errMsg.includes("Failed to fetch")||errMsg.includes("NetworkError")) {
-        errMsg = "Netzwerkfehler — Bitte API-Schlüssel prüfen und WLAN-Verbindung kontrollieren.";
-      }
-      setMsg({type:"err",text:"❌ "+errMsg});
-      setAnalyzing(false); return;
-    }
-
-    // ── STEP E: 검수 UI 진입 ─────────────────────────────────────
-    if (Object.keys(parsed).length===0) {
-      setMsg({type:"err",text:"❌ Keine Schichten erkannt. Bild prüfen oder erneut versuchen."});
-      setAnalyzing(false); return;
-    }
-
-    const editRowsNew = [];
-    for (const [name, shifts] of Object.entries(parsed)) {
-      for (const s of shifts) {
-        editRowsNew.push({
-          id:Math.random().toString(36).slice(2),
-          name, date:s.date, filiale:s.filiale, time:s.time||""
-        });
-      }
-    }
-    editRowsNew.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.name<b.name?-1:1);
-
-    setPendingAnalysis({parsed, dataUrl, selMonthAtTime:selMonth});
-    setEditRows(editRowsNew);
-    setApprovedDates(new Set());
-    setMsg({type:"review",text:"✅ Analyse fertig — "+editRowsNew.length+" Schichten von "+Object.keys(parsed).length+" Personen erkannt."});
-    setAnalyzing(false);
+    });
   }
+  const sortedDates=Object.keys(byDate).sort();
 
-  // ── 특정 날짜 개별 승인 ──────────────────────────────────
-  async function confirmDate(date) {
-    const dateRows = editRows.filter(r=>r.date===date && r.name && r.filiale);
-    if (dateRows.length === 0) {
-      setApprovedDates(prev=>new Set([...prev, date]));
-      return;
-    }
-    setSavingDate(date);
+  // ── 달력 셀 ──
+  const daysInMonth=new Date(calYM.y, calYM.m+1, 0).getDate();
+  const firstDow=(new Date(calYM.y, calYM.m, 1).getDay()+6)%7; // Mo=0 … So=6
+  const cells=[]; for(let i=0;i<firstDow;i++) cells.push(null);
+  for(let d=1;d<=daysInMonth;d++) cells.push(d);
+  const ymStr=(d)=>calYM.y+"-"+String(calYM.m+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+  const calLabel=new Date(calYM.y, calYM.m, 1).toLocaleDateString("de-DE",{month:"long",year:"numeric"});
+  const todayStr=today();
 
-    // 해당 날짜 데이터만 Firebase 기존 스케줄에 병합
-    let saveMonthKey = pendingAnalysis?.selMonthAtTime || selMonth;
-    if (!saveMonthKey) {
-      saveMonthKey = date.slice(0,7).replace("-","_");
-    }
-    const fbKey = "schedule_" + saveMonthKey;
-
-    if (window._fbDb && window._fbRef && window._fbGet && window._fbSet) {
-      try {
-        const snap = await window._fbGet(window._fbRef(window._fbDb, fbKey));
-        const existing = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
-
-        // 해당 날짜의 기존 항목 제거 후 새 항목 삽입
-        for (const row of dateRows) {
-          if (!existing[row.name]) existing[row.name] = {};
-          // 이 직원의 해당 날짜 항목 제거
-          const empShifts = Object.values(existing[row.name] || {})
-            .filter(s => (s.date||s.d) !== date);
-          // 새 항목 추가
-          empShifts.push({ date: row.date, filiale: row.filiale, time: row.time||null });
-          existing[row.name] = Object.fromEntries(empShifts.map((s,i)=>[String(i),s]));
-        }
-        await window._fbSet(window._fbRef(window._fbDb, fbKey), existing);
-
-        // root schedule도 동기화
-        const rootSnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
-        const rootSched = rootSnap.val() ? JSON.parse(JSON.stringify(rootSnap.val())) : {};
-        for (const row of dateRows) {
-          if (!Array.isArray(rootSched[row.name])) rootSched[row.name] = Object.values(rootSched[row.name]||{});
-          rootSched[row.name] = rootSched[row.name].filter(s=>(s.d||s.date)!==date);
-          rootSched[row.name].push({d:row.date, f:row.filiale, t:row.time||null});
-        }
-        await window._fbSet(window._fbRef(window._fbDb, "schedule"), rootSched);
-
-        // 부모 상태 즉시 갱신 (allMonthSchedules)
-        if (onScheduleSaved) {
-          // 전체 month 재구성해서 콜백
-          const allRows = editRows.filter(r=>r.date&&r.name);
-          const rebuiltParsed = {};
-          for (const row of allRows) {
-            if (!rebuiltParsed[row.name]) rebuiltParsed[row.name]=[];
-            rebuiltParsed[row.name].push({date:row.date,filiale:row.filiale,time:row.time||null});
-          }
-          onScheduleSaved(saveMonthKey, rebuiltParsed);
-        }
-      } catch(e) {
-        console.error("confirmDate error:", e);
-        setSavingDate(null);
-        setMsg({type:"err", text:"Fehler beim Speichern von "+date+": "+e.message});
-        return;
-      }
-    }
-
-    setApprovedDates(prev => new Set([...prev, date]));
-    setSavingDate(null);
-    setMsg({type:"ok", text:"✅ "+date+" gespeichert!"});
-  }
-
-  async function confirmAndSave() {
-    if (!pendingAnalysis) return;
-    setSaving(true);
-    setMsg({ type:"info", text:"Wird gespeichert..." });
-
-    const parsed = {};
-    for (const row of editRows) {
-      if (!row.name||!row.date) continue;
-      if (!parsed[row.name]) parsed[row.name] = [];
-      parsed[row.name].push({ date:row.date, filiale:row.filiale, time:row.time||null });
-    }
-
-    const parsedForFb = {};
-    for (const [name,shifts] of Object.entries(parsed)) {
-      parsedForFb[name] = Object.fromEntries((shifts||[]).map((s,i)=>[String(i),s]));
-    }
-
-    let saveMonthKey = pendingAnalysis.selMonthAtTime;
-    if (!saveMonthKey) {
-      const allDates = editRows.map(r=>r.date).filter(Boolean);
-      if (allDates.length>0){
-        const mc={};
-        allDates.forEach(d=>{const m=d.slice(0,7).replace("-","_");mc[m]=(mc[m]||0)+1;});
-        saveMonthKey=Object.entries(mc).sort((a,b)=>b[1]-a[1])[0][0];
-      } else {
-        const now=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
-        saveMonthKey=now.getFullYear()+"_"+String(now.getMonth()+1).padStart(2,"0");
-      }
-    }
-    const fbScheduleKey = "schedule_"+saveMonthKey;
-    const fbImageKey    = "planImage_"+saveMonthKey;
-    const dUrl = pendingAnalysis.dataUrl;
-
-    if (window._fbDb&&window._fbRef&&window._fbSet) {
-      await window._fbSet(window._fbRef(window._fbDb,fbScheduleKey),parsedForFb).catch(()=>{});
-      if (dUrl) {
-        await window._fbSet(window._fbRef(window._fbDb,fbImageKey),dUrl).catch(()=>{});
-        await window._fbSet(window._fbRef(window._fbDb,"planImage"),dUrl).catch(()=>{});
-      }
-    }
-    if (onScheduleSaved) onScheduleSaved(saveMonthKey, parsed);
-    setLocalSchedule({data:parsed, month:saveMonthKey});
-    setPendingAnalysis(null);
-    setEditRows([]);
-    setSaving(false);
-    setMsg({ type:"ok", text:"Gespeichert! " + Object.keys(parsed).length + " Personen, " + editRows.length + " Schichten." });
-  }
-
+  const inp = {...S.input, width:"100%", fontSize:13, padding:"10px 12px", boxSizing:"border-box"};
 
   return (
-    <div style={{padding:"0"}}>
-
-      {/* ── 업로드 UI: 일반 스크롤 (sticky 없음) ── */}
-      <div style={{padding:"12px 14px 8px",background:C.card,
-        borderBottom:"1px solid "+C.border}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.text}}>Dienstplan hochladen</div>
-          {apiKey&&(
-            <button onClick={()=>setShowKeyInput(v=>!v)}
-              style={{fontSize:9,padding:"3px 8px",borderRadius:8,
-                border:"1px solid "+C.border,background:"#fff",color:C.muted,cursor:"pointer"}}>
-              API-Key
-            </button>
-          )}
+    <div>
+      {/* 헤더 + 추가 버튼 */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,gap:10}}>
+        <div>
+          <div style={{fontSize:14,fontWeight:800,color:C.text}}>{"📋 Dienstplan"}</div>
+          <div style={{fontSize:10,color:C.muted,marginTop:1}}>Schichten manuell hinzufügen & verwalten</div>
         </div>
-        {showKeyInput&&(
-          <div style={{...S.card,marginBottom:8,padding:"10px 12px",border:"1.5px solid "+C.yellow}}>
-            <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Anthropic API-Schluessel</div>
-            <input value={apiKey} onChange={e=>setApiKey(e.target.value)}
-              placeholder="sk-ant-..."
-              style={{...S.input,width:"100%",fontSize:12,marginBottom:6}}/>
-            <button onClick={()=>setShowKeyInput(false)}
-              style={{width:"100%",padding:"6px",borderRadius:8,border:"none",
-                background:C.navy,color:"#fff",fontWeight:700,fontSize:11,cursor:"pointer"}}>
-              Speichern
-            </button>
-          </div>
-        )}
-        <input type="file" accept="image/*,application/pdf" ref={fileRef}
-          style={{display:"none"}} onChange={handleFile}/>
-        <button onClick={()=>fileRef.current.click()} disabled={analyzing}
-          style={{width:"100%",padding:"13px",borderRadius:12,border:"2px dashed "+C.mint,
-            background:analyzing?"#f8f8f8":C.mintLight,
-            color:analyzing?C.muted:C.mintDark,
-            fontWeight:800,fontSize:13,cursor:analyzing?"not-allowed":"pointer",
-            display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-          {analyzing ? "KI analysiert..." : "Bild oder PDF auswaehlen & analysieren"}
+        <button onClick={()=>{setShowAdd(true);setMsg(null);}}
+          style={{flexShrink:0,padding:"10px 16px",borderRadius:10,border:"none",
+            background:"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",color:"#fff",
+            fontWeight:800,fontSize:12,cursor:"pointer",boxShadow:"0 3px 10px rgba(92,127,148,.35)"}}>
+          {"+ Schicht hinzufügen"}
         </button>
-        {!apiKey&&(
-          <button onClick={()=>setShowKeyInput(true)}
-            style={{marginTop:6,width:"100%",padding:"7px",borderRadius:8,
-              border:"1px solid "+C.border,background:"#fff",color:C.muted,fontSize:10,cursor:"pointer"}}>
-            API-Schluessel eingeben
-          </button>
-        )}
-        {msg&&(
-          <div style={{marginTop:8,padding:"8px 12px",borderRadius:9,
-            background:msg.type==="ok"?C.mintLight:msg.type==="err"?C.redLight:msg.type==="review"?"#EEF4FF":"#f0f4ff",
-            color:msg.type==="ok"?C.mintDark:msg.type==="err"?C.red:msg.type==="review"?C.navy:C.text,
-            fontSize:11,fontWeight:600}}>
-            {msg.text}
-          </div>
-        )}
       </div>
 
-      {/* ── 근무표 이미지만 Sticky 고정 ── */}
-      {displayImg&&(
-        <div style={{
-          position:"sticky", top:0, zIndex:60,
-          background:C.card,
-          boxShadow:"0 2px 12px rgba(0,0,0,.12)"
-        }}>
-          <PlanImage src={displayImg}/>
+      {/* Draft 안내 */}
+      {hasDraft && !showAdd && (
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,
+          background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"8px 12px",marginBottom:10}}>
+          <span style={{fontSize:11,color:"#92400e",fontWeight:600}}>💾 Ein Entwurf wurde gespeichert.</span>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setShowAdd(true)}
+              style={{fontSize:10,padding:"5px 10px",borderRadius:7,border:"none",background:"#f59e0b",color:"#fff",fontWeight:700,cursor:"pointer"}}>Weiter</button>
+            <button onClick={clearForm}
+              style={{fontSize:10,padding:"5px 10px",borderRadius:7,border:"1px solid #fde68a",background:"#fff",color:"#92400e",fontWeight:700,cursor:"pointer"}}>Verwerfen</button>
+          </div>
         </div>
       )}
 
-      {/* ═══ 스크롤 영역: 날짜→지점 그룹 레이아웃 ═══ */}
-      {editRows.length > 0 && (()=>{
-        // 날짜별 → 지점별 그룹핑
-        const validNames = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
-        const filOrder = FILIALEN; // ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"]
-        const filShort = {"TEEAMO Arkaden":"Arkaden","TEEAMO Aegidiimarkt":"Aegidiimarkt","TEEnJOY":"TEEnJOY"};
-        const filIcon  = {"TEEAMO Arkaden":"🏪","TEEAMO Aegidiimarkt":"🏬","TEEnJOY":"🧋"};
+      {/* 상태 메시지 */}
+      {msg && !showAdd && (
+        <div style={{fontSize:11,fontWeight:700,padding:"9px 12px",borderRadius:9,marginBottom:10,
+          background:msg.t==="ok"?"#dcfce7":"#fee2e2",color:msg.t==="ok"?"#15803d":C.red}}>
+          {msg.m}
+        </div>
+      )}
 
-        // 날짜 목록 추출 (오름차순)
-        const dates = [...new Set(editRows.map(r=>r.date))].filter(Boolean).sort();
-
-        const addRow = (date, filiale) => setEditRows(prev=>[...prev,{
-          id:Math.random().toString(36).slice(2),
-          name:"", date, filiale, time:""
-        }]);
-
-        const updateRow = (id, field, val) =>
-          setEditRows(prev=>prev.map(r=>r.id===id?{...r,[field]:val}:r));
-
-        const deleteRow = (id) =>
-          setEditRows(prev=>prev.filter(r=>r.id!==id));
-
-        return (
-          <div style={{padding:"10px 14px 90px"}}>
-            {/* 상단 헤더 */}
+      {/* ── Schicht hinzufügen 모달 ── */}
+      {showAdd && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:200,
+          display:"flex",alignItems:"flex-end",justifyContent:"center"}}
+          onClick={()=>setShowAdd(false)}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{background:"#fff",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:480,
+              maxHeight:"92vh",overflowY:"auto",padding:"18px 16px calc(18px + env(safe-area-inset-bottom,0px))"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:800,color:C.navy,textTransform:"uppercase",letterSpacing:".05em"}}>
-                {pendingAnalysis ? "Ergebnisse pruefen" : "Schichten bearbeiten"}
-              </div>
-              <div style={{fontSize:10,color:C.muted}}>{editRows.length} Eintraege · {dates.length} Tage</div>
+              <div style={{fontSize:16,fontWeight:800,color:C.text}}>Schicht hinzufügen</div>
+              <button onClick={()=>setShowAdd(false)}
+                style={{border:"none",background:"none",fontSize:22,color:C.muted,cursor:"pointer",lineHeight:1}}>{"×"}</button>
             </div>
 
-            {/* 날짜별 섹션 */}
-            {dates.map(date=>{
-              const dateObj = new Date(date+"T00:00:00");
-              const dayName = dateObj.toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"numeric"});
-              // 이 날짜의 모든 행
-              const dayRows = editRows.filter(r=>r.date===date);
-              const hasAlert = dayRows.some(r=>r.name && !validNames.includes(r.name));
+            {/* Mitarbeiter */}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>MITARBEITER/IN</div>
+              <select value={selEmp} onChange={e=>setSelEmp(e.target.value)} style={inp}>
+                <option value="">— auswählen —</option>
+                {empOptions.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
+              </select>
+            </div>
 
-              return (
-                <div key={date} style={{marginBottom:20}}>
-                  {/* 날짜 헤더 */}
-                  <div style={{
-                    display:"flex",alignItems:"center",gap:8,
-                    padding:"7px 10px",borderRadius:10,marginBottom:8,
-                    background:hasAlert?"#FFF3F3":"#EEF4FF",
-                    border:"1px solid "+(hasAlert?C.red:C.navy)
-                  }}>
-                    <span style={{fontSize:14}}>{"🗓️"}</span>
-                    <div style={{fontSize:12,fontWeight:800,color:hasAlert?C.red:C.navy}}>
-                      {dayName}
-                    </div>
-                    {hasAlert&&<span style={{fontSize:10,color:C.red,fontWeight:700}}>{"⚠ Pruefen!"}</span>}
-                  </div>
+            {/* Filiale */}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>FILIALE</div>
+              <select value={selFil} onChange={e=>setSelFil(e.target.value)} style={inp}>
+                {FILIALEN.map(f=><option key={f} value={f}>{filShort[f]||f}</option>)}
+              </select>
+            </div>
 
-                  {/* 지점별 서브섹션 */}
-                  {filOrder.map(fil=>{
-                    const filRows = dayRows.filter(r=>r.filiale===fil);
-                    const short = filShort[fil]||fil;
-                    const icon  = filIcon[fil]||"🏢";
-                    // 미등록 이름 = 정보용 경고 (에러 아님)
-                    const hasFilAlert = false; // 모든 이름 허용
-
-                    return (
-                      <div key={fil} style={{
-                        marginBottom:8,borderRadius:10,overflow:"hidden",
-                        border:"1px solid "+(hasFilAlert?C.red:C.border)
-                      }}>
-                        {/* 지점 헤더 */}
-                        <div style={{
-                          display:"flex",alignItems:"center",justifyContent:"space-between",
-                          padding:"6px 10px",
-                          background:hasFilAlert?C.redLight:C.bg,
-                          borderBottom:filRows.length>0?"1px solid "+(hasFilAlert?C.red:C.border):"none"
-                        }}>
-                          <div style={{display:"flex",alignItems:"center",gap:6}}>
-                            <span style={{fontSize:13}}>{icon}</span>
-                            <span style={{fontSize:11,fontWeight:800,color:hasFilAlert?C.red:C.text}}>{short}</span>
-                            <span style={{fontSize:10,color:C.muted,fontWeight:500}}>({filRows.length})</span>
-                          </div>
-                          <button onClick={()=>addRow(date,fil)}
-                            style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:7,
-                              border:"1px dashed "+C.mint,background:"transparent",
-                              color:C.mintDark,cursor:"pointer"}}>
-                            {"+ hinzufuegen"}
-                          </button>
-                        </div>
-
-                        {/* 직원 행들 */}
-                        {filRows.length===0?(
-                          <div style={{padding:"8px 12px",fontSize:10,color:C.muted,fontStyle:"italic"}}>
-                            Keine Schichten
-                          </div>
-                        ):filRows.map(row=>{
-                          // 계정 없는 이름도 정상 — 단지 미등록 표시만
-                    // 미등록 이름도 정상 — 단지 정보 표시용 플래그
-                    const nameRegistered = validNames.includes(row.name);
-                    const nameOk = true; // 모든 이름 유효 (계정 없어도 저장 가능)
-                          const empList = ["emplist",row.id].join("-");
-                          return (
-                            <div key={row.id} style={{
-                              display:"flex",alignItems:"center",gap:6,
-                              padding:"7px 10px",
-                              background:nameOk?"#fff":C.redLight,
-                              borderTop:"1px solid "+(nameOk?C.border:C.red)
-                            }}>
-                              {/* 직원 콤보박스 */}
-                              <div style={{flex:2,minWidth:0}}>
-                                <input
-                                  list={empList}
-                                  value={row.name}
-                                  onChange={e=>!approvedDates.has(date)&&updateRow(row.id,"name",e.target.value)}
-                                  readOnly={approvedDates.has(date)}
-                                  placeholder="Name..."
-                                  style={{
-                                    ...S.input,width:"100%",fontSize:12,fontWeight:700,
-                                    padding:"5px 7px",boxSizing:"border-box",
-                                    borderColor:approvedDates.has(date)?"#22c55e":C.border,
-                                    background:approvedDates.has(date)?"#f0fdf4":"#fff",
-                                    cursor:approvedDates.has(date)?"default":"text"
-                                  }}
-                                />
-                                <datalist id={empList}>
-                                  {/* AI가 분석한 원래 이름 (목록에 없어도 포함) */}
-                                  {row.name && !(Array.isArray(users)?users:[]).some(u=>u.vorname===row.name) && (
-                                    <option value={row.name}>{row.name} (AI erkannt)</option>
-                                  )}
-                                  {/* 등록된 직원 목록 */}
-                                  {(Array.isArray(users)?users:[])
-                                    .filter(u=>!MANAGERS.includes(u.key))
-                                    .sort((a,b)=>a.vorname<b.vorname?-1:1)
-                                    .map(u=><option key={u.key} value={u.vorname}>{u.vorname}</option>)
-                                  }
-                                </datalist>
-                                {!nameOk&&row.name&&(
-                                  <div style={{fontSize:8,color:C.red,marginTop:2,fontWeight:700}}>
-                                    {"Noch kein Konto"}
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* 시간 입력 */}
-                              <input
-                                value={row.time||""}
-                                onChange={e=>!approvedDates.has(date)&&updateRow(row.id,"time",e.target.value)}
-                                readOnly={approvedDates.has(date)}
-                                placeholder="09:00-17:00"
-                                style={{
-                                  ...S.input,flex:1.2,minWidth:0,fontSize:11,
-                                  padding:"5px 6px",boxSizing:"border-box",
-                                  background:approvedDates.has(date)?"#f0fdf4":"#fff",
-                                  borderColor:approvedDates.has(date)?"#22c55e":C.border,
-                                  cursor:approvedDates.has(date)?"default":"text"
-                                }}
-                              />
-
-                              {/* 삭제 버튼 (승인 완료 시 숨김) */}
-                              {!approvedDates.has(date)&&<button onClick={()=>deleteRow(row.id)}
-                                style={{flexShrink:0,width:26,height:26,
-                                  borderRadius:7,border:"1px solid "+C.border,
-                                  background:"#fff",color:C.red,fontSize:13,
-                                  cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                                {"×"}
-                              </button>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-
-                  {/* 이 날짜에 지점에 속하지 않는 행 (비정상 지점명) */}
-                  {dayRows.filter(r=>!filOrder.includes(r.filiale)).map(row=>{
-                    const nameOk = !row.name||validNames.includes(row.name);
-                    const filOk = false; // 알 수 없는 지점
-                    const empList2 = "emplist2-"+row.id;
-                    return(
-                      <div key={row.id} style={{
-                        borderRadius:10,marginBottom:4,overflow:"hidden",
-                        border:"1px solid "+C.red,background:C.redLight
-                      }}>
-                        <div style={{padding:"5px 10px",fontSize:9,fontWeight:700,
-                          color:C.red,borderBottom:"1px solid "+C.red}}>
-                          {"⚠ Unbekannte Filiale: "+row.filiale}
-                        </div>
-                        <div style={{display:"flex",alignItems:"center",gap:6,padding:"7px 10px"}}>
-                          <input list={empList2} value={row.name}
-                            onChange={e=>updateRow(row.id,"name",e.target.value)}
-                            placeholder="Name..."
-                            style={{...S.input,flex:1.5,fontSize:12,fontWeight:700,padding:"5px 7px",boxSizing:"border-box"}}/>
-                          <datalist id={empList2}>
-                            {(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key))
-                              .map(u=><option key={u.key} value={u.vorname}>{u.vorname}</option>)}
-                          </datalist>
-                          <select value={row.filiale}
-                            onChange={e=>updateRow(row.id,"filiale",e.target.value)}
-                            style={{...S.input,flex:1.2,fontSize:11,padding:"5px 6px",boxSizing:"border-box",borderColor:C.red}}>
-                            {FILIALEN.map(f=><option key={f} value={f}>{filShort[f]||f}</option>)}
-                          </select>
-                          <input value={row.time||""} onChange={e=>updateRow(row.id,"time",e.target.value)}
-                            placeholder="09:00-17:00"
-                            style={{...S.input,flex:1,fontSize:11,padding:"5px 6px",boxSizing:"border-box"}}/>
-                          <button onClick={()=>deleteRow(row.id)}
-                            style={{flexShrink:0,width:26,height:26,borderRadius:7,
-                              border:"1px solid "+C.border,background:"#fff",color:C.red,
-                              fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                            {"×"}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                {/* ─── 날짜별 Bestätigen 버튼 ─── */}
-                {(()=>{
-                  const isApproved = approvedDates.has(date);
-                  const isSaving   = savingDate === date;
-                  const pendingCount = dayRows.filter(r=>r.name&&r.filiale).length;
-                  const validNames2 = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
-                  const alertCount2 = dayRows.filter(r=>!r.name||!r.date).length; // 빈 이름/날짜만
-
-                  if (isApproved) return (
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
-                      marginTop:10,padding:"8px 12px",borderRadius:10,
-                      background:"#dcfce7",border:"1.5px solid #22c55e"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <span style={{fontSize:16}}>{"✅"}</span>
-                        <span style={{fontSize:11,fontWeight:700,color:"#15803d"}}>
-                          Genehmigt ({pendingCount} Schichten)
-                        </span>
-                      </div>
-                      <button onClick={()=>setApprovedDates(prev=>{const s=new Set(prev);s.delete(date);return s;})}
-                        style={{fontSize:10,padding:"4px 10px",borderRadius:8,
-                          border:"1px solid #22c55e",background:"#fff",
-                          color:"#15803d",fontWeight:700,cursor:"pointer"}}>
-                        Bearbeiten
-                      </button>
-                    </div>
-                  );
-
-                  return (
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
-                      marginTop:10,gap:8}}>
-                      {alertCount2 > 0 && (
-                        <div style={{fontSize:10,color:C.red,fontWeight:700,flex:1}}>
-                          {"⚠ "+alertCount2+" Name"+(alertCount2>1?"n":"")+" pruefen"}
-                        </div>
-                      )}
-                      <button
-                        onClick={()=>confirmDate(date)}
-                        disabled={isSaving}
-                        style={{
-                          marginLeft:"auto",
-                          padding:"10px 20px",borderRadius:10,border:"none",
-                          background: isSaving?"#aaa":alertCount2>0
-                            ?"linear-gradient(135deg,#f59e0b,#d97706)"
-                            :"linear-gradient(135deg,#22c55e,#16a34a)",
-                          color:"#fff",fontWeight:800,fontSize:12,
-                          cursor:isSaving?"not-allowed":"pointer",
-                          boxShadow:isSaving?"none":"0 3px 10px rgba(34,197,94,.35)",
-                          display:"flex",alignItems:"center",gap:6,
-                          opacity:isSaving?0.7:1
-                        }}>
-                        {isSaving
-                          ? "⏳ Speichern…"
-                          : alertCount2>0
-                            ? "⚠ Trotzdem bestätigen"
-                            : "✅ Bestätigen ("+pendingCount+")"}
-                      </button>
-                    </div>
-                  );
-                })()}
+            {/* 다중 날짜 선택 (달력) */}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>
+                DATEN (Mehrfachauswahl){selDates.length>0?" · "+selDates.length+" gewählt":""}
               </div>
+              <div style={{border:"1px solid "+C.border,borderRadius:12,padding:"10px"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                  <button onClick={()=>setCalYM(p=>{const m=p.m-1;return m<0?{y:p.y-1,m:11}:{y:p.y,m};})}
+                    style={{border:"none",background:C.bg,borderRadius:8,width:30,height:30,fontSize:15,cursor:"pointer",color:C.text}}>{"‹"}</button>
+                  <div style={{fontSize:12,fontWeight:800,color:C.text}}>{calLabel}</div>
+                  <button onClick={()=>setCalYM(p=>{const m=p.m+1;return m>11?{y:p.y+1,m:0}:{y:p.y,m};})}
+                    style={{border:"none",background:C.bg,borderRadius:8,width:30,height:30,fontSize:15,cursor:"pointer",color:C.text}}>{"›"}</button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:4}}>
+                  {["Mo","Di","Mi","Do","Fr","Sa","So"].map(w=>(
+                    <div key={w} style={{textAlign:"center",fontSize:8,fontWeight:700,color:C.muted}}>{w}</div>
+                  ))}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+                  {cells.map((d,i)=>{
+                    if(d===null) return <div key={"e"+i}/>;
+                    const ds=ymStr(d);
+                    const on=selDates.includes(ds);
+                    const isToday=ds===todayStr;
+                    return(
+                      <button key={ds} onClick={()=>toggleDate(ds)}
+                        style={{aspectRatio:"1",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:on?800:600,
+                          border:isToday&&!on?"1.5px solid "+C.mint:"1px solid "+(on?C.mintDark:C.border),
+                          background:on?C.mintDark:"#fff",color:on?"#fff":C.text,
+                          display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>
+                        {d}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {selDates.length>0 && (
+                <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:8}}>
+                  {selDates.map(d=>(
+                    <span key={d} onClick={()=>toggleDate(d)}
+                      style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:99,
+                        background:C.mintLight,color:C.mintDark,cursor:"pointer",border:"1px solid "+C.mint}}>
+                      {new Date(d).toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit"})} ✕
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* VON */}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>VON</div>
+              <input value={von} onChange={e=>setVon(e.target.value)} placeholder="z. B. 09:30"
+                inputMode="numeric" style={{...inp,marginBottom:6}}/>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                {QUICK.map(q=>(
+                  <button key={"v"+q} onClick={()=>setVon(q)}
+                    style={{fontSize:11,fontWeight:700,padding:"6px 9px",borderRadius:8,cursor:"pointer",
+                      border:"1px solid "+(von===q?C.mintDark:C.border),
+                      background:von===q?C.mintDark:"#fff",color:von===q?"#fff":C.text}}>{q}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* BIS */}
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>BIS</div>
+              <input value={bis} onChange={e=>setBis(e.target.value)} placeholder="z. B. 17:00"
+                inputMode="numeric" style={{...inp,marginBottom:6}}/>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                {QUICK.map(q=>(
+                  <button key={"b"+q} onClick={()=>setBis(q)}
+                    style={{fontSize:11,fontWeight:700,padding:"6px 9px",borderRadius:8,cursor:"pointer",
+                      border:"1px solid "+(bis===q?C.mintDark:C.border),
+                      background:bis===q?C.mintDark:"#fff",color:bis===q?"#fff":C.text}}>{q}</button>
+                ))}
+              </div>
+            </div>
+
+            {msg && (
+              <div style={{fontSize:11,fontWeight:700,padding:"9px 12px",borderRadius:9,marginBottom:12,
+                background:msg.t==="ok"?"#dcfce7":"#fee2e2",color:msg.t==="ok"?"#15803d":C.red}}>
+                {msg.m}
+              </div>
+            )}
+
+            {/* 미리보기 */}
+            {selEmp&&selDates.length>0&&von&&bis&&(
+              <div style={{fontSize:11,color:C.muted,marginBottom:12,padding:"8px 12px",background:C.bg,borderRadius:9}}>
+                <b style={{color:C.text}}>{selEmp}</b> · {filShort[selFil]||selFil} · {von}-{bis}
+                {" · "}{selDates.length} Tag(e)
+              </div>
+            )}
+
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={clearForm}
+                style={{flex:1,padding:"12px",borderRadius:11,border:"1px solid "+C.border,
+                  background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>
+                Zurücksetzen
+              </button>
+              <button onClick={saveShifts} disabled={saving}
+                style={{flex:2,padding:"12px",borderRadius:11,border:"none",
+                  background:saving?"#aaa":"linear-gradient(135deg,"+C.mint+","+C.mintDark+")",
+                  color:"#fff",fontWeight:800,fontSize:13,cursor:saving?"not-allowed":"pointer"}}>
+                {saving?"⏳ Speichern…":"✅ Speichern"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 현재 월 플랜 (읽기 + 삭제) ── */}
+      {sortedDates.length===0 ? (
+        <div style={{textAlign:"center",padding:"32px 14px",color:C.muted}}>
+          <div style={{fontSize:30,marginBottom:8}}>📋</div>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:3}}>Noch kein Dienstplan</div>
+          <div style={{fontSize:11}}>Oben auf „+ Schicht hinzufügen“ tippen.</div>
+        </div>
+      ) : (
+        sortedDates.map(d=>(
+          <div key={d} style={{marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:800,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>
+              {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"2-digit",month:"2-digit"})}
+            </div>
+            {byDate[d].sort((a,b)=>(a.time||"").localeCompare(b.time||"")).map((row,i)=>{
+              const freigegeben = row.status==="freigegeben";
+              const getauscht   = row.status==="getauscht";
+              return(
+                <div key={d+"_"+row.name+"_"+i}
+                  style={{...S.card,display:"flex",alignItems:"center",gap:10,padding:"10px 12px",marginBottom:6,
+                    opacity:(freigegeben||getauscht)?0.55:1}}>
+                  <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,color:"#fff",
+                    display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,flexShrink:0}}>
+                    {(row.name||"?").slice(0,2)}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:700,color:C.text}}>{row.name}</div>
+                    <div style={{fontSize:10,color:C.muted,marginTop:1}}>
+                      {(filShort[row.filiale]||row.filiale)}{row.time?" · "+row.time:""}
+                    </div>
+                    {freigegeben && (
+                      <div style={{fontSize:10,fontWeight:700,color:"#b45309",marginTop:2}}>🔄 Freigegeben (wartet auf Tausch)</div>
+                    )}
+                    {getauscht && (
+                      <div style={{fontSize:10,fontWeight:700,color:C.mintDark,marginTop:2}}>✔️ Getauscht mit {row.getauschtMit||"?"}</div>
+                    )}
+                    {row.getauschtVon && !getauscht && (
+                      <div style={{fontSize:10,fontWeight:700,color:C.mintDark,marginTop:2}}>✔️ Getauscht mit {row.getauschtVon}</div>
+                    )}
+                  </div>
+                  <button onClick={()=>deleteShift(row.name,d)}
+                    style={{flexShrink:0,width:28,height:28,borderRadius:8,border:"1px solid "+C.border,
+                      background:C.redLight,color:C.red,fontSize:14,fontWeight:700,cursor:"pointer",
+                      display:"flex",alignItems:"center",justifyContent:"center"}}>{"×"}</button>
+                </div>
               );
             })}
-
-            {/* 새 날짜 전체 추가 */}
-            <button onClick={()=>{
-              const nextDate = new Date(); nextDate.setDate(nextDate.getDate()+1);
-              const d = nextDate.toISOString().slice(0,10);
-              addRow(d, FILIALEN[0]);
-            }} style={{
-              width:"100%",padding:"11px",borderRadius:11,
-              border:"1.5px dashed "+C.mint,background:"transparent",
-              color:C.mintDark,fontSize:12,fontWeight:700,cursor:"pointer"
-            }}>
-              {"+ Neuen Tag hinzufuegen"}
-            </button>
           </div>
-        );
-      })()}
-
-            {/* 데이터 없을 때 안내 */}
-      {editRows.length === 0 && !analyzing && (
-        <div style={{padding:"32px 14px",textAlign:"center"}}>
-          <div style={{fontSize:32,marginBottom:8}}>📋</div>
-          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>
-            Kein Dienstplan vorhanden
-          </div>
-          <div style={{fontSize:11,color:C.muted}}>
-            Bitte erst hochladen und analysieren.
-          </div>
-        </div>
+        ))
       )}
-
-      {/* ═══ 하단 고정 플로팅 바 (nav bar 위에 표시) ═══ */}
-      {editRows.length > 0 && (
-        <div style={{
-          position:"fixed",
-          bottom:"calc(60px + env(safe-area-inset-bottom))", /* nav bar(~60px) 바로 위 */
-          left:0, right:0,
-          zIndex:150,  /* nav bar(100)보다 높게 */
-          padding:"10px 14px",
-          background:"rgba(255,255,255,0.97)",
-          backdropFilter:"blur(8px)",
-          borderTop:"2px solid "+C.mint,
-          boxShadow:"0 -6px 24px rgba(0,0,0,.15)"
-        }}>
-          {/* 오류 개수 요약 */}
-          {(()=>{
-            const validNames=(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).map(u=>u.vorname);
-            const alertCount=editRows.filter(r=>!r.name||!r.date).length; // 빈 이름/날짜만
-            return alertCount>0?(
-              <div style={{fontSize:10,color:C.red,fontWeight:700,textAlign:"center",marginBottom:6}}>
-                {"⚠ "+alertCount+" Eintrag"+(alertCount>1?"e":"")+" noch nicht korrekt – bitte pruefen!"}
-              </div>
-            ):null;
-          })()}
-
-          <div style={{display:"flex",gap:8,maxWidth:500,margin:"0 auto"}}>
-            {/* 초기화 버튼 */}
-            <button onClick={()=>{setEditRows([]);setPendingAnalysis(null);setMsg(null);setApprovedDates(new Set());}}
-              style={{
-                flex:1, padding:"11px 8px", borderRadius:11,
-                border:"1px solid "+C.border, background:"#fff",
-                color:C.muted, fontWeight:700, fontSize:11, cursor:"pointer"
-              }}>
-              Zuruecksetzen
-            </button>
-
-            {/* ✅ 메인 확인 버튼 */}
-            <button
-              onClick={confirmAndSave}
-              disabled={saving}
-              style={{
-                flex:3, padding:"13px 8px", borderRadius:11, border:"none",
-                background: saving
-                  ? "#aaa"
-                  : "linear-gradient(135deg,"+C.mint+","+C.mintDark+")", /* 글로벌 보조 버튼 */
-                color:"#fff", fontWeight:900, fontSize:14,
-                cursor: saving ? "not-allowed" : "pointer",
-                boxShadow: saving ? "none" : "0 3px 10px rgba(0,0,0,.15)",
-                display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-                letterSpacing:".01em"
-              }}>
-              {saving
-                ? "⏳ Wird gespeichert…"
-                : "Alle bestaetigen (" + editRows.filter(r=>!approvedDates.has(r.date)).length + " ausstehend)"}
-            </button>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }
