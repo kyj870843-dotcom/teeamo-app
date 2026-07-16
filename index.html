@@ -1755,11 +1755,12 @@ function SchichtboerseView({ userName, users, isAdmin }) {
         <div>
           <div style={{...S.card,marginBottom:10}}>
             <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Schicht zur Börse einstellen</div>
-            {/* DATUM — 한 줄 전체 폭 */}
-            <div style={{marginBottom:10}}>
+            {/* DATUM — 한 줄 전체 폭 (iOS 날짜 입력 오버플로우 방지) */}
+            <div style={{marginBottom:10,width:"100%",minWidth:0}}>
               <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>DATUM</div>
               <input type="date" value={fsDate} onChange={e=>setFsDate(e.target.value)}
-                style={{...S.input,width:"100%",fontSize:13,padding:"10px 12px",boxSizing:"border-box"}}/>
+                style={{...S.input,display:"block",width:"100%",maxWidth:"100%",minWidth:0,fontSize:13,
+                  padding:"10px 12px",boxSizing:"border-box",WebkitAppearance:"none",appearance:"none"}}/>
             </div>
             {/* FILIALE — 한 줄 전체 폭 */}
             <div style={{marginBottom:10}}>
@@ -4202,8 +4203,11 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                   <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"2 · MITARBEITER/IN"}</div>
                   <select value={addEmp} onChange={e=>setAddEmp(e.target.value)} style={{...S.input,width:"100%",fontSize:13,padding:"8px 10px",boxSizing:"border-box"}}>
                     <option value="">{"— auswählen —"}</option>
+                    {(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort(byName).map(u=>(
+                      <option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>
+                    ))}
+                    <option disabled>{"──────────"}</option>
                     <option value="__temp__">{"➕ Temp-Name direkt eingeben…"}</option>
-                    {(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort(byName).map(u=><option key={u.key} value={u.vorname}>{u.vorname}</option>)}
                   </select>
                   {addEmp==="__temp__"&&(
                     <input value={addTemp} onChange={e=>setAddTemp(e.target.value)} placeholder="z. B. Tingting"
@@ -4395,7 +4399,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
               setSelMonth(mk);
             }}/>
           <div style={{marginTop:16}}>
-            <DienstplanKalender schedule={schedule} records={records} allowDelete={true}/>
+            <DienstplanKalender schedule={schedule} records={records} allowDelete={true} users={users}/>
           </div>
         </div>
       )}
@@ -4514,8 +4518,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
 
   // ── Draft 복원 ────────────────────────────────────────────────
   const draft0 = (()=>{ try{const s=localStorage.getItem(DRAFT_KEY);return s?JSON.parse(s):null;}catch{return null;} })();
-  const [selEmp, setSelEmp] = useState(draft0?.emp || "");
-  // 날짜별 설정: { "YYYY-MM-DD": { filiale, von, bis } }
+  // 날짜별 설정: { "YYYY-MM-DD": { filiale, emp, tempName, von, bis } } — 날짜마다 직원 개별 지정
   const [dateConfigs, setDateConfigs] = useState(draft0?.configs && typeof draft0.configs==="object" ? draft0.configs : {});
 
   // 달력 표시 월
@@ -4526,65 +4529,77 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
 
   // ── Draft 자동 저장 ───────────────────────────────────────────
   useEffect(()=>{
-    try{ localStorage.setItem(DRAFT_KEY, JSON.stringify({emp:selEmp, configs:dateConfigs})); }catch{}
-  },[selEmp, dateConfigs]);
+    try{ localStorage.setItem(DRAFT_KEY, JSON.stringify({configs:dateConfigs})); }catch{}
+  },[dateConfigs]);
 
   const selDates = Object.keys(dateConfigs).sort();
-  const hasDraft = !!(selEmp || selDates.length>0);
+  const hasDraft = selDates.length>0;
 
   function toggleDate(d){
     setDateConfigs(prev=>{
       const next={...prev};
       if(next[d]) delete next[d];
-      else next[d]={filiale:FILIALEN[0], von:"", bis:""};
+      else next[d]={filiale:FILIALEN[0], emp:"", tempName:"", von:"", bis:""};
       return next;
     });
   }
   function updateConfig(d, field, val){
-    setDateConfigs(prev=>({...prev, [d]:{...(prev[d]||{filiale:FILIALEN[0],von:"",bis:""}), [field]:val}}));
+    setDateConfigs(prev=>({...prev, [d]:{...(prev[d]||{filiale:FILIALEN[0],emp:"",tempName:"",von:"",bis:""}), [field]:val}}));
   }
   function clearForm(){
-    setSelEmp(""); setDateConfigs({});
+    setDateConfigs({});
     try{localStorage.removeItem(DRAFT_KEY);}catch{}
   }
+  const resolveName = c => c.emp==="__temp__" ? (c.tempName||"").trim() : c.emp;
 
-  // ── 저장: 날짜별 개별 지점/시간을 root + 월별 두 노드에 기록 ──
+  // ── 저장: 날짜별 개별 지점/직원/시간을 root + 월별 두 노드에 기록 ──
   async function saveShifts(){
-    if(!selEmp){ setMsg({t:"err",m:"Bitte zuerst eine/n Mitarbeiter/in wählen."}); return; }
     const dates=Object.keys(dateConfigs);
     if(dates.length===0){ setMsg({t:"err",m:"Bitte mindestens ein Datum wählen."}); return; }
-    const incomplete=dates.filter(d=>!dateConfigs[d].von || !dateConfigs[d].bis);
-    if(incomplete.length>0){ setMsg({t:"err",m:"Bitte für ALLE Tage VON und BIS ausfüllen."}); return; }
+    for(const d of dates){
+      const c=dateConfigs[d];
+      if(!resolveName(c)){ setMsg({t:"err",m:"Bitte für JEDEN Tag eine/n Mitarbeiter/in wählen."}); return; }
+      if(!c.von||!c.bis){ setMsg({t:"err",m:"Bitte für ALLE Tage VON und BIS ausfüllen."}); return; }
+    }
     if(!(window._fbDb&&window._fbRef&&window._fbGet&&window._fbSet)){ setMsg({t:"err",m:"Keine Verbindung zur Datenbank."}); return; }
     setSaving(true); setMsg(null);
     try{
-      // 월(month)별 그룹
-      const byMonth={};
-      dates.forEach(d=>{ const mk=d.slice(0,7).replace("-","_"); (byMonth[mk]=byMonth[mk]||[]).push(d); });
-
+      // 직원별 엔트리 그룹
+      const byName={};  // {name: [{date, filiale, time}]}
+      dates.forEach(d=>{
+        const c=dateConfigs[d];
+        const name=resolveName(c);
+        (byName[name]=byName[name]||[]).push({date:d, filiale:c.filiale, time:c.von+"-"+c.bis});
+      });
       // 1) 월별 노드
-      for(const [mk, ds] of Object.entries(byMonth)){
+      const monthsTouched=new Set(dates.map(d=>d.slice(0,7).replace("-","_")));
+      for(const mk of monthsTouched){
         const key="schedule_"+mk;
         const snap=await window._fbGet(window._fbRef(window._fbDb,key));
         const ex=snap.val()?JSON.parse(JSON.stringify(snap.val())):{};
-        let arr=Array.isArray(ex[selEmp])?ex[selEmp]:Object.values(ex[selEmp]||{});
-        ds.forEach(d=>{ const c=dateConfigs[d]; arr=arr.filter(s=>(s.date||s.d)!==d); arr.push({date:d,filiale:c.filiale,time:c.von+"-"+c.bis}); });
-        ex[selEmp]=Object.fromEntries(arr.map((s,i)=>[String(i),s]));
+        for(const [name,entries] of Object.entries(byName)){
+          const monthEntries=entries.filter(e=>e.date.slice(0,7).replace("-","_")===mk);
+          if(monthEntries.length===0) continue;
+          let arr=Array.isArray(ex[name])?ex[name]:Object.values(ex[name]||{});
+          monthEntries.forEach(e=>{ arr=arr.filter(s=>(s.date||s.d)!==e.date); arr.push({date:e.date,filiale:e.filiale,time:e.time}); });
+          ex[name]=Object.fromEntries(arr.map((s,i)=>[String(i),s]));
+        }
         await window._fbSet(window._fbRef(window._fbDb,key),ex);
         const pd={}; for(const [n,sh] of Object.entries(ex)){ pd[n]=norm(sh); }
         if(onScheduleSaved) onScheduleSaved(mk, pd);
       }
-
       // 2) root schedule
       const rsnap=await window._fbGet(window._fbRef(window._fbDb,"schedule"));
       const root=rsnap.val()?JSON.parse(JSON.stringify(rsnap.val())):{};
-      let rarr=Array.isArray(root[selEmp])?root[selEmp]:Object.values(root[selEmp]||{});
-      dates.forEach(d=>{ const c=dateConfigs[d]; rarr=rarr.filter(s=>(s.d||s.date)!==d); rarr.push({d:d,f:c.filiale,t:c.von+"-"+c.bis}); });
-      root[selEmp]=rarr;
+      for(const [name,entries] of Object.entries(byName)){
+        let rarr=Array.isArray(root[name])?root[name]:Object.values(root[name]||{});
+        entries.forEach(e=>{ rarr=rarr.filter(s=>(s.d||s.date)!==e.date); rarr.push({d:e.date,f:e.filiale,t:e.time}); });
+        root[name]=rarr;
+      }
       await window._fbSet(window._fbRef(window._fbDb,"schedule"),root);
 
       setSaving(false);
-      setMsg({t:"ok",m:"✅ "+dates.length+" Schicht(en) für "+selEmp+" gespeichert."});
+      setMsg({t:"ok",m:"✅ "+dates.length+" Schicht(en) gespeichert."});
       clearForm();
       setShowAdd(false);
     }catch(e){
@@ -4723,16 +4738,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
 
             {/* 스크롤 영역 */}
             <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
-              {/* Mitarbeiter */}
-              <div style={{marginBottom:12}}>
-                <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>MITARBEITER/IN</div>
-                <select value={selEmp} onChange={e=>setSelEmp(e.target.value)} style={inp}>
-                  <option value="">— auswählen —</option>
-                  {empOptions.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
-                </select>
-              </div>
-
-              {/* 달력 다중 선택 */}
+              {/* 1) 달력 다중 선택 (날짜 우선) */}
               <div style={{marginBottom:12}}>
                 <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>
                   DATEN WÄHLEN{selDates.length>0?" · "+selDates.length+" Tag(e)":""}
@@ -4798,6 +4804,21 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
                             style={{...S.input,width:"100%",fontSize:13,padding:"9px 11px",boxSizing:"border-box"}}>
                             {FILIALEN.map(f=><option key={f} value={f}>{filShort[f]||f}</option>)}
                           </select>
+                        </div>
+                        {/* Mitarbeiter (정식 직원 + 구분선 + Temp) */}
+                        <div style={{marginBottom:10}}>
+                          <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>MITARBEITER/IN</div>
+                          <select value={c.emp||""} onChange={e=>updateConfig(d,"emp",e.target.value)}
+                            style={{...S.input,width:"100%",fontSize:13,padding:"9px 11px",boxSizing:"border-box"}}>
+                            <option value="">{"— auswählen —"}</option>
+                            {empOptions.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
+                            <option disabled>{"──────────"}</option>
+                            <option value="__temp__">{"➕ Temp-Name direkt eingeben…"}</option>
+                          </select>
+                          {c.emp==="__temp__"&&(
+                            <input value={c.tempName||""} onChange={e=>updateConfig(d,"tempName",e.target.value)} placeholder="z. B. Tingting"
+                              style={{...S.input,width:"100%",fontSize:13,padding:"9px 11px",boxSizing:"border-box",marginTop:6}}/>
+                          )}
                         </div>
                         {/* VON / BIS + 개별 퀵버튼 */}
                         <div style={{display:"flex",gap:12}}>
