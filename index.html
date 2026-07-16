@@ -1708,8 +1708,10 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   const ADMIN_NAMES=["yeaji","tingting","teddy","huy"];
   const safeUsers=Array.isArray(users)?users:[];
   const isAdminName=regV.trim()!==""&&ADMIN_NAMES.some(n=>regV.trim().toLowerCase().includes(n));
-  const empList=[...safeUsers.filter(u=>!MANAGERS.includes(u.key))].sort(byName);
-  const mgrList=[...safeUsers.filter(u=>MANAGERS.includes(u.key))].sort(byName);
+  // 역할이 Admin/Management이거나 isAdmin이면 무조건 MANAGEMENT 그룹으로 분류 (하이브리드 관리자 포함)
+  const isMgmtAcc = u => MANAGERS.includes(u.key) || u.isAdmin===true || u.role==="Admin" || u.role==="Management";
+  const empList=[...safeUsers.filter(u=>!isMgmtAcc(u))].sort(byName);
+  const mgrList=[...safeUsers.filter(u=>isMgmtAcc(u))].sort(byName);
 
   function selectUser(u){setSelUser(u);setPin("");setErr("");setPage("pin");}
   function back(){setPage("list");setSelUser(null);setPin("");setErr("");}
@@ -2537,6 +2539,27 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
   return(
     <div style={{background:C.bg,minHeight:"100vh",paddingBottom:80}}>
+      {/* 🔁 하이브리드 관리자: 직원 모드 상단 복귀 바 */}
+      {onSwitchToAdmin&&(
+        <div style={{position:"sticky",top:0,zIndex:150,
+          background:`linear-gradient(135deg,${C.navy},#3a4a55)`,color:"#fff",
+          padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,
+          boxShadow:"0 2px 8px rgba(0,0,0,.18)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+            <span style={{fontSize:16,flexShrink:0}}>{"👤"}</span>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}>Mitarbeiter-Modus</div>
+              <div style={{fontSize:9,opacity:.7,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Du arbeitest gerade als Mitarbeiter/in</div>
+            </div>
+          </div>
+          <button onClick={onSwitchToAdmin}
+            style={{flexShrink:0,display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,.20)",
+              border:"1px solid rgba(255,255,255,.4)",borderRadius:10,padding:"9px 13px",cursor:"pointer",
+              fontSize:12,fontWeight:800,color:"#fff",whiteSpace:"nowrap"}}>
+            {"🔁 Admin-Modus"}
+          </button>
+        </div>
+      )}
       {showSettings && (
         <SettingsView
           user={user}
@@ -2559,26 +2582,14 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             )}
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
-            <div style={{display:"flex",gap:6}}>
-              {onSwitchToAdmin&&(
-                <button onClick={onSwitchToAdmin}
-                  style={{display:"flex",alignItems:"center",gap:5,background:"rgba(255,255,255,.16)",
-                    border:"0.5px solid rgba(255,255,255,.25)",borderRadius:10,padding:"8px 11px",cursor:"pointer",
-                    fontSize:12,fontWeight:700,color:"#fff",lineHeight:1}}>
-                  {"👑 Admin-Ansicht"}
-                </button>
-              )}
-              <button onClick={()=>setShowSettings(true)}
-                style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
-                {"⚙️"}
-              </button>
-            </div>
-            {!onSwitchToAdmin&&(
-              <button onClick={onLogout}
-                style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
-                Abmelden
-              </button>
-            )}
+            <button onClick={()=>setShowSettings(true)}
+              style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
+              {"⚙️"}
+            </button>
+            <button onClick={onLogout}
+              style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
+              Abmelden
+            </button>
           </div>
         </div>
         <div style={{marginTop:14,background:"rgba(255,255,255,.07)",borderRadius:12,padding:"11px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -4935,10 +4946,10 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             <div style={{display:"flex",gap:6}}>
               {onSwitchToStaff&&(
                 <button onClick={onSwitchToStaff}
-                  style={{display:"flex",alignItems:"center",gap:5,background:"rgba(255,255,255,.16)",
-                    border:"0.5px solid rgba(255,255,255,.25)",borderRadius:10,padding:"8px 11px",cursor:"pointer",
-                    fontSize:12,fontWeight:700,color:"#fff",lineHeight:1}}>
-                  {"👤 Staff-Ansicht"}
+                  style={{display:"flex",alignItems:"center",gap:5,background:"rgba(255,255,255,.18)",
+                    border:"0.5px solid rgba(255,255,255,.3)",borderRadius:10,padding:"8px 12px",cursor:"pointer",
+                    fontSize:12,fontWeight:800,color:"#fff",lineHeight:1,whiteSpace:"nowrap"}}>
+                  {"🔁 Mitarbeiter-Modus"}
                 </button>
               )}
               <button onClick={()=>setShowMgrSettings(true)}
