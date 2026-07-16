@@ -158,32 +158,12 @@ function deleteUserData(userKey, vorname) {
   const fb = window._fbRef;
   const db = window._fbDb;
   const rm = window._fbRemove;
-  // PIN 삭제
+  // PIN 삭제 (로그인 정보만 제거)
   rm(fb(db, `pins/${userKey}`)).catch(()=>{});
-  // records 삭제 (해당 유저)
-  if (window._fbGet) {
-    window._fbGet(fb(db, "records")).then(snap=>{
-      const data = snap.val();
-      if (!data) return;
-      Object.entries(data).forEach(([k,v])=>{
-        if (v && v.user === vorname) rm(fb(db, `records/${k}`)).catch(()=>{});
-      });
-    }).catch(()=>{});
-  }
-  // notifications 삭제 (해당 유저)
-  if (window._fbGet) {
-    window._fbGet(fb(db, "notifications")).then(snap=>{
-      const data = snap.val();
-      if (!data) return;
-      Object.entries(data).forEach(([k,v])=>{
-        if (v && (v.user === vorname || k.includes(userKey) || k.toLowerCase().includes((vorname||"").toLowerCase()))) {
-          rm(fb(db, `notifications/${k}`)).catch(()=>{});
-        }
-      });
-    }).catch(()=>{});
-  }
+  // ⚠️ records(출퇴근 기록)와 schedule(근무표)은 삭제하지 않고 보존한다.
+  //    → 직원을 삭제해도 관리자 Dienstplan/Statistik 데이터는 그대로 유지됨.
   // localStorage PIN 삭제
-  localStorage.removeItem(`pin_${userKey}`);
+  try{ localStorage.removeItem(`pin_${userKey}`); }catch{}
 }
 
 // 시간 입력 컴포넌트 (24시간 도르래 방식)
@@ -1134,6 +1114,30 @@ async function patchScheduleShift(name, date, patch) {
   } catch (e) { console.error("patchScheduleShift error:", e); }
 }
 
+// (name·date) shift를 root + 월별 노드에서 삭제
+async function deleteScheduleShift(name, date) {
+  if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet)) return;
+  try {
+    const mk = "schedule_" + date.slice(0,7).replace("-","_");
+    const snap = await window._fbGet(window._fbRef(window._fbDb, mk));
+    const ex = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
+    if (ex[name]) {
+      let arr = Array.isArray(ex[name]) ? ex[name] : Object.values(ex[name] || {});
+      arr = arr.filter(s => (s.date || s.d) !== date);
+      ex[name] = Object.fromEntries(arr.map((s,i)=>[String(i), s]));
+      await window._fbSet(window._fbRef(window._fbDb, mk), ex);
+    }
+    const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
+    const root = rsnap.val() ? JSON.parse(JSON.stringify(rsnap.val())) : {};
+    if (root[name]) {
+      let rarr = Array.isArray(root[name]) ? root[name] : Object.values(root[name] || {});
+      rarr = rarr.filter(s => (s.d || s.date) !== date);
+      root[name] = rarr;
+      await window._fbSet(window._fbRef(window._fbDb, "schedule"), root);
+    }
+  } catch (e) { console.error("deleteScheduleShift error:", e); }
+}
+
 function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
   const d = s.d || s.date;
   const f = s.f || s.filiale;
@@ -1456,6 +1460,27 @@ function SchichtboerseView({ userName, users, isAdmin }) {
 
   // ── [3] 근무 이어받기 → 자동 승인 + 관리자 확인 알림 ─────────
   async function uebernehmen(schicht) {
+    // ⛔ 중복 근무 방지: 같은 날 본인 기존 근무와 시간이 1분이라도 겹치면 차단
+    try{
+      if(window._fbDb&&window._fbRef&&window._fbGet&&schicht.time&&schicht.time.includes("-")){
+        const snap=await window._fbGet(window._fbRef(window._fbDb,"schedule"));
+        const sched=snap.val()||{};
+        const mine=!sched[userName]?[]:Array.isArray(sched[userName])?sched[userName]:Object.values(sched[userName]);
+        const [ns,ne]=schicht.time.split("-").map(t=>parseMinutes(t));
+        const conflict=mine.some(s=>{
+          if((s.d||s.date)!==schicht.date) return false;
+          if(s.status==="getauscht"||s.status==="freigegeben") return false; // 이미 넘긴 근무는 제외
+          const tm=s.t||s.time; if(!tm||!tm.includes("-")) return false;
+          const [es,ee]=tm.split("-").map(t=>parseMinutes(t));
+          if(ns==null||ne==null||es==null||ee==null) return false;
+          return ns<ee && es<ne; // 구간 겹침
+        });
+        if(conflict){
+          alert("⛔ Überschneidung!\n\nDiese Schicht überschneidet sich mit einer deiner bestehenden Schichten am selben Tag. Übernahme nicht möglich.");
+          return;
+        }
+      }
+    }catch(e){ console.error("overlap check error:",e); }
     // 1) schedule 자동 업데이트 (관리자 승인 불필요)
     if (window._fbDb && window._fbRef && window._fbGet && window._fbSet) {
       try {
@@ -2356,7 +2381,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 }
 
 //  MITARBEITER 
-function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,setAntraege,onLogout,csvCtx,onSwitchToAdmin}){
+function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,setAntraege,onLogout,csvCtx,onSwitchToAdmin,hybridStaff}){
   const user=(Array.isArray(users)?users:[]).find(u=>u.key===userKey);
   const now=useNow();
   const [tab,setTab]=useState("home");
@@ -2569,7 +2594,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           onLogout={onLogout}
           onClose={()=>setShowSettings(false)}
         />)}
-      <div style={S.hdr}>
+      <div style={{...S.hdr,...(hybridStaff?{paddingTop:16,paddingBottom:18}:{})}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
             <div style={{fontSize:11,opacity:.45,marginBottom:3,letterSpacing:".06em",textTransform:"uppercase"}}>{"teeamo Münster"}</div>
@@ -2790,7 +2815,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
       {tab==="dienstplan"&&(
         <div style={{padding:"14px"}}>
-          <div style={{marginBottom:12}}><KalenderView csvCtx={csvCtx} userName={user.vorname} records={records} users={users}/></div>
+          <DienstplanKalender schedule={scheduleData} records={records} highlightName={user.vorname}/>
         </div>
       )}
 
@@ -3762,6 +3787,135 @@ function NachMitarbeiterAntrag({name, d, nList, approveNachtrag, rejectNachtrag}
   );
 }
 
+// ── 공용 Dienstplan 캘린더: 월 달력 + 선택일의 지점별 근무자 리스트 ──
+//    highlightName이 주어지면(직원 뷰) 본인 근무를 강조. 안전 렌더링(정규화)으로 크래시 방지.
+function DienstplanKalender({ schedule, records, highlightName, allowDelete }) {
+  const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
+  const filShort = { "TEEAMO Arkaden":"Arkaden","TEEAMO Aegidiimarkt":"Aegidiimarkt","TEEnJOY":"TEEnJOY" };
+  const todayStr = today();
+  const [calYM, setCalYM] = useState(()=>{ const p=todayStr.split("-"); return {y:+p[0], m:(+p[1])-1}; });
+  const [selDate, setSelDate] = useState(todayStr);
+
+  // 날짜별 근무 인덱스 (안전 정규화)
+  const byDate = React.useMemo(()=>{
+    const map={};
+    Object.entries(schedule||{}).forEach(([name,sh])=>{
+      norm(sh).forEach(s=>{
+        if(!s) return;
+        const d=s.date||s.d; if(!d) return;
+        (map[d]=map[d]||[]).push({
+          name, filiale:s.filiale||s.f||"", time:s.time||s.t||"",
+          status:s.status||null, getauschtMit:s.getauschtMit||null, getauschtVon:s.getauschtVon||null
+        });
+      });
+    });
+    return map;
+  },[schedule]);
+
+  const daysInMonth=new Date(calYM.y, calYM.m+1, 0).getDate();
+  const firstDow=(new Date(calYM.y, calYM.m, 1).getDay()+6)%7;
+  const cells=[]; for(let i=0;i<firstDow;i++) cells.push(null);
+  for(let d=1;d<=daysInMonth;d++) cells.push(d);
+  const ymStr=d=>calYM.y+"-"+String(calYM.m+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+  const calLabel=new Date(calYM.y, calYM.m, 1).toLocaleDateString("de-DE",{month:"long",year:"numeric"});
+  const navBtn={border:"none",background:C.bg,borderRadius:8,width:30,height:30,fontSize:15,cursor:"pointer",color:C.text};
+
+  const dayShifts=(byDate[selDate]||[]).slice()
+    .sort((a,b)=>(a.filiale||"").localeCompare(b.filiale||"")||(a.time||"").localeCompare(b.time||""));
+  const byFil={}; dayShifts.forEach(r=>{ (byFil[r.filiale]=byFil[r.filiale]||[]).push(r); });
+  const recFor=name=> selDate!==todayStr ? null
+    : (Array.isArray(records)?records:[]).find(r=>r.user===name&&r.date===selDate);
+
+  return (
+    <div>
+      {/* 달력 */}
+      <div style={{border:"1px solid "+C.border,borderRadius:14,padding:"12px",marginBottom:14,background:"#fff"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <button onClick={()=>setCalYM(p=>{const m=p.m-1;return m<0?{y:p.y-1,m:11}:{y:p.y,m};})} style={navBtn}>{"‹"}</button>
+          <div style={{fontSize:13,fontWeight:800,color:C.text}}>{calLabel}</div>
+          <button onClick={()=>setCalYM(p=>{const m=p.m+1;return m>11?{y:p.y+1,m:0}:{y:p.y,m};})} style={navBtn}>{"›"}</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:4}}>
+          {["Mo","Di","Mi","Do","Fr","Sa","So"].map(w=><div key={w} style={{textAlign:"center",fontSize:9,fontWeight:700,color:C.muted}}>{w}</div>)}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+          {cells.map((d,i)=>{
+            if(d===null) return <div key={"e"+i}/>;
+            const ds=ymStr(d);
+            const shifts=byDate[ds]||[];
+            const mine=highlightName&&shifts.some(s=>s.name===highlightName);
+            const isSel=ds===selDate;
+            const isToday=ds===todayStr;
+            return(
+              <button key={ds} onClick={()=>setSelDate(ds)}
+                style={{aspectRatio:"1",borderRadius:9,cursor:"pointer",position:"relative",padding:0,
+                  border:isSel?"2px solid "+C.navy:isToday?"1.5px solid "+C.mint:"1px solid "+C.border,
+                  background:isSel?C.navy:mine?C.mintLight:"#fff",color:isSel?"#fff":C.text,
+                  display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}}>
+                <span style={{fontSize:12,fontWeight:mine||isSel?800:600}}>{d}</span>
+                {shifts.length>0&&(
+                  <span style={{width:5,height:5,borderRadius:"50%",background:isSel?"#fff":mine?C.mintDark:C.muted}}/>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 선택일 상세: 지점별 근무자 */}
+      <div>
+        <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>
+          {new Date(selDate).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+        </div>
+        {dayShifts.length===0 ? (
+          <div style={{...S.card,textAlign:"center",padding:"22px",color:C.muted,fontSize:12}}>Keine Schichten an diesem Tag.</div>
+        ) : (
+          Object.keys(byFil).sort().map(fil=>(
+            <div key={fil} style={{marginBottom:12}}>
+              <div style={{fontSize:10,fontWeight:800,color:C.mintDark,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>
+                {"📍 "+(filShort[fil]||fil||"—")}
+              </div>
+              {byFil[fil].map((r,idx)=>{
+                const isMine=highlightName&&r.name===highlightName;
+                const rec=recFor(r.name);
+                const transl=r.status==="freigegeben"||r.status==="getauscht";
+                return(
+                  <div key={fil+idx} style={{...S.card,display:"flex",alignItems:"center",gap:10,padding:"9px 12px",marginBottom:6,
+                    opacity:transl?0.55:1,
+                    border:isMine?"1.5px solid "+C.mint:"1px solid "+C.border,
+                    background:isMine?C.mintLight:"#fff"}}>
+                    <div style={{width:32,height:32,borderRadius:"50%",background:isMine?C.mintDark:C.navy,color:"#fff",
+                      display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,flexShrink:0}}>
+                      {(r.name||"?").slice(0,2)}
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>
+                        {r.name}{isMine&&<span style={{fontSize:9,color:C.mintDark,marginLeft:6,fontWeight:800}}>(Du)</span>}
+                      </div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:1}}>
+                        {r.time||"—"}{rec?.aus?" · ✅ Feierabend":rec?.ein?" · 🟢 Aktiv":""}
+                      </div>
+                      {r.status==="freigegeben"&&<div style={{fontSize:9,fontWeight:700,color:"#b45309",marginTop:1}}>{"🔄 Freigegeben"}</div>}
+                      {r.status==="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>{"🔄 Getauscht mit "+(r.getauschtMit||"?")}</div>}
+                      {r.getauschtVon&&r.status!=="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>{"✔️ Getauscht mit "+r.getauschtVon}</div>}
+                    </div>
+                    {allowDelete&&(
+                      <button onClick={()=>{ if(window.confirm(r.name+" · "+selDate+"\nSchicht löschen?")) deleteScheduleShift(r.name, selDate); }}
+                        style={{flexShrink:0,width:28,height:28,borderRadius:8,border:"1px solid "+C.border,
+                          background:C.redLight,color:C.red,fontSize:14,fontWeight:700,cursor:"pointer",
+                          display:"flex",alignItems:"center",justifyContent:"center"}}>{"×"}</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AdminDienstplanView({ records, setRecords, users, userKey, manager, csvCtx, schedule, antraege, setAntraege }) {
   const [viewMode, setViewMode] = useState("plan");
   const [openEmp, setOpenEmp] = useState(null);
@@ -3896,10 +4050,9 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
       {/*   */}
       <div style={{display:"flex",gap:0,margin:"14px 14px 0",borderRadius:12,overflow:"hidden",border:`1px solid ${C.border}`}}>
         {[{id:"plan",l:"📋 Plan"},
-          {id:"by_emp",l:"👤 Nach Mitarbeiter"},
-          {id:"by_date",l:"📅 Nach Datum"}].map(({id,l})=>(
+          {id:"by_emp",l:"👤 Nach Mitarbeiter"}].map(({id,l})=>(
           <button key={id} onClick={()=>setViewMode(id)}
-            style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",fontSize:10,fontWeight:700,
+            style={{flex:1,padding:"11px 4px",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
               background:viewMode===id?C.navy:"#fff",
               color:viewMode===id?"#fff":C.muted,transition:"all .15s"}}>
             {l}
@@ -3907,22 +4060,19 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
         ))}
       </div>
 
-      {/*    ( ) */}
+      {/* Plan: 근무 추가 + 캘린더(선택일 지점별 리스트) */}
       {viewMode==="plan"&&(
         <div style={{padding:"14px"}}>
-          {!MANAGERS.includes(userKey)&&manager?.vorname&&(
-            <div style={{marginBottom:12}}>
-              <KalenderView csvCtx={csvCtx} userName={manager.vorname} records={records} users={users}/>
-            </div>
-          )}
           <DienstplanUploadView users={users}
             selMonth={selMonth}
             onScheduleSaved={(mk, pd) => {
-              // allMonthSchedules 즉시 갱신 (Firebase 재로드 불필요)
               const fbFmt = Object.fromEntries(Object.entries(pd).map(([n,s])=>[n,Object.fromEntries((s||[]).map((x,i)=>[String(i),x]))]));
               setAllMonthSchedules(prev => ({...prev, [mk]: fbFmt}));
-              setSelMonth(mk);  // 업로드한 달로 자동 전환
+              setSelMonth(mk);
             }}/>
+          <div style={{marginTop:16}}>
+            <DienstplanKalender schedule={schedule} records={records} allowDelete={true}/>
+          </div>
         </div>
       )}
 
@@ -4018,127 +4168,6 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
       )}
 
       {/*    */}
-      {viewMode==="by_date"&&(
-        <div style={{padding:"14px"}}>
-          {allDates.length===0&&(
-            <div style={{textAlign:"center",color:C.muted,fontSize:13,padding:"30px 0"}}>
-              Kein Dienstplan vorhanden. Bitte erst hochladen & analysieren.
-            </div>
-          )}
-          {(()=>{
-            // KW  
-            function getKW(dateStr) {
-              const d=new Date(dateStr);
-              const jan1=new Date(d.getFullYear(),0,1);
-              const dayOfYear=Math.floor((d-jan1)/86400000)+1;
-              const dayOfWeek=jan1.getDay()||7;
-              return Math.ceil((dayOfYear+dayOfWeek-1)/7);
-            }
-            function getMonthYear(dateStr) {
-              const d=new Date(dateStr);
-              return d.toLocaleDateString("de-DE",{month:"long",year:"numeric"});
-            }
-            // allDates  KW  
-            const weeks={};
-            allDates.forEach(d=>{
-              const kw=getKW(d);
-              const yr=new Date(d).getFullYear();
-              const key=`${yr}-KW${String(kw).padStart(2,"0")}`;
-              if(!weeks[key]) weeks[key]={kw,yr,dates:[]};
-              weeks[key].dates.push(d);
-            });
-            const weekKeys=Object.keys(weeks).sort();
-            const WOCHENTAGE=["So","Mo","Di","Mi","Do","Fr","Sa"];
-            const WOCHENTAGE_LONG=["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
-            const todayStr=today();
-            let lastMonth="";
-            return weekKeys.map(wk=>{
-              const {kw,yr,dates}=weeks[wk];
-              const monthLabel=getMonthYear(dates[0]);
-              const showMonth=monthLabel!==lastMonth;
-              if(showMonth) lastMonth=monthLabel;
-              return(
-                <div key={wk}>
-                  {showMonth&&(
-                    <div style={{fontSize:18,fontWeight:800,color:C.navy,marginBottom:4,marginTop:showMonth&&wk!==weekKeys[0]?16:0}}>
-                      {monthLabel}
-                    </div>
-                  )}
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,marginTop:8}}>
-                    <div style={{flex:1,height:1,background:C.border}}/>
-                    <span style={{fontSize:11,fontWeight:800,color:C.muted,whiteSpace:"nowrap"}}>KW {kw}</span>
-                    <div style={{flex:1,height:1,background:C.border}}/>
-                  </div>
-                  {dates.map(d=>{
-                    const isOpen=openDate===d;
-                    const dow=new Date(d).getDay();
-                    const dayNum=new Date(d).getDate();
-                    // schedule  
-                    const allNamesForDay=Object.keys(schedule||{}).filter(name=>
-                      (()=>{const arr=!schedule[name]?[]:Array.isArray(schedule[name])?schedule[name]:Object.values(schedule[name]);return arr.some(s=>(s.date||s.d)===d);})()
-                    );
-                    return(
-                      <React.Fragment key={d}>
-                      <div style={{...S.card,marginBottom:6,padding:0,overflow:"hidden",marginBottom:6}}>
-                        <button onClick={()=>setOpenDate(isOpen?null:d)}
-                          style={{width:"100%",padding:"11px 14px",background:"none",border:"none",cursor:"pointer",
-                            display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:10}}>
-                            <div style={{width:36,height:36,borderRadius:10,
-                              background:d===todayStr?C.navy:C.bg,
-                              display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                              <span style={{fontSize:8,fontWeight:700,color:d===todayStr?"rgba(255,255,255,.6)":C.muted}}>
-                                {WOCHENTAGE[dow]}
-                              </span>
-                              <span style={{fontSize:14,fontWeight:800,color:d===todayStr?"#fff":C.text}}>
-                                {dayNum}.
-                              </span>
-                            </div>
-                            <div>
-                              <div style={{fontSize:13,fontWeight:800,color:C.text}}>
-                                {WOCHENTAGE_LONG[dow]}
-                              </div>
-                              <div style={{fontSize:10,color:C.muted}}>{allNamesForDay.length} Personen geplant</div>
-                            </div>
-                          </div>
-                          <span style={{fontSize:12,color:C.muted}}>{isOpen?"▲":"▼"}</span>
-                        </button>
-                        {isOpen&&(
-                          <div style={{borderTop:`1px solid ${C.border}`}}>
-                            {FILIALEN.map(fil=>{
-                              const filNames=allNamesForDay.filter(name=>{
-                                const arr=!schedule[name]?[]:Array.isArray(schedule[name])?schedule[name]:Object.values(schedule[name]);
-                                const sh=arr.find(s=>(s.date||s.d)===d);
-                                return sh&&(sh.filiale||sh.f)===fil;
-                              });
-                              if(filNames.length===0) return null;
-                              return(
-                                <div key={fil}>
-                                  <div style={{padding:"6px 14px",background:C.bg,fontSize:10,fontWeight:700,color:C.muted}}>
-                                    {filialInit(fil)} · {fil}
-                                  </div>
-                                  {filNames.map((name,i)=>(
-                                    <NachDatumFilRow key={name+i} name={name} d={d} t={t}
-                                      schedule={schedule} users={users} records={records}
-                                      todayStr={todayStr} C={C} S={S}/>
-                                  ))}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                      <NachMitarbeiterAntrag d={d} nList={nList}
-                        approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag}/>
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-              );
-            });
-          })()}
-        </div>
-      )}
     </div>
   );
 }
@@ -4484,60 +4513,17 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
         </div>
       )}
 
-      {/* ── 현재 월 플랜 (읽기 + 삭제) ── */}
-      {sortedDates.length===0 ? (
-        <div style={{textAlign:"center",padding:"32px 14px",color:C.muted}}>
-          <div style={{fontSize:30,marginBottom:8}}>📋</div>
-          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:3}}>Noch kein Dienstplan</div>
-          <div style={{fontSize:11}}>Oben auf „+ Schicht hinzufügen“ tippen.</div>
+      {msg && !showAdd && (
+        <div style={{fontSize:11,fontWeight:700,padding:"9px 12px",borderRadius:9,marginTop:4,
+          background:msg.t==="ok"?"#dcfce7":"#fee2e2",color:msg.t==="ok"?"#15803d":C.red}}>
+          {msg.m}
         </div>
-      ) : (
-        sortedDates.map(d=>(
-          <div key={d} style={{marginBottom:12}}>
-            <div style={{fontSize:11,fontWeight:800,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>
-              {new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"2-digit",month:"2-digit"})}
-            </div>
-            {byDate[d].sort((a,b)=>(a.time||"").localeCompare(b.time||"")).map((row,i)=>{
-              const freigegeben = row.status==="freigegeben";
-              const getauscht   = row.status==="getauscht";
-              return(
-                <div key={d+"_"+row.name+"_"+i}
-                  style={{...S.card,display:"flex",alignItems:"center",gap:10,padding:"10px 12px",marginBottom:6,
-                    opacity:(freigegeben||getauscht)?0.55:1}}>
-                  <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,color:"#fff",
-                    display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,flexShrink:0}}>
-                    {(row.name||"?").slice(0,2)}
-                  </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:700,color:C.text}}>{row.name}</div>
-                    <div style={{fontSize:10,color:C.muted,marginTop:1}}>
-                      {(filShort[row.filiale]||row.filiale)}{row.time?" · "+row.time:""}
-                    </div>
-                    {freigegeben && (
-                      <div style={{fontSize:10,fontWeight:700,color:"#b45309",marginTop:2}}>🔄 Freigegeben (wartet auf Tausch)</div>
-                    )}
-                    {getauscht && (
-                      <div style={{fontSize:10,fontWeight:700,color:C.mintDark,marginTop:2}}>✔️ Getauscht mit {row.getauschtMit||"?"}</div>
-                    )}
-                    {row.getauschtVon && !getauscht && (
-                      <div style={{fontSize:10,fontWeight:700,color:C.mintDark,marginTop:2}}>✔️ Getauscht mit {row.getauschtVon}</div>
-                    )}
-                  </div>
-                  <button onClick={()=>deleteShift(row.name,d)}
-                    style={{flexShrink:0,width:28,height:28,borderRadius:8,border:"1px solid "+C.border,
-                      background:C.redLight,color:C.red,fontSize:14,fontWeight:700,cursor:"pointer",
-                      display:"flex",alignItems:"center",justifyContent:"center"}}>{"×"}</button>
-                </div>
-              );
-            })}
-          </div>
-        ))
       )}
     </div>
   );
 }
 
-function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx,onSwitchToStaff}){
+function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx,onSwitchToStaff,hybrid}){
   const [tab,setTab]=useState("uebersicht");
   const [detailKey,setDetailKey]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
@@ -4640,6 +4626,19 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   const boerseMatchNotifs = Object.entries(notifications||{})
     .filter(([,n])=>n.type==="schichtboerse_match"&&!n.gelesen&&MANAGERS.includes(n.zustaendig))
     .sort(([,a],[,b])=>b.ts-a.ts);
+  // Schichtbörse 탭 진입 시 매칭 알림을 읽음 처리 → 하단 탭바 배지 즉시 0
+  useEffect(()=>{
+    if(tab!=="schichtboerse_mgr") return;
+    const keys=boerseMatchNotifs.map(([k])=>k);
+    if(keys.length===0) return;
+    setNotifications(prev=>{
+      const next={...(prev||{})};
+      keys.forEach(k=>{ next[k]={...(next[k]||{}),gelesen:true}; });
+      return next;
+    });
+    if(window._fbSet&&window._fbRef&&window._fbDb)
+      keys.forEach(k=>window._fbSet(window._fbRef(window._fbDb,"notifications/"+k+"/gelesen"),true).catch(()=>{}));
+  },[tab]);
   const pendingNotifs = Object.entries(notifications||{})
     .filter(([,n]) => n.zustaendig === userKey && !n.gelesen && !n.bearbeitetVon)
     .sort((a,b) => b[1].ts - a[1].ts);
@@ -4935,7 +4934,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           isAdmin={true}
         />
       )}
-      <div style={S.hdr}>
+      <div style={{...S.hdr,...(hybrid?{paddingTop:16,paddingBottom:18}:{})}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
             <div style={{fontSize:11,opacity:.45,marginBottom:3,letterSpacing:".06em",textTransform:"uppercase"}}>{"teeamo · Admin"}</div>
@@ -5065,34 +5064,29 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
               ))}
             </div>
           )}
-          {/* Schichtbörse 매칭 로그 */}
-          {Object.entries(notifications||{}).filter(([,n])=>n.type==="schichtboerse_match").slice(0,5).length>0&&(
-            <div style={{padding:"8px 14px 0"}}>
-              <div style={{fontSize:10,fontWeight:700,color:"#1d4ed8",marginBottom:6,textTransform:"uppercase"}}>
-                🔔 Schichtbörse Log
-              </div>
-              {Object.entries(notifications||{}).filter(([,n])=>n.type==="schichtboerse_match")
-                .sort(([,a],[,b])=>b.ts-a.ts).slice(0,5).map(([k,n])=>(
-                <div key={k} style={{...S.card,marginBottom:6,border:"1px solid #bfdbfe",background:"#eff6ff",opacity:n.gelesen?0.6:1}}>
-                  <div style={{fontSize:11,fontWeight:700,color:"#1d4ed8"}}>{"✅ "+n.angeboten_von+" → "+n.uebernommen_von}</div>
-                  <div style={{fontSize:9,color:C.muted,marginTop:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}</div>
+          {/* Schichtbörse 매칭 로그 — 매니저별 중복 제거, 최신순, 검은색 텍스트 */}
+          {(()=>{
+            const matches=Object.entries(notifications||{}).filter(([,n])=>n.type==="schichtboerse_match");
+            const seen=new Set(); const uniq=[];
+            matches.sort(([,a],[,b])=>(b.ts||0)-(a.ts||0)).forEach(([k,n])=>{
+              const sig=(n.angeboten_von||"")+"|"+(n.uebernommen_von||"")+"|"+(n.date||"")+"|"+(n.time||"")+"|"+(n.filiale||"");
+              if(seen.has(sig)) return; seen.add(sig); uniq.push([k,n]);
+            });
+            if(uniq.length===0) return null;
+            return(
+              <div style={{padding:"8px 14px 0"}}>
+                <div style={{fontSize:10,fontWeight:700,color:C.text,marginBottom:6,textTransform:"uppercase"}}>
+                  {"🔔 Schichtbörse Log"}
                 </div>
-              ))}
-            </div>
-          )}
-          <AntraegeTab
-          antraege={antraege}
-          setAntraege={setAntraege}
-          tauschAntraege={tauschAntraege}
-          setTauschAntraege={setTauschAntraege}
-          records={records}
-          setRecords={setRecords}
-          aTab={aTab}
-          setATab={setATab}
-          openAId={openAId}
-          setOpenAId={setOpenAId}
-          userKey={userKey}
-        />
+                {uniq.slice(0,8).map(([k,n])=>(
+                  <div key={k} style={{...S.card,marginBottom:6,border:"1px solid "+C.border}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>{"✅ "+(n.angeboten_von||"?")+" → "+(n.uebernommen_von||"?")}</div>
+                    <div style={{fontSize:9,color:C.muted,marginTop:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}{n.time?" · "+n.time:""}</div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -5321,8 +5315,28 @@ function App(){
     <div style={{maxWidth:500,margin:"0 auto",minHeight:"100vh",background:C.bg}}>
       {screen==="login"&&<LoginView onLogin={handleLogin} users={users} setUsers={setUsersFirebase} getPin={getPin} setPin={setPin} csvCtx={csvCtx}/>}
       {screen==="mitarbeiter"&&<MitarbeiterView userKey={userKey} users={users} setUsers={setUsersFirebase} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx}/>}
-      {screen==="manager"&&!staffView&&<ManagerView records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsersFirebase} csvCtx={csvCtx} onSwitchToStaff={()=>setStaffView(true)}/>}
-      {screen==="manager"&&staffView&&<MitarbeiterView userKey={userKey} users={users} setUsers={setUsersFirebase} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx} onSwitchToAdmin={()=>setStaffView(false)}/>}
+      {screen==="manager"&&(
+        <div>
+          {/* 🔁 상단 고정 모드 전환 탭 (하이브리드 관리자) */}
+          <div style={{position:"sticky",top:0,zIndex:300,background:"#0f1f2a",
+            padding:"8px 10px calc(8px + env(safe-area-inset-top,0px))",paddingTop:"max(8px,env(safe-area-inset-top))"}}>
+            <div style={{display:"flex",background:"rgba(255,255,255,.10)",borderRadius:10,padding:3,maxWidth:420,margin:"0 auto"}}>
+              {[{id:false,l:"👑 Admin-Modus"},{id:true,l:"👤 Mitarbeiter-Modus"}].map(o=>(
+                <button key={String(o.id)} onClick={()=>setStaffView(o.id)}
+                  style={{flex:1,padding:"9px 6px",border:"none",borderRadius:8,cursor:"pointer",
+                    fontSize:12,fontWeight:800,transition:"all .15s",
+                    background:staffView===o.id?"#fff":"transparent",
+                    color:staffView===o.id?"#0f1f2a":"rgba(255,255,255,.75)"}}>
+                  {o.l}
+                </button>
+              ))}
+            </div>
+          </div>
+          {!staffView
+            ? <ManagerView records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsersFirebase} csvCtx={csvCtx} hybrid={true}/>
+            : <MitarbeiterView userKey={userKey} users={users} setUsers={setUsersFirebase} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx} hybridStaff={true}/>}
+        </div>
+      )}
     </div>
   );
 }
