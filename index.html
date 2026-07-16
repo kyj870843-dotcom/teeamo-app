@@ -2346,7 +2346,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
 }
 
 //  MITARBEITER 
-function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,setAntraege,onLogout,csvCtx}){
+function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,setAntraege,onLogout,csvCtx,onSwitchToAdmin}){
   const user=(Array.isArray(users)?users:[]).find(u=>u.key===userKey);
   const now=useNow();
   const [tab,setTab]=useState("home");
@@ -2551,14 +2551,26 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             )}
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
-            <button onClick={()=>setShowSettings(true)}
-              style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
-              {"⚙️"}
-            </button>
-            <button onClick={onLogout}
-              style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
-              Abmelden
-            </button>
+            <div style={{display:"flex",gap:6}}>
+              {onSwitchToAdmin&&(
+                <button onClick={onSwitchToAdmin}
+                  style={{display:"flex",alignItems:"center",gap:5,background:"rgba(255,255,255,.16)",
+                    border:"0.5px solid rgba(255,255,255,.25)",borderRadius:10,padding:"8px 11px",cursor:"pointer",
+                    fontSize:12,fontWeight:700,color:"#fff",lineHeight:1}}>
+                  {"👑 Admin-Ansicht"}
+                </button>
+              )}
+              <button onClick={()=>setShowSettings(true)}
+                style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
+                {"⚙️"}
+              </button>
+            </div>
+            {!onSwitchToAdmin&&(
+              <button onClick={onLogout}
+                style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
+                Abmelden
+              </button>
+            )}
           </div>
         </div>
         <div style={{marginTop:14,background:"rgba(255,255,255,.07)",borderRadius:12,padding:"11px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -2881,7 +2893,11 @@ function StatistikTab({records,users}){
     return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
   });
   const [exported,setExported]=useState(null);
-  const empList=(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort(byName);
+  // 근무 기록이 있는 계정은 관리자(하이브리드 포함)여도 정산 목록에 포함
+  const _workerNames = new Set((Array.isArray(records)?records:[]).map(r=>r.user));
+  const empList=(Array.isArray(users)?users:[])
+    .filter(u=>!MANAGERS.includes(u.key) || _workerNames.has(u.vorname))
+    .sort(byName);
   const monthRecs=records.filter(r=>r.date.startsWith(selMonth)&&r.aus);
 
   function downloadCSV(rows,filename){
@@ -4502,7 +4518,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
   );
 }
 
-function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx}){
+function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx,onSwitchToStaff}){
   const [tab,setTab]=useState("uebersicht");
   const [detailKey,setDetailKey]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
@@ -4908,10 +4924,20 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             <div style={{fontSize:11,opacity:.5,marginTop:1}}>Admin</div>
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
-            <button onClick={()=>setShowMgrSettings(true)}
-              style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
-              {"⚙️"}
-            </button>
+            <div style={{display:"flex",gap:6}}>
+              {onSwitchToStaff&&(
+                <button onClick={onSwitchToStaff}
+                  style={{display:"flex",alignItems:"center",gap:5,background:"rgba(255,255,255,.16)",
+                    border:"0.5px solid rgba(255,255,255,.25)",borderRadius:10,padding:"8px 11px",cursor:"pointer",
+                    fontSize:12,fontWeight:700,color:"#fff",lineHeight:1}}>
+                  {"👤 Staff-Ansicht"}
+                </button>
+              )}
+              <button onClick={()=>setShowMgrSettings(true)}
+                style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
+                {"⚙️"}
+              </button>
+            </div>
             <button onClick={onLogout}
               style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
               Abmelden
@@ -5119,6 +5145,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 //  APP ROOT 
 function App(){
   const [screen,setScreen]=useState("login");
+  const [staffView,setStaffView]=useState(false); // 하이브리드 관리자: 직원 뷰로 전환 여부
   React.useEffect(()=>{ loadPinsFromFirebase(); },[]);
   const [userKey,setUserKey]=useState(null);
   const { getPin, setPin, initPins } = usePinStore();
@@ -5174,9 +5201,9 @@ function App(){
   function handleLogin(key){
     const u=(Array.isArray(users)?users:[]).find(x=>x.key===key);
     const isAdmin=MANAGERS.includes(key)||(u&&u.isAdmin);
-    setUserKey(key);setScreen(isAdmin?"manager":"mitarbeiter");
+    setUserKey(key);setStaffView(false);setScreen(isAdmin?"manager":"mitarbeiter");
   }
-  function handleLogout(){setUserKey(null);setScreen("login");}
+  function handleLogout(){setUserKey(null);setStaffView(false);setScreen("login");}
 
   // users setUsers  Firebase   wrapper
   function setUsersFirebase(updater) {
@@ -5275,7 +5302,8 @@ function App(){
     <div style={{maxWidth:500,margin:"0 auto",minHeight:"100vh",background:C.bg}}>
       {screen==="login"&&<LoginView onLogin={handleLogin} users={users} setUsers={setUsersFirebase} getPin={getPin} setPin={setPin} csvCtx={csvCtx}/>}
       {screen==="mitarbeiter"&&<MitarbeiterView userKey={userKey} users={users} setUsers={setUsersFirebase} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx}/>}
-      {screen==="manager"&&<ManagerView records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsersFirebase} csvCtx={csvCtx}/>}
+      {screen==="manager"&&!staffView&&<ManagerView records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} userKey={userKey} users={users} setUsers={setUsersFirebase} csvCtx={csvCtx} onSwitchToStaff={()=>setStaffView(true)}/>}
+      {screen==="manager"&&staffView&&<MitarbeiterView userKey={userKey} users={users} setUsers={setUsersFirebase} records={records} setRecords={setRecords} antraege={antraege} setAntraege={setAntraege} onLogout={handleLogout} csvCtx={csvCtx} onSwitchToAdmin={()=>setStaffView(false)}/>}
     </div>
   );
 }
