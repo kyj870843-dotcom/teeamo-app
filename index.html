@@ -187,14 +187,22 @@ function deleteUserData(userKey, vorname) {
 }
 
 // 시간 입력 컴포넌트 (24시간 도르래 방식)
+// 시간 입력: 숫자만 받아 3~4자리에서 자동으로 콜론(:) 삽입 (11:30). 백스페이스 안전.
+// type="text" + inputMode="numeric" → 모바일 숫자 키패드. onChange는 포맷된 문자열을 넘김.
+function formatTimeStr(raw){
+  const digits=(raw||"").replace(/\D/g,"").slice(0,4);
+  return digits.length<=2 ? digits : digits.slice(0,2)+":"+digits.slice(2);
+}
 function TimeInput({ value, onChange, placeholder, style }) {
   return (
     <input
-      type="time"
-      lang="de-DE"
-      value={value}
-      onChange={e=>onChange(e.target.value)}
-      style={style}
+      type="text"
+      inputMode="numeric"
+      value={value||""}
+      onChange={e=>onChange(formatTimeStr(e.target.value))}
+      placeholder={placeholder||"--:--"}
+      maxLength={5}
+      style={{boxSizing:"border-box",textAlign:"center",...style}}
     />
   );
 }
@@ -4279,13 +4287,13 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
     return (
       <div style={{flex:1,minWidth:0}}>
         <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{label}</div>
-        <input value={val} onChange={e=>updateConfig(d,field,e.target.value)} placeholder="--:--"
-          inputMode="numeric"
-          style={{...S.input,width:"100%",fontSize:14,fontWeight:700,textAlign:"center",padding:"8px 6px",boxSizing:"border-box"}}/>
+        <input value={val} onChange={e=>updateConfig(d,field,formatTimeStr(e.target.value))} placeholder="--:--"
+          type="text" inputMode="numeric" maxLength={5}
+          style={{...S.input,width:"100%",fontSize:14,fontWeight:700,textAlign:"center",padding:"8px 4px",boxSizing:"border-box"}}/>
         <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:5}}>
           {QUICK.map(q=>(
             <button key={field+q} onClick={()=>updateConfig(d,field,q)}
-              style={{fontSize:10,fontWeight:700,padding:"5px 7px",borderRadius:7,cursor:"pointer",flex:"0 0 auto",
+              style={{fontSize:10,fontWeight:700,padding:"5px 6px",borderRadius:7,cursor:"pointer",flex:"0 0 auto",
                 border:"1px solid "+(val===q?C.mintDark:C.border),
                 background:val===q?C.mintDark:"#fff",color:val===q?"#fff":C.text}}>{q}</button>
           ))}
