@@ -1138,6 +1138,112 @@ async function deleteScheduleShift(name, date) {
   } catch (e) { console.error("deleteScheduleShift error:", e); }
 }
 
+// 근무 양도(Schicht freigeben): freieSchichten 게시 + 동료 알림 + schedule 상태 'freigegeben'
+// ⚠️ 이 로직은 데이터 초기화(Reset)와 무관하게 항상 코드에 존재한다(격리/보호).
+function freigebenSchicht({ userName, date, filiale, time, grund, users }) {
+  const schichtId = Date.now();
+  const newFrei = { id:schichtId, date, filiale, time:time||null, note:grund||"", besetzt:false, angeboten_von:userName, ts:schichtId };
+  if (window._fbDb && window._fbRef && window._fbSet) {
+    window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+schichtId), newFrei).catch(()=>{});
+    const dateStr = new Date(date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"});
+    const msgTxt = "📢 [Schichtbörse] "+userName+" gibt Schicht frei! "+dateStr+" · "+filiale+(time?" · "+time:"")+" — Jetzt übernehmen!";
+    (Array.isArray(users)?users:[]).filter(u=>!u.isAdmin&&u.vorname!==userName).forEach(u=>{
+      window._fbSet(window._fbRef(window._fbDb,"notifications/boerse_new_"+schichtId+"_"+u.key),{
+        type:"schichtboerse_new",kategorie:"Schichtbörse",schichtId,
+        zielUser:u.vorname,zielKey:u.key,angeboten_von:userName,
+        date,filiale,time:time||null,text:msgTxt,gelesen:false,ts:schichtId
+      }).catch(()=>{});
+    });
+  }
+  patchScheduleShift(userName, date, {status:"freigegeben", freigabeGrund:grund||""});
+}
+
+// Nachtragen(사후 등록): 자동승인 record 저장 + 관리자 Anträge(Nachtragen) 알림 로그
+function nachtragenSchicht({ userName, date, filiale, ein, aus, setRecords }) {
+  const rec = { id:Date.now(), user:userName, date, filiale:filiale||"", ein, aus, note:"", typ:"nachtrag" };
+  if (typeof setRecords === "function") {
+    setRecords(prev => [...(Array.isArray(prev)?prev:[]), rec]);  // 로컬 + Firebase 전체노드 동기화
+  } else if (window._fbDb && window._fbRef && window._fbPush) {
+    window._fbPush(window._fbRef(window._fbDb,"records"), rec).catch(()=>{});
+  }
+  // 관리자 Anträge(Nachtragen) 알림 로그
+  if (window._fbDb && window._fbRef && window._fbSet) {
+    const ts = Date.now();
+    ["teddy","yeaji","tingting"].forEach(mgr=>{
+      window._fbSet(window._fbRef(window._fbDb,"notifications/nachtrag_log_"+ts+"_"+mgr),{
+        type:"nachtrag_log", kategorie:"Nachtragen", zustaendig:mgr,
+        user:userName, date, filiale:filiale||"", ein, aus,
+        text:"📝 "+userName+" — "+date+" · "+ein+"-"+aus, gelesen:false, ts
+      }).catch(()=>{});
+    });
+  }
+  return rec;
+}
+
+// (name·date)에 shift 추가 (root + 월별). 같은 날 기존 shift는 대체.
+async function addScheduleShift(name, date, filiale, time) {
+  if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !name || !date) return;
+  try {
+    const mk = "schedule_" + date.slice(0,7).replace("-","_");
+    const snap = await window._fbGet(window._fbRef(window._fbDb, mk));
+    const ex = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
+    let arr = Array.isArray(ex[name]) ? ex[name] : Object.values(ex[name] || {});
+    arr = arr.filter(s => (s.date||s.d) !== date);
+    arr.push({ date, filiale, time });
+    ex[name] = Object.fromEntries(arr.map((s,i)=>[String(i), s]));
+    await window._fbSet(window._fbRef(window._fbDb, mk), ex);
+    const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
+    const root = rsnap.val() ? JSON.parse(JSON.stringify(rsnap.val())) : {};
+    let rarr = Array.isArray(root[name]) ? root[name] : Object.values(root[name] || {});
+    rarr = rarr.filter(s => (s.d||s.date) !== date);
+    rarr.push({ d:date, f:filiale, t:time });
+    root[name] = rarr;
+    await window._fbSet(window._fbRef(window._fbDb, "schedule"), root);
+  } catch(e) { console.error("addScheduleShift error:", e); }
+}
+
+// 임시 이름 → 정식 계정으로 데이터 귀속 (schedule + records의 user 이름을 이전)
+async function reassignTempName(tempName, realName) {
+  if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !tempName || !realName || tempName===realName) return;
+  try {
+    // root schedule
+    const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
+    const root = rsnap.val() ? JSON.parse(JSON.stringify(rsnap.val())) : {};
+    if (root[tempName]) {
+      const tArr = Array.isArray(root[tempName]) ? root[tempName] : Object.values(root[tempName]);
+      const rArr = Array.isArray(root[realName]) ? root[realName] : Object.values(root[realName] || {});
+      root[realName] = [...rArr, ...tArr];
+      delete root[tempName];
+      await window._fbSet(window._fbRef(window._fbDb, "schedule"), root);
+    }
+    // 월별 노드 범위
+    const yr = new Date().getFullYear();
+    for (let y=yr-1; y<=yr+2; y++) for (let m=1; m<=12; m++) {
+      const mk = "schedule_" + y + "_" + String(m).padStart(2,"0");
+      const snap = await window._fbGet(window._fbRef(window._fbDb, mk));
+      const data = snap.val();
+      if (!data || !data[tempName]) continue;
+      const md = JSON.parse(JSON.stringify(data));
+      const tArr = Array.isArray(md[tempName]) ? md[tempName] : Object.values(md[tempName]);
+      const rArr = Array.isArray(md[realName]) ? md[realName] : Object.values(md[realName] || {});
+      const merged = [...rArr, ...tArr];
+      md[realName] = Object.fromEntries(merged.map((s,i)=>[String(i), s]));
+      delete md[tempName];
+      await window._fbSet(window._fbRef(window._fbDb, mk), md);
+    }
+    // records의 user 이름 이전
+    const recSnap = await window._fbGet(window._fbRef(window._fbDb, "records"));
+    const recs = recSnap.val();
+    if (recs) {
+      for (const [k,v] of Object.entries(recs)) {
+        if (v && v.user === tempName) {
+          await window._fbSet(window._fbRef(window._fbDb, "records/"+k+"/user"), realName).catch(()=>{});
+        }
+      }
+    }
+  } catch(e) { console.error("reassignTempName error:", e); }
+}
+
 function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
   const d = s.d || s.date;
   const f = s.f || s.filiale;
@@ -1730,6 +1836,8 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   const [regP2,setRegP2]=useState("");
   const [regErr,setRegErr]=useState("");
   const [regRole,setRegRole]=useState("Staff");
+  const [preSchedule]=useFirebase("schedule",{});   // 로그인 전 Dienstplan 실시간 구독
+  const [preRecords]=useFirebase("records",[]);
   const ADMIN_NAMES=["yeaji","tingting","teddy","huy"];
   const safeUsers=Array.isArray(users)?users:[];
   const isAdminName=regV.trim()!==""&&ADMIN_NAMES.some(n=>regV.trim().toLowerCase().includes(n));
@@ -1790,7 +1898,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
         <div style={{fontSize:18,fontWeight:800}}>Dienstplan</div>
         <div style={{fontSize:11,opacity:.45,marginTop:2}}>{"Leseansicht – ohne Anmeldung"}</div>
       </div>
-      <div style={{padding:"14px"}}><KalenderView csvCtx={csvCtx} records={[]}/></div>
+      <div style={{padding:"14px"}}><DienstplanKalender schedule={preSchedule} records={preRecords}/></div>
     </div>
   );
 
@@ -2065,6 +2173,10 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   const [resetConfirm, setResetConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetMsg, setResetMsg] = useState("");
+  // 임시 계정 매칭 (Zuweisen)
+  const [schedForMatch] = useFirebase("schedule", {});
+  const [zuweisenSel, setZuweisenSel] = useState({});
+  const [zuweisenMsg, setZuweisenMsg] = useState("");
 
   // 모든 운영 데이터를 삭제해 완전한 백지 상태로 초기화 (계정/PIN은 유지)
   async function resetDienstplan(){
@@ -2288,6 +2400,47 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             </div>
           )}
         </div>
+
+        {/* 🔗 임시 계정 매칭 (Zuweisen) — 관리자 전용 */}
+        {isAdmin && (()=>{
+          const registered = new Set((Array.isArray(users)?users:[]).map(u=>(u.vorname||"").toLowerCase()));
+          const tempNames = Object.keys(schedForMatch||{})
+            .filter(n=>n && !registered.has(n.toLowerCase()) && !MANAGERS.includes(n.toLowerCase()));
+          const realEmps = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort(byName);
+          return(
+            <div style={{...S.card,marginBottom:12,border:`1px solid ${C.mint}`}}>
+              <div style={{fontSize:12,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"🔗 Temp-Konto zuweisen"}</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:10,lineHeight:1.5}}>
+                {"Im Dienstplan angelegte Temp-Namen (ohne echtes Konto) einem registrierten Konto zuordnen. Alle Schichten & Stempelzeiten werden übertragen."}
+              </div>
+              {zuweisenMsg&&<div style={{fontSize:11,fontWeight:700,color:C.mintDark,marginBottom:8}}>{zuweisenMsg}</div>}
+              {tempNames.length===0 ? (
+                <div style={{fontSize:11,color:C.muted,textAlign:"center",padding:"10px 0"}}>Keine offenen Temp-Namen.</div>
+              ) : tempNames.map(tn=>(
+                <div key={tn} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <div style={{flex:"0 0 auto",fontSize:12,fontWeight:800,color:C.text,minWidth:70,
+                    background:C.yellowLight,color:"#92400e",padding:"6px 8px",borderRadius:8}}>{tn}</div>
+                  <span style={{color:C.muted,flexShrink:0}}>{"→"}</span>
+                  <select value={zuweisenSel[tn]||""} onChange={e=>setZuweisenSel(prev=>({...prev,[tn]:e.target.value}))}
+                    style={{...S.input,flex:1,minWidth:0,fontSize:12,padding:"7px 8px",boxSizing:"border-box"}}>
+                    <option value="">{"— Konto —"}</option>
+                    {realEmps.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
+                  </select>
+                  <button onClick={async()=>{
+                    const real=zuweisenSel[tn];
+                    if(!real) return;
+                    await reassignTempName(tn, real);
+                    setZuweisenMsg("✅ „"+tn+"“ → „"+real+"“ zugewiesen.");
+                    setZuweisenSel(prev=>{ const n={...prev}; delete n[tn]; return n; });
+                    setTimeout(()=>setZuweisenMsg(""),3000);
+                  }} disabled={!zuweisenSel[tn]}
+                    style={{flexShrink:0,padding:"7px 10px",borderRadius:8,border:"none",fontSize:11,fontWeight:800,cursor:zuweisenSel[tn]?"pointer":"not-allowed",
+                      background:zuweisenSel[tn]?C.mintDark:C.border,color:"#fff"}}>{"Zuweisen"}</button>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
 
         {/* 🧹 Dienstplan 초기화 (관리자 전용) */}
         {isAdmin && (
@@ -2815,7 +2968,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
       {tab==="dienstplan"&&(
         <div style={{padding:"14px"}}>
-          <DienstplanKalender schedule={scheduleData} records={records} highlightName={user.vorname}/>
+          <DienstplanKalender schedule={scheduleData} records={records} highlightName={user.vorname} users={users} setRecords={setRecords}/>
         </div>
       )}
 
@@ -3789,12 +3942,24 @@ function NachMitarbeiterAntrag({name, d, nList, approveNachtrag, rejectNachtrag}
 
 // ── 공용 Dienstplan 캘린더: 월 달력 + 선택일의 지점별 근무자 리스트 ──
 //    highlightName이 주어지면(직원 뷰) 본인 근무를 강조. 안전 렌더링(정규화)으로 크래시 방지.
-function DienstplanKalender({ schedule, records, highlightName, allowDelete }) {
+function DienstplanKalender({ schedule, records, highlightName, allowDelete, users, setRecords, FILIALEN_LIST }) {
   const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
   const filShort = { "TEEAMO Arkaden":"Arkaden","TEEAMO Aegidiimarkt":"Aegidiimarkt","TEEnJOY":"TEEnJOY" };
+  const FILS = Array.isArray(FILIALEN_LIST)&&FILIALEN_LIST.length?FILIALEN_LIST:(typeof FILIALEN!=="undefined"?FILIALEN:[]);
   const todayStr = today();
   const [calYM, setCalYM] = useState(()=>{ const p=todayStr.split("-"); return {y:+p[0], m:(+p[1])-1}; });
   const [selDate, setSelDate] = useState(todayStr);
+  // 인라인 수정/양도/Nachtragen 상태
+  const [editRow, setEditRow] = useState(null);   // {name, fil, von, bis}
+  const [nachRow, setNachRow] = useState(null);   // {name, von, bis}
+  const [actMsg, setActMsg]   = useState("");
+  // 날짜 우선 추가 폼 (관리자)
+  const [addOpen, setAddOpen] = useState(false);
+  const [addFil, setAddFil]   = useState("");
+  const [addEmp, setAddEmp]   = useState("");     // vorname | "__temp__"
+  const [addTemp, setAddTemp] = useState("");
+  const [addVon, setAddVon]   = useState("");
+  const [addBis, setAddBis]   = useState("");
 
   // 날짜별 근무 인덱스 (안전 정규화)
   const byDate = React.useMemo(()=>{
@@ -3867,6 +4032,12 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete }) {
         <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>
           {new Date(selDate).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
         </div>
+        {actMsg&&(
+          <div style={{fontSize:11,fontWeight:700,padding:"8px 11px",borderRadius:9,marginBottom:8,
+            background:actMsg.startsWith("✅")?"#dcfce7":"#fee2e2",color:actMsg.startsWith("✅")?"#15803d":C.red}}>
+            {actMsg}
+          </div>
+        )}
         {dayShifts.length===0 ? (
           <div style={{...S.card,textAlign:"center",padding:"22px",color:C.muted,fontSize:12}}>Keine Schichten an diesem Tag.</div>
         ) : (
@@ -3879,8 +4050,77 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete }) {
                 const isMine=highlightName&&r.name===highlightName;
                 const rec=recFor(r.name);
                 const transl=r.status==="freigegeben"||r.status==="getauscht";
+                const rowKey=r.name+"|"+fil+"|"+idx;
+                const editing = editRow&&editRow.key===rowKey;
+                const nachting = nachRow&&nachRow.key===rowKey;
+                const isPastOrToday = selDate<=todayStr;
+                const iBtn={flexShrink:0,width:30,height:30,borderRadius:8,border:"1px solid "+C.border,
+                  fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"};
+
+                // ── 인라인 수정 폼 (관리자) ──
+                if(editing){
+                  return(
+                    <div key={rowKey} style={{...S.card,padding:"11px 12px",marginBottom:6,border:"1.5px solid "+C.navy}}>
+                      <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:8}}>{"✏️ "+r.name}</div>
+                      <div style={{marginBottom:8}}>
+                        <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>FILIALE</div>
+                        <select value={editRow.fil} onChange={e=>setEditRow({...editRow,fil:e.target.value})}
+                          style={{...S.input,width:"100%",fontSize:13,padding:"8px 10px",boxSizing:"border-box"}}>
+                          {FILS.map(f=><option key={f} value={f}>{filShort[f]||f}</option>)}
+                        </select>
+                      </div>
+                      <div style={{display:"flex",gap:10,marginBottom:10}}>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>VON</div>
+                          <TimeInput value={editRow.von} onChange={v=>setEditRow({...editRow,von:v})} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>BIS</div>
+                          <TimeInput value={editRow.bis} onChange={v=>setEditRow({...editRow,bis:v})} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:8}}>
+                        <button onClick={()=>setEditRow(null)} style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
+                        <button onClick={()=>{
+                          const nt=(editRow.von&&editRow.bis)?editRow.von+"-"+editRow.bis:(r.time||"");
+                          patchScheduleShift(r.name, selDate, {f:editRow.fil, filiale:editRow.fil, t:nt, time:nt});
+                          setEditRow(null);
+                        }} style={{flex:2,padding:"10px",borderRadius:9,border:"none",background:C.navy,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"💾 Speichern"}</button>
+                      </div>
+                    </div>
+                  );
+                }
+                // ── Nachtragen 인라인 폼 (직원 본인) ──
+                if(nachting){
+                  return(
+                    <div key={rowKey} style={{...S.card,padding:"11px 12px",marginBottom:6,border:"1.5px solid "+C.yellow}}>
+                      <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:2}}>{"📝 Nachtragen · "+r.name}</div>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:8}}>Wird automatisch genehmigt & in Statistik übernommen.</div>
+                      <div style={{display:"flex",gap:10,marginBottom:10}}>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>VON</div>
+                          <TimeInput value={nachRow.von} onChange={v=>setNachRow({...nachRow,von:v})} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>BIS</div>
+                          <TimeInput value={nachRow.bis} onChange={v=>setNachRow({...nachRow,bis:v})} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:8}}>
+                        <button onClick={()=>setNachRow(null)} style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
+                        <button onClick={()=>{
+                          if(!nachRow.von||!nachRow.bis){ setActMsg("Bitte VON und BIS angeben."); return; }
+                          nachtragenSchicht({userName:r.name, date:selDate, filiale:fil, ein:nachRow.von, aus:nachRow.bis, setRecords});
+                          setNachRow(null); setActMsg("✅ Nachgetragen & genehmigt.");
+                          setTimeout(()=>setActMsg(""),2500);
+                        }} style={{flex:2,padding:"10px",borderRadius:9,border:"none",background:C.yellow,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"✅ Nachtragen"}</button>
+                      </div>
+                    </div>
+                  );
+                }
+                // ── 일반 카드 + 액션 ──
                 return(
-                  <div key={fil+idx} style={{...S.card,display:"flex",alignItems:"center",gap:10,padding:"9px 12px",marginBottom:6,
+                  <div key={rowKey} style={{...S.card,display:"flex",alignItems:"center",gap:10,padding:"9px 12px",marginBottom:6,
                     opacity:transl?0.55:1,
                     border:isMine?"1.5px solid "+C.mint:"1px solid "+C.border,
                     background:isMine?C.mintLight:"#fff"}}>
@@ -3899,17 +4139,87 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete }) {
                       {r.status==="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>{"🔄 Getauscht mit "+(r.getauschtMit||"?")}</div>}
                       {r.getauschtVon&&r.status!=="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>{"✔️ Getauscht mit "+r.getauschtVon}</div>}
                     </div>
+                    {/* 관리자: 수정/삭제 */}
                     {allowDelete&&(
-                      <button onClick={()=>{ if(window.confirm(r.name+" · "+selDate+"\nSchicht löschen?")) deleteScheduleShift(r.name, selDate); }}
-                        style={{flexShrink:0,width:28,height:28,borderRadius:8,border:"1px solid "+C.border,
-                          background:C.redLight,color:C.red,fontSize:14,fontWeight:700,cursor:"pointer",
-                          display:"flex",alignItems:"center",justifyContent:"center"}}>{"×"}</button>
+                      <div style={{display:"flex",gap:6,flexShrink:0}}>
+                        <button onClick={()=>{ const p=(r.time||"").split("-"); setEditRow({key:rowKey,name:r.name,fil,von:p[0]||"",bis:p[1]||""}); }}
+                          style={{...iBtn,background:"#fff",color:C.navy}}>{"✏️"}</button>
+                        <button onClick={()=>{ if(window.confirm(r.name+" · "+selDate+"\nSchicht löschen?")) deleteScheduleShift(r.name, selDate); }}
+                          style={{...iBtn,background:C.redLight,color:C.red}}>{"×"}</button>
+                      </div>
+                    )}
+                    {/* 직원 본인: 양도 / Nachtragen */}
+                    {isMine&&!transl&&!allowDelete&&(
+                      <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
+                        <button onClick={()=>{ if(window.confirm("Schicht freigeben?\n"+r.name+" · "+selDate)) freigebenSchicht({userName:highlightName,date:selDate,filiale:fil,time:r.time,users}); }}
+                          style={{padding:"6px 9px",borderRadius:8,border:"none",background:C.navy,color:"#fff",fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{"🔁 Freigeben"}</button>
+                        {isPastOrToday&&!(rec&&rec.aus)&&(
+                          <button onClick={()=>{ const p=(r.time||"").split("-"); setNachRow({key:rowKey,von:p[0]||"",bis:p[1]||""}); }}
+                            style={{padding:"6px 9px",borderRadius:8,border:"1px solid "+C.yellow,background:C.yellowLight,color:C.yellow,fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{"📝 Nachtragen"}</button>
+                        )}
+                      </div>
                     )}
                   </div>
                 );
               })}
             </div>
           ))
+        )}
+
+        {/* ➕ 날짜 우선 추가 (관리자): 지점 → 직원(임시이름 가능) → 시간 */}
+        {allowDelete&&(
+          <div style={{marginTop:6}}>
+            {!addOpen ? (
+              <button onClick={()=>{setAddOpen(true);setAddFil(FILS[0]||"");setAddEmp("");setAddTemp("");setAddVon("");setAddBis("");setActMsg("");}}
+                style={{width:"100%",padding:"11px",borderRadius:11,border:"1.5px dashed "+C.mint,background:C.mintLight,color:C.mintDark,fontWeight:800,fontSize:12,cursor:"pointer"}}>
+                {"+ Schicht für diesen Tag hinzufügen"}
+              </button>
+            ) : (
+              <div style={{...S.card,padding:"12px",border:"1.5px solid "+C.mint}}>
+                <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:2}}>{"+ Neue Schicht"}</div>
+                <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{new Date(selDate).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}</div>
+                <div style={{marginBottom:8}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"1 · FILIALE"}</div>
+                  <select value={addFil} onChange={e=>setAddFil(e.target.value)} style={{...S.input,width:"100%",fontSize:13,padding:"8px 10px",boxSizing:"border-box"}}>
+                    {FILS.map(f=><option key={f} value={f}>{filShort[f]||f}</option>)}
+                  </select>
+                </div>
+                <div style={{marginBottom:8}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"2 · MITARBEITER/IN"}</div>
+                  <select value={addEmp} onChange={e=>setAddEmp(e.target.value)} style={{...S.input,width:"100%",fontSize:13,padding:"8px 10px",boxSizing:"border-box"}}>
+                    <option value="">{"— auswählen —"}</option>
+                    <option value="__temp__">{"➕ Temp-Name direkt eingeben…"}</option>
+                    {(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort(byName).map(u=><option key={u.key} value={u.vorname}>{u.vorname}</option>)}
+                  </select>
+                  {addEmp==="__temp__"&&(
+                    <input value={addTemp} onChange={e=>setAddTemp(e.target.value)} placeholder="z. B. Tingting"
+                      style={{...S.input,width:"100%",fontSize:13,padding:"8px 10px",boxSizing:"border-box",marginTop:6}}/>
+                  )}
+                </div>
+                <div style={{display:"flex",gap:10,marginBottom:10}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"3 · VON"}</div>
+                    <TimeInput value={addVon} onChange={setAddVon} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"BIS"}</div>
+                    <TimeInput value={addBis} onChange={setAddBis} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>setAddOpen(false)} style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
+                  <button onClick={()=>{
+                    const name=addEmp==="__temp__"?addTemp.trim():addEmp;
+                    if(!name){ setActMsg("Bitte Mitarbeiter oder Temp-Name wählen."); return; }
+                    if(!addVon||!addBis){ setActMsg("Bitte VON und BIS angeben."); return; }
+                    addScheduleShift(name, selDate, addFil, addVon+"-"+addBis);
+                    setAddOpen(false); setActMsg("✅ Schicht hinzugefügt.");
+                    setTimeout(()=>setActMsg(""),2500);
+                  }} style={{flex:2,padding:"10px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"✅ Hinzufügen"}</button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -4525,6 +4835,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
 
 function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx,onSwitchToStaff,hybrid}){
   const [tab,setTab]=useState("uebersicht");
+  const [antragTab,setAntragTab]=useState("schichtboerse"); // Anträge 서브탭
   const [detailKey,setDetailKey]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
   const [erledigtExpanded,setErledigtExpanded]=useState({});
@@ -4650,8 +4961,18 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   // Nachtrag(antraege) :   ,   
   const offeneNachtraege = antraege.filter(a => a.status==="offen");
 
-  //  + Nachtraege  
-  const alarmCount = pendingNotifs.length + offeneNachtraege.length;
+  // Anträge 배지 = 미읽은 Nachtragen 로그 + Schichtbörse 매칭 로그
+  const antraegeUnread = Object.entries(notifications||{}).filter(([,n])=>
+    (n.type==="nachtrag_log"||n.type==="schichtboerse_match") && !n.gelesen && MANAGERS.includes(n.zustaendig));
+  const alarmCount = antraegeUnread.length;
+  // Anträge 탭 진입 즉시 관련 로그를 읽음 처리 → 배지 0 (로그 자체는 계속 표시됨)
+  useEffect(()=>{
+    if(tab!=="antraege") return;
+    const keys=antraegeUnread.map(([k])=>k);
+    if(keys.length===0) return;
+    setNotifications(prev=>{ const next={...(prev||{})}; keys.forEach(k=>{ next[k]={...(next[k]||{}),gelesen:true}; }); return next; });
+    if(window._fbSet&&window._fbRef&&window._fbDb) keys.forEach(k=>window._fbSet(window._fbRef(window._fbDb,"notifications/"+k+"/gelesen"),true).catch(()=>{}));
+  },[tab]);
 
   // Archiv ()
   const myArchiv = Object.entries(archiv||{})
@@ -5064,26 +5385,63 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
               ))}
             </div>
           )}
-          {/* Schichtbörse 매칭 로그 — 매니저별 중복 제거, 최신순, 검은색 텍스트 */}
-          {(()=>{
+          {/* 서브탭: Schichtbörse / Nachtragen */}
+          <div style={{display:"flex",gap:0,margin:"14px 14px 12px",borderRadius:11,overflow:"hidden",border:`1px solid ${C.border}`}}>
+            {[{id:"schichtboerse",l:"🔔 Schichtbörse"},{id:"nachtragen",l:"📝 Nachtragen"}].map(({id,l})=>(
+              <button key={id} onClick={()=>setAntragTab(id)}
+                style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",fontSize:12,fontWeight:800,
+                  background:antragTab===id?C.navy:"#fff",color:antragTab===id?"#fff":C.muted}}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* 🔔 Schichtbörse 로그 (중복 제거, 최신순, 검은색) */}
+          {antragTab==="schichtboerse"&&(()=>{
             const matches=Object.entries(notifications||{}).filter(([,n])=>n.type==="schichtboerse_match");
             const seen=new Set(); const uniq=[];
             matches.sort(([,a],[,b])=>(b.ts||0)-(a.ts||0)).forEach(([k,n])=>{
               const sig=(n.angeboten_von||"")+"|"+(n.uebernommen_von||"")+"|"+(n.date||"")+"|"+(n.time||"")+"|"+(n.filiale||"");
               if(seen.has(sig)) return; seen.add(sig); uniq.push([k,n]);
             });
-            if(uniq.length===0) return null;
             return(
-              <div style={{padding:"8px 14px 0"}}>
-                <div style={{fontSize:10,fontWeight:700,color:C.text,marginBottom:6,textTransform:"uppercase"}}>
-                  {"🔔 Schichtbörse Log"}
-                </div>
-                {uniq.slice(0,8).map(([k,n])=>(
-                  <div key={k} style={{...S.card,marginBottom:6,border:"1px solid "+C.border}}>
-                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>{"✅ "+(n.angeboten_von||"?")+" → "+(n.uebernommen_von||"?")}</div>
-                    <div style={{fontSize:9,color:C.muted,marginTop:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}{n.time?" · "+n.time:""}</div>
-                  </div>
-                ))}
+              <div style={{padding:"0 14px"}}>
+                {uniq.length===0
+                  ? <div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted,fontSize:12}}>Keine Schichtbörse-Logs.</div>
+                  : uniq.slice(0,20).map(([k,n])=>(
+                    <div key={k} style={{...S.card,marginBottom:6,border:"1px solid "+C.border}}>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>{"✅ "+(n.angeboten_von||"?")+" → "+(n.uebernommen_von||"?")}</div>
+                      <div style={{fontSize:9,color:C.muted,marginTop:2}}>{new Date(n.date).toLocaleDateString("de-DE")} · {n.filiale}{n.time?" · "+n.time:""}</div>
+                    </div>
+                  ))
+                }
+              </div>
+            );
+          })()}
+
+          {/* 📝 Nachtragen 로그 (중복 제거, 최신순, 검은색) */}
+          {antragTab==="nachtragen"&&(()=>{
+            const logs=Object.entries(notifications||{}).filter(([,n])=>n.type==="nachtrag_log");
+            const seen=new Set(); const uniq=[];
+            logs.sort(([,a],[,b])=>(b.ts||0)-(a.ts||0)).forEach(([k,n])=>{
+              const sig=(n.user||"")+"|"+(n.date||"")+"|"+(n.ein||"")+"|"+(n.aus||"");
+              if(seen.has(sig)) return; seen.add(sig); uniq.push([k,n]);
+            });
+            return(
+              <div style={{padding:"0 14px"}}>
+                {uniq.length===0
+                  ? <div style={{...S.card,textAlign:"center",padding:"24px",color:C.muted,fontSize:12}}>Keine Nachtragen-Logs.</div>
+                  : uniq.slice(0,30).map(([k,n])=>(
+                    <div key={k} style={{...S.card,marginBottom:6,border:"1px solid "+C.border}}>
+                      <div style={{fontSize:12,fontWeight:700,color:C.text}}>{"📝 "+(n.user||"?")}</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>
+                        {new Date(n.date).toLocaleDateString("de-DE",{weekday:"short",day:"2-digit",month:"2-digit"})}
+                        {" · "}{n.ein}-{n.aus}{n.filiale?" · "+n.filiale:""}
+                        <span style={{color:C.mintDark,fontWeight:700,marginLeft:6}}>✓ genehmigt</span>
+                      </div>
+                    </div>
+                  ))
+                }
               </div>
             );
           })()}
