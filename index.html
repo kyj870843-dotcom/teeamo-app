@@ -77,7 +77,12 @@ const C = {
 
 const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
 const MONTHS     = ["2026-06","2026-05","2026-04"];
-const MONTH_LABELS = {"2026-06":"Juni 2026","2026-05":"Mai 2026","2026-04":"April 2026"};
+// "YYYY-MM" → 독일어 월 라벨 (예: "2026-07" → "Juli 2026") — 데이터 기반 동적 생성
+function monthLabel(ym){
+  if(!ym) return "";
+  try{ return new Date(ym+"-01T00:00:00").toLocaleDateString("de-DE",{month:"long",year:"numeric"}); }
+  catch{ return ym; }
+}
 const TAGE_DE    = ["So","Mo","Di","Mi","Do","Fr","Sa"];
 const MANAGERS   = ["tingting","teddy","yeaji"];
 
@@ -2624,8 +2629,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   // 이번 달 records만
   const curMo2=(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");})();
   const myMonthRecs=myRecs.filter(r=>r.date&&r.date.startsWith(curMo2)&&r.aus);
-  // 유형별 분류
-  const normalH=myMonthRecs.filter(r=>!r.typ||r.typ==="normal").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+  // 유형별 분류 (Nachtragen(사후 등록)도 정규 근무로 합산에 포함)
+  const normalH=myMonthRecs.filter(r=>!r.typ||r.typ==="normal"||r.typ==="nachtrag").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
   const einsprH=myMonthRecs.filter(r=>r.typ==="einspringen").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
   const onigiriH=myMonthRecs.filter(r=>r.typ==="onigiri").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
   // Pause 누적: record.pauseSec 필드에서 집계
@@ -3075,16 +3080,21 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 }
 
 //  STATISTIK 
-function StatistikTab({records,users}){
-  // records에서 달 추출 + 현재 달 포함, 최신순 정렬
+function StatistikTab({records,users,schedule}){
+  // records + Dienstplan(schedule)에서 달 추출 + 현재 달 포함, 최신순 정렬
   const availMonths = React.useMemo(()=>{
     const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
     const cur=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
-    const fromRecs=[...new Set((Array.isArray(records)?records:[])
-      .filter(r=>r.aus&&r.date)
-      .map(r=>r.date.slice(0,7)))];
-    return [...new Set([cur,...fromRecs])].sort((a,b)=>b.localeCompare(a));
-  },[records]);
+    const set=new Set([cur]);
+    // 실제 근무 기록(records)의 달
+    (Array.isArray(records)?records:[]).forEach(r=>{ if(r.aus&&r.date) set.add(r.date.slice(0,7)); });
+    // Dienstplan(schedule)에 존재하는 근무 일자의 달
+    Object.values(schedule||{}).forEach(sh=>{
+      const arr=!sh?[]:Array.isArray(sh)?sh:Object.values(sh);
+      arr.forEach(s=>{ const dd=s&&(s.date||s.d); if(dd) set.add(dd.slice(0,7)); });
+    });
+    return [...set].sort((a,b)=>b.localeCompare(a));
+  },[records,schedule]);
   const [selMonth,setSelMonth]=useState(()=>{
     const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
     return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
@@ -3147,7 +3157,7 @@ function StatistikTab({records,users}){
         <div style={{display:"flex",gap:7}}>
           {availMonths.map(m=>(
             <button key={m} onClick={()=>setSelMonth(m)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${selMonth===m?C.mint:C.border}`,background:selMonth===m?C.mintLight:"#fff",color:selMonth===m?C.mintDark:C.muted}}>
-              {MONTH_LABELS[m]}
+              {monthLabel(m)}
             </button>
           ))}
         </div>
@@ -4151,8 +4161,12 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                     {/* 직원 본인: 양도 / Nachtragen */}
                     {isMine&&!transl&&!allowDelete&&(
                       <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
-                        <button onClick={()=>{ if(window.confirm("Schicht freigeben?\n"+r.name+" · "+selDate)) freigebenSchicht({userName:highlightName,date:selDate,filiale:fil,time:r.time,users}); }}
-                          style={{padding:"6px 9px",borderRadius:8,border:"none",background:C.navy,color:"#fff",fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{"🔁 Freigeben"}</button>
+                        {/* Freigeben: 내일(미래) 근무만 — 과거/당일은 차단 */}
+                        {selDate>todayStr&&(
+                          <button onClick={()=>{ if(window.confirm("Schicht freigeben?\n"+r.name+" · "+selDate)) freigebenSchicht({userName:highlightName,date:selDate,filiale:fil,time:r.time,users}); }}
+                            style={{padding:"6px 9px",borderRadius:8,border:"none",background:C.navy,color:"#fff",fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{"🔁 Freigeben"}</button>
+                        )}
+                        {/* Nachtragen: 과거/당일, 아직 완료 기록 없을 때 */}
                         {isPastOrToday&&!(rec&&rec.aus)&&(
                           <button onClick={()=>{ const p=(r.time||"").split("-"); setNachRow({key:rowKey,von:p[0]||"",bis:p[1]||""}); }}
                             style={{padding:"6px 9px",borderRadius:8,border:"1px solid "+C.yellow,background:C.yellowLight,color:C.yellow,fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{"📝 Nachtragen"}</button>
@@ -4869,24 +4883,22 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             const startMin=sh2*60+sm2;
             // 15분 초과 && 아직 알림 안 보냄
             if(nowMin-startMin<15) continue;
-            const alertKey="noshow_"+name+"_"+todayStr+"_"+startTime.replace(":","");
+            // [동일 날짜 + 동일 직원] 단일 키 → 매니저별 중복(3개) 생성 방지, 단 1개만
+            const alertKey="noshow_"+name+"_"+todayStr;
             window._fbGet(window._fbRef(window._fbDb,"notifications/"+alertKey)).then(ex=>{
-              if(ex.val()) return; // 이미 알림 보냄
+              if(ex.val()) return; // 이미 존재 → 중복 인서트 차단
               // 실제 출근 기록 체크
               window._fbGet(window._fbRef(window._fbDb,"records")).then(recSnap=>{
                 const recs=Object.values(recSnap.val()||{});
                 const clocked=recs.some(r=>r.user===name&&r.date===todayStr&&r.ein);
                 if(clocked) return; // 이미 출근함
-                // 미출근 경보 발송
-                const alertMsg="🚨 [No-Show] "+name+"님 — "+sh.f||sh.filiale+"·"+startTime+" 출근 기록 없음.";
-                MANAGERS.forEach(mgr=>{
-                  window._fbSet(window._fbRef(window._fbDb,"notifications/"+alertKey+"_"+mgr),{
-                    type:"noshow_alert", kategorie:"🚨 NoShow",
-                    user:name, date:todayStr, filiale:sh.f||sh.filiale, time:startTime,
-                    text:alertMsg, gelesen:false, urgent:true,
-                    ts:Date.now(), zustaendig:mgr
-                  }).catch(()=>{});
-                });
+                // 미출근 경보 발송 (단 1개)
+                const alertMsg="🚨 [No-Show] "+name+" — "+(sh.f||sh.filiale)+" · "+startTime+" — kein Einstempeln.";
+                window._fbSet(window._fbRef(window._fbDb,"notifications/"+alertKey),{
+                  type:"noshow_alert", kategorie:"🚨 NoShow",
+                  user:name, date:todayStr, filiale:sh.f||sh.filiale, time:startTime,
+                  text:alertMsg, gelesen:false, urgent:true, ts:Date.now()
+                }).catch(()=>{});
               }).catch(()=>{});
             }).catch(()=>{});
           }
@@ -5449,7 +5461,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       )}
 
       {/*  STATISTIK  */}
-      {tab==="statistik"&&<StatistikTab records={records} users={users}/>}
+      {tab==="statistik"&&<StatistikTab records={records} users={users} schedule={schedule}/>}
 
       {/*  SCHICHTBRSE (Admin)  */}
       {tab==="schichtboerse_mgr"&&(
