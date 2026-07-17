@@ -384,6 +384,18 @@ function scheduledEndTimeFor(schedule, name, date){
   }
   return null;
 }
+// 실제(Ist) 근무시간: name·date의 실제 출퇴근 or 승인된 Nachtragen 시간을 반환.
+//  · 승인된 Nachtragen(typ:"nachtrag") 우선 → 그다음 완료된 실시간 출퇴근 기록.
+//  · 완전한 ein·aus 쌍이 있을 때만 반환(진행 중/미출근이면 null → Ist 미표시).
+function istTimeFor(records, name, date){
+  const list = (Array.isArray(records)?records:[]).filter(r=>r&&r.user===name&&r.date===date);
+  if(!list.length) return null;
+  const nach = list.find(r=>r.typ==="nachtrag" && r.ein && r.aus);
+  const done = list.find(r=>r.ein && r.aus);
+  const pick = nach || done;
+  if(!pick || !pick.ein || !pick.aus) return null;
+  return { ein:pick.ein, aus:pick.aus, isNachtrag:pick.typ==="nachtrag", isAuto:!!pick.isAutoCheckedOut };
+}
 function today() {
   //    (CET=UTC+1, CEST=UTC+2  )
   return new Date().toLocaleDateString("sv-SE", {timeZone:"Europe/Berlin"});
@@ -3314,6 +3326,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 }
 
 //  STATISTIK 
+// 📊 통계에서 완전히 제외할 더미/과거 월 (예: Juni 2026)
+const STAT_EXCLUDED_MONTHS = new Set(["2026-06"]);
 function StatistikTab({records,users,schedule}){
   // records + Dienstplan(schedule)에서 달 추출 + 현재 달 포함, 최신순 정렬
   const availMonths = React.useMemo(()=>{
@@ -3327,6 +3341,8 @@ function StatistikTab({records,users,schedule}){
       const arr=!sh?[]:Array.isArray(sh)?sh:Object.values(sh);
       arr.forEach(s=>{ const dd=s&&(s.date||s.d); if(dd) set.add(dd.slice(0,7)); });
     });
+    // 🚫 더미/제외 월(Juni 2026) 필터 옵션 완전 제거
+    STAT_EXCLUDED_MONTHS.forEach(m=>set.delete(m));
     return [...set].sort((a,b)=>b.localeCompare(a));
   },[records,schedule]);
   const [selMonth,setSelMonth]=useState(()=>{
@@ -3339,7 +3355,7 @@ function StatistikTab({records,users,schedule}){
   const empList=(Array.isArray(users)?users:[])
     .filter(u=>!MANAGERS.includes(u.key) || _workerNames.has(u.vorname))
     .sort(byName);
-  const monthRecs=records.filter(r=>r.date.startsWith(selMonth)&&r.aus);
+  const monthRecs=records.filter(r=>r.date&&r.date.startsWith(selMonth)&&r.aus&&!STAT_EXCLUDED_MONTHS.has(r.date.slice(0,7)));
 
   function downloadCSV(rows,filename){
     const bom="﻿";
@@ -4372,6 +4388,15 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                       <div style={{fontSize:10,color:C.muted,marginTop:1}}>
                         {r.time||"—"}{rec?.aus?" · ✅ Feierabend":rec?.ein?" · 🟢 Aktiv":""}
                       </div>
+                      {(()=>{ const ist=istTimeFor(records,r.name,selDate); if(!ist) return null;
+                        return (
+                          <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>
+                            {"Ist: "+ist.ein+" – "+ist.aus}
+                            {ist.isNachtrag&&<span style={{color:C.muted,fontWeight:400}}>{" · korrigiert"}</span>}
+                            {ist.isAuto&&<span style={{color:C.muted,fontWeight:400}}>{" · Auto"}</span>}
+                          </div>
+                        );
+                      })()}
                       {r.status==="freigegeben"&&<div style={{fontSize:9,fontWeight:700,color:"#b45309",marginTop:1}}>{"🔄 Freigegeben"}</div>}
                       {r.status==="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>{"🔄 Getauscht mit "+(r.getauschtMit||"?")}</div>}
                       {r.getauschtVon&&r.status!=="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>{"✔️ Getauscht mit "+r.getauschtVon}</div>}
@@ -4698,6 +4723,15 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                                 {new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
                               </div>
                               <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
+                              {accountExists&&(()=>{ const ist=istTimeFor(records,name,d); if(!ist) return null;
+                                return (
+                                  <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>
+                                    {"Ist: "+ist.ein+" – "+ist.aus}
+                                    {ist.isNachtrag&&<span style={{color:C.muted,fontWeight:400}}>{" · korrigiert"}</span>}
+                                    {ist.isAuto&&<span style={{color:C.muted,fontWeight:400}}>{" · Auto"}</span>}
+                                  </div>
+                                );
+                              })()}
                               {sSt==="freigegeben"&&<div style={{fontSize:9,fontWeight:700,color:"#b45309",marginTop:2}}>🔄 Freigegeben · wartet auf Tausch</div>}
                               {sSt==="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:2}}>🔄 Getauscht mit {gMit||"?"}</div>}
                               {gVon&&sSt!=="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:2}}>✔️ Getauscht mit {gVon}</div>}
