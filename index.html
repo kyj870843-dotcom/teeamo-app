@@ -2663,6 +2663,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
       return [...filtered,{id:tempId,user:user.vorname,date:today(),filiale:selFiliale,ein:inStr,aus:null,note:"",typ}];
     });
     setClockedIn(true);setClockInTime(new Date());setClockFiliale(selFiliale);setModal(null);
+    // 🚨 미출근 알림 자동 제거: 지각이라도 출근 도장을 찍으면 해당 날짜·직원 알림 삭제
+    if(window._fbDb&&window._fbRef&&window._fbRemove)
+      window._fbRemove(window._fbRef(window._fbDb,"notifications/noshow_"+user.vorname+"_"+today())).catch(()=>{});
   }
   // 오늘 예정 근무의 종료 시각(분) — 조기 퇴근 판정용
   function getPlannedEndMin(){
@@ -3028,7 +3031,10 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           grund={grund}
           CLOCK_KEY={CLOCK_KEY}
           onClose={()=>setModal(null)}
-          onEin={(d)=>{setClockedIn(true);setClockInTime(d);setClockFiliale(selFiliale);setModal(null);}}
+          onEin={(d)=>{setClockedIn(true);setClockInTime(d);setClockFiliale(selFiliale);setModal(null);
+            if(window._fbDb&&window._fbRef&&window._fbRemove)
+              window._fbRemove(window._fbRef(window._fbDb,"notifications/noshow_"+user.vorname+"_"+today())).catch(()=>{});
+          }}
           onAus={(inStr,outStr)=>{
             const plannedEnd=getPlannedEndMin();
             const [oh,om]=outStr.split(":").map(Number);
@@ -4511,6 +4517,8 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
   // 선택된 월 스케줄 (달력 점 표시용)
   const scheduleKey = selMonth ? "schedule_"+selMonth : "schedule";
   const [monthSched] = useFirebase(scheduleKey, {});
+  // root 스케줄 (실시간) — 모달의 '기존 근무 조회' + 달력 점 (저장 즉시 반영)
+  const [rootSched] = useFirebase("schedule", {});
 
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving]   = useState(false);
@@ -4600,7 +4608,18 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
 
   // 기존 스케줄 있는 날짜 (달력 점)
   const existDates = new Set();
-  Object.values(monthSched||{}).forEach(sh=>{ norm(sh).forEach(s=>{ const dd=s&&(s.date||s.d); if(dd) existDates.add(dd); }); });
+  Object.values(rootSched||{}).forEach(sh=>{ norm(sh).forEach(s=>{ const dd=s&&(s.date||s.d); if(dd) existDates.add(dd); }); });
+  // 선택 날짜에 이미 저장된 근무 (실시간)
+  const existingForSel = [];
+  Object.entries(rootSched||{}).forEach(([name,sh])=>{
+    if(MANAGERS.includes((name||"").toLowerCase())) return;
+    norm(sh).forEach(s=>{
+      if(!s) return;
+      const dd=s.date||s.d; if(dd!==selDate) return;
+      existingForSel.push({ name, filiale:s.filiale||s.f||"", time:s.time||s.t||"", status:s.status||null });
+    });
+  });
+  existingForSel.sort((a,b)=>(a.filiale||"").localeCompare(b.filiale||"")||(a.time||"").localeCompare(b.time||""));
   const cartDates = new Set(cart.map(c=>c.date));
 
   const inp = {...S.input, width:"100%", fontSize:13, padding:"9px 11px", boxSizing:"border-box"};
@@ -4710,17 +4729,39 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
                 {new Date(selDate).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
               </div>
 
-              {/* 2) 당일 근무 장바구니 */}
-              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6}}>{"2 · SCHICHTEN AN DIESEM TAG"}</div>
-              {cartForSel.length===0 ? (
-                <div style={{fontSize:11,color:C.muted,textAlign:"center",padding:"14px 10px",background:C.bg,borderRadius:10,marginBottom:12}}>
-                  Noch leer — unten hinzufügen.
+              {/* 2) 실시간 기존 근무 조회 (Firebase에 이미 저장된 근무) */}
+              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6}}>
+                {"2 · GESPEICHERTE SCHICHTEN"}{existingForSel.length>0?" · "+existingForSel.length+" an diesem Tag":""}
+              </div>
+              {existingForSel.length===0 ? (
+                <div style={{fontSize:11,color:C.muted,textAlign:"center",padding:"12px 10px",background:C.bg,borderRadius:10,marginBottom:12}}>
+                  Noch leer — keine gespeicherten Schichten.
                 </div>
               ) : (
                 <div style={{marginBottom:12}}>
+                  {existingForSel.map((e, i)=>{
+                    const transl=e.status==="freigegeben"||e.status==="getauscht";
+                    return(
+                      <div key={"ex"+i} style={{...S.card,display:"flex",alignItems:"center",gap:10,padding:"8px 11px",marginBottom:6,opacity:transl?0.55:1,border:"1px solid "+C.mint}}>
+                        <div style={{width:30,height:30,borderRadius:"50%",background:C.mintDark,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:10,flexShrink:0}}>{(e.name||"?").slice(0,2)}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12,fontWeight:700,color:C.text}}>{e.name}</div>
+                          <div style={{fontSize:10,color:C.muted}}>{(filShort[e.filiale]||e.filiale)+(e.time?" · "+e.time:"")}</div>
+                        </div>
+                        <span style={{fontSize:8,fontWeight:800,color:C.mintDark,background:C.mintLight,padding:"3px 7px",borderRadius:99,flexShrink:0}}>{"✓ gespeichert"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* 3) 이번 세션에서 추가할 근무 장바구니 */}
+              {cartForSel.length>0&&(
+                <div style={{marginBottom:12}}>
+                  <div style={{fontSize:9,fontWeight:700,color:"#b45309",marginBottom:6}}>{"3 · NEU HINZUGEFÜGT (Warenkorb)"}</div>
                   {cartForSel.map(c=>(
-                    <div key={c._i} style={{...S.card,display:"flex",alignItems:"center",gap:10,padding:"8px 11px",marginBottom:6}}>
-                      <div style={{width:30,height:30,borderRadius:"50%",background:C.navy,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:10,flexShrink:0}}>{(c.name||"?").slice(0,2)}</div>
+                    <div key={c._i} style={{...S.card,display:"flex",alignItems:"center",gap:10,padding:"8px 11px",marginBottom:6,border:"1px dashed #f59e0b",background:"#fffbeb"}}>
+                      <div style={{width:30,height:30,borderRadius:"50%",background:"#f59e0b",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:10,flexShrink:0}}>{(c.name||"?").slice(0,2)}</div>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:12,fontWeight:700,color:C.text}}>{c.name}</div>
                         <div style={{fontSize:10,color:C.muted}}>{(filShort[c.filiale]||c.filiale)+" · "+c.von+"-"+c.bis}</div>
@@ -4732,9 +4773,9 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
                 </div>
               )}
 
-              {/* 3) 하위 항목 추가: 지점 → 직원 → 시간 */}
+              {/* 4) 하위 항목 추가: 지점 → 직원 → 시간 */}
               <div style={{border:"1.5px dashed "+C.mint,borderRadius:12,padding:"12px",marginBottom:6,background:C.mintLight}}>
-                <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginBottom:8}}>{"3 · NEUE SCHICHT FÜR DIESEN TAG"}</div>
+                <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginBottom:8}}>{"4 · NEUE SCHICHT FÜR DIESEN TAG"}</div>
                 <div style={{marginBottom:8}}>
                   <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>FILIALE</div>
                   <select value={aFil} onChange={e=>setAFil(e.target.value)} style={inp}>
@@ -5310,12 +5351,12 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       {tab==="antraege"&&(
         <div>
           {/* 🚨 미출근 긴급 경보 */}
-          {Object.entries(notifications||{}).filter(([,n])=>n.type==="noshow_alert"&&!n.gelesen).length>0&&(
+          {Object.entries(notifications||{}).filter(([,n])=>n.type==="noshow_alert"&&!n.gelesen&&!(Array.isArray(records)?records:[]).some(r=>r.user===n.user&&r.date===n.date&&r.ein)).length>0&&(
             <div style={{padding:"14px 14px 0"}}>
               <div style={{fontSize:10,fontWeight:800,color:C.red,marginBottom:8,textTransform:"uppercase"}}>
                 🚨 Mierschienen Alarm
               </div>
-              {Object.entries(notifications||{}).filter(([,n])=>n.type==="noshow_alert"&&!n.gelesen)
+              {Object.entries(notifications||{}).filter(([,n])=>n.type==="noshow_alert"&&!n.gelesen&&!(Array.isArray(records)?records:[]).some(r=>r.user===n.user&&r.date===n.date&&r.ein))
                 .sort(([,a],[,b])=>b.ts-a.ts).map(([k,n])=>(
                 <div key={k} style={{...S.card,marginBottom:8,border:"2px solid "+C.red,background:C.redLight}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
