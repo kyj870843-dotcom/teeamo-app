@@ -4397,7 +4397,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
       {/* Plan: 근무 추가 + 캘린더(선택일 지점별 리스트) */}
       {viewMode==="plan"&&(
         <div style={{padding:"14px"}}>
-          <DienstplanUploadView users={users}
+          <DienstplanUploadView users={users} adminName={manager?.vorname}
             selMonth={selMonth}
             onScheduleSaved={(mk, pd) => {
               const fbFmt = Object.fromEntries(Object.entries(pd).map(([n,s])=>[n,Object.fromEntries((s||[]).map((x,i)=>[String(i),x]))]));
@@ -4507,9 +4507,9 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 }
 
 //  DIENSTPLAN UPLOAD + AI ANALYSE 
-function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
+function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
-  const empOptions = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort(byName);
+  const empOptions = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key) && u.vorname!==adminName).sort(byName);
   const QUICK = ["09:30","11:30","12:30","14:00","15:00","16:00","18:00","19:00","20:00"];
   const DRAFT_KEY = "teeamo_schicht_cart_v1";
   const filShort = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt", "TEEnJOY":"TEEnJOY" };
@@ -4786,6 +4786,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved }) {
                   <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>MITARBEITER/IN</div>
                   <select value={aEmp} onChange={e=>setAEmp(e.target.value)} style={inp}>
                     <option value="">{"— auswählen —"}</option>
+                    {adminName&&<option value={adminName}>{adminName+" (Admin)"}</option>}
                     {empOptions.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
                     <option disabled>{"──────────"}</option>
                     <option value="__temp__">{"➕ Temp-Name direkt eingeben…"}</option>
