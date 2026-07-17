@@ -75,7 +75,14 @@ const C = {
   yellow:"#C8A96A", yellowLight:"#FAF4E8",
 };
 
-const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
+const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY","Onigiri"];
+// 📍 Onigiri 지점: 고정 계획시간 없이 이름만으로 등록되는 특수 지점.
+const ONIGIRI_FILIALE = "Onigiri";
+function isOnigiriFiliale(f){ return (f||"")===ONIGIRI_FILIALE || String(f||"").trim().toLowerCase()==="onigiri"; }
+// 지점 표시 순서 (Onigiri는 항상 최하단)
+const FILIAL_ORDER = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY","Onigiri"];
+function filialRank(f){ if(isOnigiriFiliale(f)) return 999; const i=FILIAL_ORDER.indexOf(f); return i<0?500:i; }
+function filialSort(a,b){ return filialRank(a)-filialRank(b) || String(a||"").localeCompare(String(b||"")); }
 // ⚠️ 하드코딩 더미 월 필터 제거됨. Statistik의 "Monat auswählen"은 실제 데이터가
 //    존재하는 달만 동적으로 표시된다 (StatistikTab.availMonths 참고).
 const MONTHS     = [];
@@ -412,7 +419,7 @@ const S = {
 
 const FILIAL_NAMES = { A:"TEEAMO Arkaden", B:"TEEAMO Aegidiimarkt", C:"TEEnJOY" };
 const FILIAL_INIT = {
-  "TEEAMO Arkaden":"Ar", "TEEAMO Aegidiimarkt":"Ae", "TEEnJOY":"Tj",
+  "TEEAMO Arkaden":"Ar", "TEEAMO Aegidiimarkt":"Ae", "TEEnJOY":"Tj", "Onigiri":"On",
   "Arkaden":"Ar", "Aegidiimarkt":"Ae", "TEEnJOY":"Tj",
 };
 function filialInit(f){ return FILIAL_INIT[f]||f?.slice(0,2)||"?"; }
@@ -1796,7 +1803,7 @@ function SchichtboerseView({ userName, users, isAdmin }) {
         <div style={{fontSize:14,fontWeight:800,color:C.navy,marginBottom:4}}>{"🔔 Schichtbörse"}</div>
         <div style={{fontSize:11,color:C.muted}}>Offene Schichten übernehmen oder eigene anbieten.</div>
         <div style={{fontSize:10,color:C.muted,marginTop:4,padding:"4px 8px",borderRadius:6,background:"rgba(0,0,0,.04)"}}>
-          ℹ️ Übernommene Schichten erscheinen als <b>Normal</b>-Schicht in deinem Dienstplan.
+          ℹ️ Übernommene Schichten erscheinen als <b>Regulär</b>-Schicht in deinem Dienstplan.
         </div>
       </div>
 
@@ -3078,7 +3085,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Arbeitstyp</div>
               <div style={{display:"flex",gap:7}}>
                 {[
-                  {typ:"normal",    icon:"📋", lbl:"Normal"},
+                  {typ:"normal",    icon:"🧋", lbl:"Regulär"},
                   {typ:"einspringen",icon:"⚡", lbl:"Einspringen"},
                   {typ:"onigiri",   icon:"🍙", lbl:"Onigiri"},
                 ].map(({typ,icon,lbl})=>(
@@ -3383,7 +3390,7 @@ function StatistikTab({records,users,schedule}){
     const hdr=["Name","Datum","Wochentag","Filiale","Einstempeln","Ausstempeln","Arbeitsstunden","Typ","Anmerkung"];
     const rows=[hdr,...[...monthRecs].sort((a,b)=>a.date.localeCompare(b.date)).map(r=>{
       const h=stunden(r.ein,r.aus);
-      return[r.user,r.date,TAGE_DE[new Date(r.date).getDay()],r.filiale,r.ein,r.aus,h!=null?h.toFixed(2):"",r.typ==="nachtrag"?"Nachtrag":"Normal",r.note||""];
+      return[r.user,r.date,TAGE_DE[new Date(r.date).getDay()],r.filiale,r.ein,r.aus,h!=null?h.toFixed(2):"",r.typ==="nachtrag"?"Nachtrag":"Regulär",r.note||""];
     })];
     if(fmt==="xlsx") downloadXLSX(rows,`Stundennachweis_Detail_${selMonth}.xlsx`,"Stundennachweis");
     else downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
@@ -3441,7 +3448,7 @@ function StatistikTab({records,users,schedule}){
                 </div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
-                {FILIALEN.map((f,fi)=>(
+                {FILIALEN.filter(f=>!isOnigiriFiliale(f)).map((f,fi)=>(
                   <div key={f} style={{background:fColors[fi],borderRadius:7,padding:"6px 7px"}}>
                     <div style={{fontSize:8,fontWeight:700,color:fTColors[fi],marginBottom:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{f}</div>
                     <div style={{fontSize:12,fontWeight:800,color:fTColors[fi]}}>{byFil[f].toFixed(1)}h</div>
@@ -3722,8 +3729,8 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
               Kein Dienstplan für heute eingetragen.
             </div>
           ):(()=>{
-            //  : Arkaden  Aegidiimarkt  TEEnJOY
-            const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
+            //  : Arkaden  Aegidiimarkt  TEEnJOY  Onigiri(최하단)
+            const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY","Onigiri"];
             //   shift  (임시 직원 포함 — todayShiftEmps 항목은 {name,emp,isTemp})
             const withShift = todayShiftEmps.map(({name,emp,isTemp})=>{
               const shift=norm(schedule[name]||[]).find(s=>(s.date||s.d)===todayStr);
@@ -4294,7 +4301,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
         {dayShifts.length===0 ? (
           <div style={{...S.card,textAlign:"center",padding:"22px",color:C.muted,fontSize:12}}>Keine Schichten an diesem Tag.</div>
         ) : (
-          Object.keys(byFil).sort().map(fil=>(
+          Object.keys(byFil).sort(filialSort).map(fil=>(
             <div key={fil} style={{marginBottom:12}}>
               <div style={{fontSize:10,fontWeight:800,color:C.mintDark,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>
                 {"📍 "+(filShort[fil]||fil||"—")}
@@ -4385,9 +4392,17 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                       <div style={{fontSize:13,fontWeight:700,color:C.text}}>
                         {r.name}{isMine&&<span style={{fontSize:9,color:C.mintDark,marginLeft:6,fontWeight:800}}>(Du)</span>}
                       </div>
-                      <div style={{fontSize:10,color:C.muted,marginTop:1}}>
-                        {r.time||"—"}{rec?.aus?" · ✅ Feierabend":rec?.ein?" · 🟢 Aktiv":""}
-                      </div>
+                      {(()=>{
+                        const on=isOnigiriFiliale(fil);
+                        const timePart = on ? "" : (r.time||"—");
+                        const statusPart = rec?.aus?" · ✅ Feierabend":rec?.ein?" · 🟢 Aktiv":"";
+                        if(on && !statusPart) return null;  // Onigiri: 시간·상태 없으면 라인 생략(이름만)
+                        return (
+                          <div style={{fontSize:10,color:C.muted,marginTop:1}}>
+                            {timePart}{statusPart}
+                          </div>
+                        );
+                      })()}
                       {(()=>{ const ist=istTimeFor(records,r.name,selDate); if(!ist) return null;
                         return (
                           <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>
@@ -4477,23 +4492,32 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                       style={{...S.input,width:"100%",fontSize:13,padding:"8px 10px",boxSizing:"border-box",marginTop:6}}/>
                   )}
                 </div>
-                <div style={{display:"flex",gap:10,marginBottom:10}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"3 · VON"}</div>
-                    <TimeInput value={addVon} onChange={setAddVon} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                {isOnigiriFiliale(addFil) ? (
+                  <div style={{fontSize:10,color:C.mintDark,fontWeight:700,background:C.mintLight,
+                    borderRadius:9,padding:"9px 11px",marginBottom:10}}>
+                    {"🍙 Onigiri: Keine Uhrzeit nötig – nur Name eintragen."}
                   </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"BIS"}</div>
-                    <TimeInput value={addBis} onChange={setAddBis} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                ) : (
+                  <div style={{display:"flex",gap:10,marginBottom:10}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"3 · VON"}</div>
+                      <TimeInput value={addVon} onChange={setAddVon} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"BIS"}</div>
+                      <TimeInput value={addBis} onChange={setAddBis} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                    </div>
                   </div>
-                </div>
+                )}
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>setAddOpen(false)} style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
                   <button onClick={()=>{
                     const name=addEmp==="__temp__"?addTemp.trim():addEmp;
                     if(!name){ setActMsg("Bitte Mitarbeiter oder Temp-Name wählen."); return; }
-                    if(!addVon||!addBis){ setActMsg("Bitte VON und BIS angeben."); return; }
-                    addScheduleShift(name, selDate, addFil, addVon+"-"+addBis);
+                    const on=isOnigiriFiliale(addFil);
+                    if(!on && (!addVon||!addBis)){ setActMsg("Bitte VON und BIS angeben."); return; }
+                    // Onigiri: 시간 없이 저장(time=""), 그 외: VON-BIS
+                    addScheduleShift(name, selDate, addFil, on ? "" : addVon+"-"+addBis);
                     setAddOpen(false); setActMsg("✅ Schicht hinzugefügt.");
                     setTimeout(()=>setActMsg(""),2500);
                   }} style={{flex:2,padding:"10px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"✅ Hinzufügen"}</button>
@@ -4810,8 +4834,10 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   function addToCart(){
     const name=resolveAName();
     if(!name){ setMsg({t:"err",m:"Bitte Mitarbeiter oder Temp-Name wählen."}); return; }
-    if(!aVon||!aBis){ setMsg({t:"err",m:"Bitte VON und BIS angeben."}); return; }
-    setCart(prev=>[...prev, {date:selDate, filiale:aFil, name, von:aVon, bis:aBis}]);
+    const on=isOnigiriFiliale(aFil);
+    if(!on && (!aVon||!aBis)){ setMsg({t:"err",m:"Bitte VON und BIS angeben."}); return; }
+    // Onigiri: 시간 없이 이름·지점만 등록
+    setCart(prev=>[...prev, {date:selDate, filiale:aFil, name, von:on?"":aVon, bis:on?"":aBis}]);
     setAEmp(""); setATemp(""); setAVon(""); setABis(""); setMsg(null);  // 지점은 유지, 나머지 초기화
   }
   function removeCart(idx){ setCart(prev=>prev.filter((_,i)=>i!==idx)); }
@@ -4825,7 +4851,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
     setSaving(true); setMsg(null);
     try{
       const byName={};  // {name: [{date,filiale,time}]}
-      cart.forEach(it=>{ (byName[it.name]=byName[it.name]||[]).push({date:it.date, filiale:it.filiale, time:it.von+"-"+it.bis}); });
+      cart.forEach(it=>{ (byName[it.name]=byName[it.name]||[]).push({date:it.date, filiale:it.filiale, time: isOnigiriFiliale(it.filiale) ? "" : it.von+"-"+it.bis}); });
       // 1) 월별 노드
       const monthsTouched=new Set(cart.map(it=>it.date.slice(0,7).replace("-","_")));
       for(const mk of monthsTouched){
@@ -5028,7 +5054,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
                       <div style={{width:30,height:30,borderRadius:"50%",background:"#f59e0b",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:10,flexShrink:0}}>{(c.name||"?").slice(0,2)}</div>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:12,fontWeight:700,color:C.text}}>{c.name}</div>
-                        <div style={{fontSize:10,color:C.muted}}>{(filShort[c.filiale]||c.filiale)+" · "+c.von+"-"+c.bis}</div>
+                        <div style={{fontSize:10,color:C.muted}}>{(filShort[c.filiale]||c.filiale)+((c.von&&c.bis)?" · "+c.von+"-"+c.bis:"")}</div>
                       </div>
                       <button onClick={()=>removeCart(c._i)}
                         style={{flexShrink:0,width:26,height:26,borderRadius:7,border:"1px solid "+C.border,background:C.redLight,color:C.red,fontSize:13,fontWeight:700,cursor:"pointer"}}>{"×"}</button>
@@ -5059,10 +5085,17 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
                     <input value={aTemp} onChange={e=>setATemp(e.target.value)} placeholder="z. B. Tingting" style={{...inp,marginTop:6}}/>
                   )}
                 </div>
-                <div style={{display:"flex",gap:12,marginBottom:10}}>
-                  {timeField(aVon,setAVon,"VON")}
-                  {timeField(aBis,setABis,"BIS")}
-                </div>
+                {isOnigiriFiliale(aFil) ? (
+                  <div style={{fontSize:10,color:C.mintDark,fontWeight:700,background:"#fff",
+                    border:"1px solid "+C.mint,borderRadius:9,padding:"9px 11px",marginBottom:10}}>
+                    {"🍙 Onigiri: Keine Uhrzeit nötig – nur Name eintragen."}
+                  </div>
+                ) : (
+                  <div style={{display:"flex",gap:12,marginBottom:10}}>
+                    {timeField(aVon,setAVon,"VON")}
+                    {timeField(aBis,setABis,"BIS")}
+                  </div>
+                )}
                 <button onClick={addToCart}
                   style={{width:"100%",padding:"11px",borderRadius:10,border:"none",background:C.navy,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
                   {"+ Zu diesem Tag hinzufügen"}
