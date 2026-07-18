@@ -75,13 +75,26 @@ const C = {
   yellow:"#C8A96A", yellowLight:"#FAF4E8",
 };
 
-const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY","Onigiri"];
-// 📍 Onigiri 지점: 고정 계획시간 없이 이름만으로 등록되는 특수 지점.
-const ONIGIRI_FILIALE = "Onigiri";
-function isOnigiriFiliale(f){ return (f||"")===ONIGIRI_FILIALE || String(f||"").trim().toLowerCase()==="onigiri"; }
-// 지점 표시 순서 (Onigiri는 항상 최하단)
-const FILIAL_ORDER = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY","Onigiri"];
-function filialRank(f){ if(isOnigiriFiliale(f)) return 999; const i=FILIAL_ORDER.indexOf(f); return i<0?500:i; }
+// 📍 Filiale = 실제 물리 지점만. (Onigiri는 지점이 아니라 Arbeitstyp으로 분류됨)
+const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
+// 🧋 Arbeitstyp(근무 타입): 저장값(typ)은 기존 데이터 호환을 위해 소문자 키 유지.
+//    - "normal"      → 화면 표기 "Regulär" 🧋
+//    - "einspringen" → ⚡
+//    - "onigiri"     → 🍙 (계획 시간 없이 이름만 등록되는 특수 근무)
+const ARBEITSTYPEN = [
+  { typ:"normal",      icon:"🧋", lbl:"Regulär"     },
+  { typ:"einspringen", icon:"⚡", lbl:"Einspringen" },
+  { typ:"onigiri",     icon:"🍙", lbl:"Onigiri"     },
+];
+const TYP_META = Object.fromEntries(ARBEITSTYPEN.map(t=>[t.typ,t]));
+function typNorm(t){ const v=String(t||"normal").toLowerCase(); return TYP_META[v]?v:"normal"; }
+function typLabel(t){ return (TYP_META[typNorm(t)]||TYP_META.normal).lbl; }
+function typIcon(t){ return (TYP_META[typNorm(t)]||TYP_META.normal).icon; }
+// 🍙 Onigiri 근무 타입 판별 (근무표 시간 생략 대상)
+function isOnigiriTyp(t){ return typNorm(t)==="onigiri"; }
+// 지점 표시 순서
+const FILIAL_ORDER = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
+function filialRank(f){ const i=FILIAL_ORDER.indexOf(f); return i<0?500:i; }
 function filialSort(a,b){ return filialRank(a)-filialRank(b) || String(a||"").localeCompare(String(b||"")); }
 // ⚠️ 하드코딩 더미 월 필터 제거됨. Statistik의 "Monat auswählen"은 실제 데이터가
 //    존재하는 달만 동적으로 표시된다 (StatistikTab.availMonths 참고).
@@ -408,6 +421,81 @@ function today() {
   return new Date().toLocaleDateString("sv-SE", {timeZone:"Europe/Berlin"});
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  📊 3차원 교차 통계: 직원 → 지점(Filiale) → 근무타입(Arbeitstyp)
+//   · records의 typ: "normal" | "einspringen" | "onigiri" | "nachtrag"
+//   · "nachtrag"(사후등록)은 별도 타입이 아니라 정규 근무의 보정이므로
+//     집계상 "normal"(Regulär)로 귀속시키되, 원장부에는 Nachtrag 여부를 남긴다.
+// ═══════════════════════════════════════════════════════════════
+function statTyp(r){ const t=String(r&&r.typ||"normal").toLowerCase(); return t==="nachtrag" ? "normal" : typNorm(t); }
+function recHours(r){ const h=stunden(r&&r.ein, r&&r.aus); return h==null?0:h; }
+// 한 직원의 월간 기록 → {total, byFiliale:[{filiale,total,byTyp:[{typ,icon,lbl,std}]}]}
+function buildBreakdown(recs){
+  const list=(Array.isArray(recs)?recs:[]).filter(r=>r&&r.ein&&r.aus);
+  const total=list.reduce((a,r)=>a+recHours(r),0);
+  const filMap={};
+  list.forEach(r=>{
+    const f=r.filiale||"—";
+    const t=statTyp(r);
+    filMap[f]=filMap[f]||{filiale:f,total:0,typs:{}};
+    filMap[f].total+=recHours(r);
+    filMap[f].typs[t]=(filMap[f].typs[t]||0)+recHours(r);
+  });
+  const byFiliale=Object.values(filMap)
+    .sort((a,b)=>filialSort(a.filiale,b.filiale))
+    .map(x=>({
+      filiale:x.filiale, total:x.total,
+      byTyp:ARBEITSTYPEN.filter(t=>(x.typs[t.typ]||0)>0)
+        .map(t=>({typ:t.typ,icon:t.icon,lbl:t.lbl,std:x.typs[t.typ]}))
+        .sort((a,b)=>b.std-a.std),
+    }));
+  return { total, byFiliale };
+}
+
+// ── 📥 CSV Export (외부 라이브러리 없이 Blob + a[download]) ──────────
+function csvEscape(v){ return '"'+String(v==null?"":v).replace(/"/g,'""')+'"'; }
+function downloadCsvRows(rows, filename){
+  const bom="\uFEFF";
+  const csv=bom+rows.map(r=>r.map(csvEscape).join(";")).join("\r\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+// 근무표에서 계획 시작/종료 시간 추출 → {von,bis}
+function plannedTimesFor(schedule, name, date){
+  const sh=schedule&&schedule[name];
+  const arr=!sh?[]:(Array.isArray(sh)?sh:Object.values(sh));
+  const hit=arr.find(s=>(s&&(s.date||s.d))===date);
+  const tm=hit&&(hit.time||hit.t);
+  if(tm&&String(tm).includes("-")){
+    const p=String(tm).split("-");
+    return { von:(p[0]||"").trim(), bis:(p[1]||"").trim() };
+  }
+  return { von:"", bis:"" };
+}
+// 정산 원장 행 생성 (통합본/개별 공용)
+const ABRECHNUNG_HEADER = ["Datum","Wochentag","Mitarbeiter/in","Filiale","Arbeitstyp",
+  "Plan Von","Plan Bis","Ist Einstempeln","Ist Ausstempeln","Stunden","Nachtragen","Auto-Ausstempeln","Anmerkung"];
+function abrechnungRows(recs, schedule){
+  return (Array.isArray(recs)?recs:[])
+    .filter(r=>r&&r.ein&&r.aus)
+    .slice()
+    .sort((a,b)=>(a.date||"").localeCompare(b.date||"")||String(a.user||"").localeCompare(String(b.user||"")))
+    .map(r=>{
+      const pl=plannedTimesFor(schedule, r.user, r.date);
+      const h=recHours(r);
+      return [
+        r.date||"", TAGE_DE[new Date(r.date).getDay()]||"", r.user||"", r.filiale||"",
+        typLabel(statTyp(r)), pl.von, pl.bis, r.ein||"", r.aus||"",
+        h.toFixed(2).replace(".",","), r.typ==="nachtrag"?"Ja":"Nein",
+        r.isAutoCheckedOut?"Ja":"Nein", r.note||"",
+      ];
+    });
+}
+
 const S = {
   card: { background: C.card, borderRadius: 14, padding: "13px 14px", boxShadow: "0 2px 10px rgba(44,44,44,.07)" },
   hdr: { background: C.navy, padding: "env(safe-area-inset-top,44px) 20px 22px", paddingTop: "max(44px,env(safe-area-inset-top))", color: "#fff" },
@@ -417,9 +505,44 @@ const S = {
   pill: (s) => ({ fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: 99, background: s==="offen"?C.yellowLight:s==="genehmigt"?C.mintLight:C.redLight, color: s==="offen"?C.yellow:s==="genehmigt"?C.mintDark:C.red }),
 };
 
+// 📊 [직원 → 지점 → 근무타입] 계층 breakdown 렌더러 (관리자/직원 공용)
+function BreakdownView({ recs, compact }){
+  const bd = buildBreakdown(recs);
+  const fmt = h => h.toFixed(1).replace(".",",")+" Std";
+  if(bd.byFiliale.length===0){
+    return <div style={{fontSize:10,color:C.muted,padding:"6px 0"}}>Keine Arbeitszeiten in diesem Monat.</div>;
+  }
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:compact?5:7}}>
+      {bd.byFiliale.map(f=>(
+        <div key={f.filiale} style={{background:C.bg,borderRadius:9,padding:compact?"7px 9px":"9px 11px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+            <span style={{fontSize:compact?10:11,fontWeight:800,color:C.text,minWidth:0,
+              overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              {"📍 "+f.filiale}
+            </span>
+            <span style={{fontSize:compact?10:11,fontWeight:800,color:C.mintDark,flexShrink:0}}>{fmt(f.total)}</span>
+          </div>
+          <div style={{marginTop:4,display:"flex",flexDirection:"column",gap:3}}>
+            {f.byTyp.map(t=>(
+              <div key={t.typ} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                gap:8,paddingLeft:10}}>
+                <span style={{fontSize:compact?9:10,color:C.muted,fontWeight:600}}>
+                  {t.icon+" "+t.lbl}
+                </span>
+                <span style={{fontSize:compact?9:10,fontWeight:700,color:C.text,flexShrink:0}}>{fmt(t.std)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const FILIAL_NAMES = { A:"TEEAMO Arkaden", B:"TEEAMO Aegidiimarkt", C:"TEEnJOY" };
 const FILIAL_INIT = {
-  "TEEAMO Arkaden":"Ar", "TEEAMO Aegidiimarkt":"Ae", "TEEnJOY":"Tj", "Onigiri":"On",
+  "TEEAMO Arkaden":"Ar", "TEEAMO Aegidiimarkt":"Ae", "TEEnJOY":"Tj",
   "Arkaden":"Ar", "Aegidiimarkt":"Ae", "TEEnJOY":"Tj",
 };
 function filialInit(f){ return FILIAL_INIT[f]||f?.slice(0,2)||"?"; }
@@ -1300,22 +1423,25 @@ function overrideWithNachtrag({ a, setRecords }){
 }
 
 // (name·date)에 shift 추가 (root + 월별). 같은 날 기존 shift는 대체.
-async function addScheduleShift(name, date, filiale, time) {
+//  · typ: Arbeitstyp("normal"|"einspringen"|"onigiri"). Onigiri는 time이 ""여도 정상 저장.
+async function addScheduleShift(name, date, filiale, time, typ) {
   if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !name || !date) return;
+  const t = typNorm(typ);
+  const safeTime = isOnigiriTyp(t) ? "" : (time||"");
   try {
     const mk = "schedule_" + date.slice(0,7).replace("-","_");
     const snap = await window._fbGet(window._fbRef(window._fbDb, mk));
     const ex = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
     let arr = Array.isArray(ex[name]) ? ex[name] : Object.values(ex[name] || {});
     arr = arr.filter(s => (s.date||s.d) !== date);
-    arr.push({ date, filiale, time });
+    arr.push({ date, filiale, time:safeTime, typ:t });
     ex[name] = Object.fromEntries(arr.map((s,i)=>[String(i), s]));
     await window._fbSet(window._fbRef(window._fbDb, mk), ex);
     const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
     const root = rsnap.val() ? JSON.parse(JSON.stringify(rsnap.val())) : {};
     let rarr = Array.isArray(root[name]) ? root[name] : Object.values(root[name] || {});
     rarr = rarr.filter(s => (s.d||s.date) !== date);
-    rarr.push({ d:date, f:filiale, t:time });
+    rarr.push({ d:date, f:filiale, t:safeTime, typ:t });
     root[name] = rarr;
     await window._fbSet(window._fbRef(window._fbDb, "schedule"), root);
   } catch(e) { console.error("addScheduleShift error:", e); }
@@ -3175,6 +3301,13 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               </div>
             </div>
 
+            {/* 📊 지점 → 근무타입 계층 breakdown (이번 달) */}
+            <div style={{marginTop:14,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:7,
+                textTransform:"uppercase",letterSpacing:".05em"}}>{"Nach Filiale · Arbeitstyp"}</div>
+              <BreakdownView recs={myMonthRecs} compact={true}/>
+            </div>
+
             {totalH===0&&<div style={{fontSize:12,color:C.muted,textAlign:"center",marginTop:8}}>Noch keine Einträge diesen Monat.</div>}
           </div>
         </div>
@@ -3407,6 +3540,40 @@ function StatistikTab({records,users,schedule}){
     else downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
   }
 
+  // 📥 A. 통합본 CSV — 선택한 달의 모든 직원 근태 원장 (브라우저 내장 API만 사용)
+  function exportAbrechnungGesamt(){
+    const rows=[ABRECHNUNG_HEADER, ...abrechnungRows(monthRecs, schedule)];
+    const fn=`Monatsabrechnung_Gesamt_${selMonth}.csv`;
+    downloadCsvRows(rows, fn);
+    setExported(fn); setTimeout(()=>setExported(null),3000);
+  }
+  // 📥 B. 직원별 개별 CSV — 일자별 상세 + 지점별/타입별 집계 요약 포함
+  function exportAbrechnungMitarbeiter(emp){
+    const er=monthRecs.filter(r=>r.user===emp.vorname);
+    const bd=buildBreakdown(er);
+    const num=h=>h.toFixed(2).replace(".",",");
+    const rows=[
+      ["Abrechnung", emp.vorname+(emp.nachname?" "+emp.nachname:"")],
+      ["Monat", monthLabel(selMonth)],
+      ["Arbeitstage", String(er.length)],
+      ["Gesamtstunden", num(bd.total)],
+      [],
+      ["— Aufschlüsselung: Filiale → Arbeitstyp —"],
+      ["Filiale","Arbeitstyp","Stunden"],
+      ...bd.byFiliale.flatMap(f=>[
+        [f.filiale,"GESAMT",num(f.total)],
+        ...f.byTyp.map(t=>[f.filiale, t.icon+" "+t.lbl, num(t.std)]),
+      ]),
+      [],
+      ["— Tagesdetails —"],
+      ABRECHNUNG_HEADER,
+      ...abrechnungRows(er, schedule),
+    ];
+    const fn=`Abrechnung_${(emp.vorname||"Mitarbeiter").replace(/[^\p{L}\p{N}_-]/gu,"")}_${selMonth}.csv`;
+    downloadCsvRows(rows, fn);
+    setExported(fn); setTimeout(()=>setExported(null),3000);
+  }
+
   return(
     <div style={{padding:"14px"}}>
       <div style={{marginBottom:12}}>
@@ -3433,7 +3600,7 @@ function StatistikTab({records,users,schedule}){
             <div key={emp.key} style={S.card}>
               <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:9}}>
                 <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:emp.emoji?18:12,color:"#fff",flexShrink:0}}>{emp.emoji||emp.kuerzel}</div>
-                <div style={{flex:1}}>
+                <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:800,color:C.text}}>{emp.emoji&&<span style={{marginRight:3}}>{emp.emoji}</span>}{emp.vorname}</div>
                   <div style={{fontSize:9,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}{contract>0?` · Vertrag: ${contract}h`:""}</div>
                 </div>
@@ -3446,16 +3613,14 @@ function StatistikTab({records,users,schedule}){
                     </div>
                   )}
                 </div>
+                {/* 📥 직원별 개별 정산 CSV */}
+                <button onClick={()=>exportAbrechnungMitarbeiter(emp)} title={"Abrechnung CSV – "+emp.vorname}
+                  style={{flexShrink:0,width:32,height:32,borderRadius:9,border:"1px solid "+C.border,
+                    background:C.mintLight,color:C.mintDark,fontSize:14,fontWeight:800,cursor:"pointer",
+                    display:"flex",alignItems:"center",justifyContent:"center"}}>{"⬇"}</button>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
-                {FILIALEN.filter(f=>!isOnigiriFiliale(f)).map((f,fi)=>(
-                  <div key={f} style={{background:fColors[fi],borderRadius:7,padding:"6px 7px"}}>
-                    <div style={{fontSize:8,fontWeight:700,color:fTColors[fi],marginBottom:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{f}</div>
-                    <div style={{fontSize:12,fontWeight:800,color:fTColors[fi]}}>{byFil[f].toFixed(1)}h</div>
-                    <div style={{fontSize:8,color:fTColors[fi],opacity:.7}}>{er.filter(r=>r.filiale===f).length}d</div>
-                  </div>
-                ))}
-              </div>
+              {/* 📊 지점 → 근무타입 계층 breakdown */}
+              <BreakdownView recs={er} compact={true}/>
             </div>
           );
         })}
@@ -3463,6 +3628,22 @@ function StatistikTab({records,users,schedule}){
       <div style={{background:C.navy,borderRadius:14,padding:"16px",marginBottom:12}}>
         <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>{"📥 Daten exportieren"}</div>
         <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV – öffnet direkt in Excel"}</div>
+        {/* 📥 A. 월간 통합 정산본 (모든 직원 · CSV) */}
+        <div style={{background:"rgba(255,255,255,.07)",borderRadius:10,padding:"12px",marginBottom:8,
+          border:"1px solid rgba(255,255,255,.18)"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{"Monatsabrechnung – Gesamt"}</div>
+          <div style={{fontSize:9,color:"rgba(255,255,255,.4)",marginBottom:10}}>
+            {"Alle Mitarbeiter/innen · Datum · Filiale · Arbeitstyp · Plan/Ist-Zeiten · Std · Nachtragen"}
+          </div>
+          <button onClick={exportAbrechnungGesamt}
+            style={{width:"100%",padding:"11px",borderRadius:8,border:"none",
+              background:`linear-gradient(135deg,${C.yellow},#C99A2E)`,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
+            {"⬇ Gesamt-CSV ("+monthLabel(selMonth)+")"}
+          </button>
+          <div style={{fontSize:9,color:"rgba(255,255,255,.35)",marginTop:7,lineHeight:1.5}}>
+            {"Einzelne Abrechnungen: ⬇-Symbol neben dem Namen in der Übersicht oben."}
+          </div>
+        </div>
         {[
           {title:"Stundennachweis (Details)",sub:"Jeder Tag · Name · Datum · Filiale · Ein/Aus · Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
           {title:"Monatsübersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin · Gesamtstunden · je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`Übersicht_${selMonth}`},
@@ -3596,6 +3777,12 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
                     ))}
                   </div>
                 )}
+                {/* 📊 지점 → 근무타입 계층 breakdown */}
+                <div style={{padding:"10px 14px",borderTop:"1px solid "+C.border,background:"#fff"}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:6,
+                    textTransform:"uppercase",letterSpacing:".05em"}}>{"Filiale · Arbeitstyp"}</div>
+                  <BreakdownView recs={mRecs} compact={true}/>
+                </div>
                 {[...mRecs].sort((a,b)=>b.date.localeCompare(a.date)).map((r,i)=>(
                   <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 14px",borderBottom:i<mRecs.length-1?"1px solid "+C.border:"none"}}>
                     <div style={{display:"flex",gap:10,alignItems:"center"}}>
@@ -3729,8 +3916,8 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
               Kein Dienstplan für heute eingetragen.
             </div>
           ):(()=>{
-            //  : Arkaden  Aegidiimarkt  TEEnJOY  Onigiri(최하단)
-            const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY","Onigiri"];
+            //  : Arkaden  Aegidiimarkt  TEEnJOY
+            const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
             //   shift  (임시 직원 포함 — todayShiftEmps 항목은 {name,emp,isTemp})
             const withShift = todayShiftEmps.map(({name,emp,isTemp})=>{
               const shift=norm(schedule[name]||[]).find(s=>(s.date||s.d)===todayStr);
@@ -4220,6 +4407,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
   const [addTemp, setAddTemp] = useState("");
   const [addVon, setAddVon]   = useState("");
   const [addBis, setAddBis]   = useState("");
+  const [addTyp, setAddTyp]   = useState("normal");   // 🧋 Arbeitstyp: normal | einspringen | onigiri
 
   // 날짜별 근무 인덱스 (안전 정규화)
   const byDate = React.useMemo(()=>{
@@ -4229,7 +4417,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
         if(!s) return;
         const d=s.date||s.d; if(!d) return;
         (map[d]=map[d]||[]).push({
-          name, filiale:s.filiale||s.f||"", time:s.time||s.t||"",
+          name, filiale:s.filiale||s.f||"", time:s.time||s.t||"", typ:typNorm(s.typ),
           status:s.status||null, getauschtMit:s.getauschtMit||null, getauschtVon:s.getauschtVon||null
         });
       });
@@ -4389,14 +4577,23 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                       {(r.name||"?").slice(0,2)}
                     </div>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>
-                        {r.name}{isMine&&<span style={{fontSize:9,color:C.mintDark,marginLeft:6,fontWeight:800}}>(Du)</span>}
+                      <div style={{fontSize:13,fontWeight:700,color:C.text,display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
+                        <span>{r.name}</span>
+                        {isOnigiriTyp(r.typ)&&(
+                          <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,
+                            background:"#fce7f3",color:"#9d174d"}}>{"🍙 Onigiri"}</span>
+                        )}
+                        {typNorm(r.typ)==="einspringen"&&(
+                          <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,
+                            background:"#fef9c3",color:"#92400e"}}>{"⚡ Einspringen"}</span>
+                        )}
+                        {isMine&&<span style={{fontSize:9,color:C.mintDark,fontWeight:800}}>(Du)</span>}
                       </div>
                       {(()=>{
-                        const on=isOnigiriFiliale(fil);
+                        const on=isOnigiriTyp(r.typ);
                         const timePart = on ? "" : (r.time||"—");
                         const statusPart = rec?.aus?" · ✅ Feierabend":rec?.ein?" · 🟢 Aktiv":"";
-                        if(on && !statusPart) return null;  // Onigiri: 시간·상태 없으면 라인 생략(이름만)
+                        if(on && !statusPart) return null;  // 🍙 Onigiri: 시간 표시 영역 생략(이름만)
                         return (
                           <div style={{fontSize:10,color:C.muted,marginTop:1}}>
                             {timePart}{statusPart}
@@ -4463,7 +4660,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
         {allowDelete&&(
           <div style={{marginTop:6}}>
             {!addOpen ? (
-              <button onClick={()=>{setAddOpen(true);setAddFil(FILS[0]||"");setAddEmp("");setAddTemp("");setAddVon("");setAddBis("");setActMsg("");}}
+              <button onClick={()=>{setAddOpen(true);setAddFil(FILS[0]||"");setAddEmp("");setAddTemp("");setAddVon("");setAddBis("");setAddTyp("normal");setActMsg("");}}
                 style={{width:"100%",padding:"11px",borderRadius:11,border:"1.5px dashed "+C.mint,background:C.mintLight,color:C.mintDark,fontWeight:800,fontSize:12,cursor:"pointer"}}>
                 {"+ Schicht für diesen Tag hinzufügen"}
               </button>
@@ -4492,7 +4689,23 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                       style={{...S.input,width:"100%",fontSize:13,padding:"8px 10px",boxSizing:"border-box",marginTop:6}}/>
                   )}
                 </div>
-                {isOnigiriFiliale(addFil) ? (
+                {/* 🧋 3 · ARBEITSTYP — Onigiri 선택 시 시간 입력 숨김 */}
+                <div style={{marginBottom:8}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"3 · ARBEITSTYP"}</div>
+                  <div style={{display:"flex",gap:6}}>
+                    {ARBEITSTYPEN.map(({typ,icon,lbl})=>(
+                      <button key={typ} onClick={()=>setAddTyp(typ)}
+                        style={{flex:1,padding:"8px 4px",borderRadius:9,fontSize:10,fontWeight:800,cursor:"pointer",
+                          border:`2px solid ${addTyp===typ?C.mintDark:C.border}`,
+                          background:addTyp===typ?C.mintLight:"#fff",
+                          color:addTyp===typ?C.mintDark:C.muted}}>
+                        <div style={{fontSize:14}}>{icon}</div>
+                        <div style={{fontSize:9,marginTop:2}}>{lbl}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {isOnigiriTyp(addTyp) ? (
                   <div style={{fontSize:10,color:C.mintDark,fontWeight:700,background:C.mintLight,
                     borderRadius:9,padding:"9px 11px",marginBottom:10}}>
                     {"🍙 Onigiri: Keine Uhrzeit nötig – nur Name eintragen."}
@@ -4500,7 +4713,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                 ) : (
                   <div style={{display:"flex",gap:10,marginBottom:10}}>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"3 · VON"}</div>
+                      <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"4 · VON"}</div>
                       <TimeInput value={addVon} onChange={setAddVon} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
                     </div>
                     <div style={{flex:1,minWidth:0}}>
@@ -4514,10 +4727,10 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                   <button onClick={()=>{
                     const name=addEmp==="__temp__"?addTemp.trim():addEmp;
                     if(!name){ setActMsg("Bitte Mitarbeiter oder Temp-Name wählen."); return; }
-                    const on=isOnigiriFiliale(addFil);
+                    const on=isOnigiriTyp(addTyp);
+                    // 🍙 Onigiri: 시간 없이도 유효 — 그 외 타입만 VON/BIS 필수
                     if(!on && (!addVon||!addBis)){ setActMsg("Bitte VON und BIS angeben."); return; }
-                    // Onigiri: 시간 없이 저장(time=""), 그 외: VON-BIS
-                    addScheduleShift(name, selDate, addFil, on ? "" : addVon+"-"+addBis);
+                    addScheduleShift(name, selDate, addFil, on ? "" : addVon+"-"+addBis, addTyp);
                     setAddOpen(false); setActMsg("✅ Schicht hinzugefügt.");
                     setTimeout(()=>setActMsg(""),2500);
                   }} style={{flex:2,padding:"10px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"✅ Hinzufügen"}</button>
@@ -4823,6 +5036,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   const [aTemp, setATemp] = useState("");
   const [aVon, setAVon]   = useState("");
   const [aBis, setABis]   = useState("");
+  const [aTyp, setATyp]   = useState("normal");   // 🧋 Arbeitstyp: normal | einspringen | onigiri
 
   const [calYM, setCalYM] = useState(()=>{ const p=(selDate||today()).split("-"); return {y:+p[0], m:(+p[1])-1}; });
 
@@ -4834,14 +5048,14 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   function addToCart(){
     const name=resolveAName();
     if(!name){ setMsg({t:"err",m:"Bitte Mitarbeiter oder Temp-Name wählen."}); return; }
-    const on=isOnigiriFiliale(aFil);
+    const on=isOnigiriTyp(aTyp);
+    // 🍙 Onigiri: 시간 없이도 유효 — 그 외 타입만 VON/BIS 필수
     if(!on && (!aVon||!aBis)){ setMsg({t:"err",m:"Bitte VON und BIS angeben."}); return; }
-    // Onigiri: 시간 없이 이름·지점만 등록
-    setCart(prev=>[...prev, {date:selDate, filiale:aFil, name, von:on?"":aVon, bis:on?"":aBis}]);
-    setAEmp(""); setATemp(""); setAVon(""); setABis(""); setMsg(null);  // 지점은 유지, 나머지 초기화
+    setCart(prev=>[...prev, {date:selDate, filiale:aFil, name, von:on?"":aVon, bis:on?"":aBis, typ:aTyp}]);
+    setAEmp(""); setATemp(""); setAVon(""); setABis(""); setATyp("normal"); setMsg(null);  // 지점은 유지
   }
   function removeCart(idx){ setCart(prev=>prev.filter((_,i)=>i!==idx)); }
-  function resetInputs(){ setAEmp("");setATemp("");setAVon("");setABis(""); }
+  function resetInputs(){ setAEmp("");setATemp("");setAVon("");setABis("");setATyp("normal"); }
   function clearAll(){ setCart([]); resetInputs(); try{localStorage.removeItem(DRAFT_KEY);}catch{} }
 
   // ── 저장: 장바구니 전체를 root + 월별 두 노드에 기록. 저장 후 모달 유지 + 초기화 ──
@@ -4850,8 +5064,9 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
     if(!(window._fbDb&&window._fbRef&&window._fbGet&&window._fbSet)){ setMsg({t:"err",m:"Keine Verbindung zur Datenbank."}); return; }
     setSaving(true); setMsg(null);
     try{
-      const byName={};  // {name: [{date,filiale,time}]}
-      cart.forEach(it=>{ (byName[it.name]=byName[it.name]||[]).push({date:it.date, filiale:it.filiale, time: isOnigiriFiliale(it.filiale) ? "" : it.von+"-"+it.bis}); });
+      const byName={};  // {name: [{date,filiale,time,typ}]}
+      cart.forEach(it=>{ const on=isOnigiriTyp(it.typ);
+        (byName[it.name]=byName[it.name]||[]).push({date:it.date, filiale:it.filiale, time: on ? "" : it.von+"-"+it.bis, typ:typNorm(it.typ)}); });
       // 1) 월별 노드
       const monthsTouched=new Set(cart.map(it=>it.date.slice(0,7).replace("-","_")));
       for(const mk of monthsTouched){
@@ -4862,7 +5077,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
           const me=entries.filter(e=>e.date.slice(0,7).replace("-","_")===mk);
           if(me.length===0) continue;
           let arr=Array.isArray(ex[name])?ex[name]:Object.values(ex[name]||{});
-          me.forEach(e=>{ arr=arr.filter(s=>!((s.date||s.d)===e.date&&(s.filiale||s.f)===e.filiale)); arr.push({date:e.date,filiale:e.filiale,time:e.time}); });
+          me.forEach(e=>{ arr=arr.filter(s=>!((s.date||s.d)===e.date&&(s.filiale||s.f)===e.filiale)); arr.push({date:e.date,filiale:e.filiale,time:e.time,typ:e.typ}); });
           ex[name]=Object.fromEntries(arr.map((s,i)=>[String(i),s]));
         }
         await window._fbSet(window._fbRef(window._fbDb,key),ex);
@@ -4874,7 +5089,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
       const root=rsnap.val()?JSON.parse(JSON.stringify(rsnap.val())):{};
       for(const [name,entries] of Object.entries(byName)){
         let rarr=Array.isArray(root[name])?root[name]:Object.values(root[name]||{});
-        entries.forEach(e=>{ rarr=rarr.filter(s=>!((s.d||s.date)===e.date&&(s.f||s.filiale)===e.filiale)); rarr.push({d:e.date,f:e.filiale,t:e.time}); });
+        entries.forEach(e=>{ rarr=rarr.filter(s=>!((s.d||s.date)===e.date&&(s.f||s.filiale)===e.filiale)); rarr.push({d:e.date,f:e.filiale,t:e.time,typ:e.typ}); });
         root[name]=rarr;
       }
       await window._fbSet(window._fbRef(window._fbDb,"schedule"),root);
@@ -5036,7 +5251,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
                         <div style={{width:30,height:30,borderRadius:"50%",background:C.mintDark,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:10,flexShrink:0}}>{(e.name||"?").slice(0,2)}</div>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:12,fontWeight:700,color:C.text}}>{e.name}</div>
-                          <div style={{fontSize:10,color:C.muted}}>{(filShort[e.filiale]||e.filiale)+(e.time?" · "+e.time:"")}</div>
+                          <div style={{fontSize:10,color:C.muted}}>{typIcon(e.typ)+" "+(filShort[e.filiale]||e.filiale)+(e.time?" · "+e.time:"")}</div>
                         </div>
                         <span style={{fontSize:8,fontWeight:800,color:C.mintDark,background:C.mintLight,padding:"3px 7px",borderRadius:99,flexShrink:0}}>{"✓ gespeichert"}</span>
                       </div>
@@ -5054,7 +5269,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
                       <div style={{width:30,height:30,borderRadius:"50%",background:"#f59e0b",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:10,flexShrink:0}}>{(c.name||"?").slice(0,2)}</div>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:12,fontWeight:700,color:C.text}}>{c.name}</div>
-                        <div style={{fontSize:10,color:C.muted}}>{(filShort[c.filiale]||c.filiale)+((c.von&&c.bis)?" · "+c.von+"-"+c.bis:"")}</div>
+                        <div style={{fontSize:10,color:C.muted}}>{typIcon(c.typ)+" "+(filShort[c.filiale]||c.filiale)+((c.von&&c.bis)?" · "+c.von+"-"+c.bis:"")}</div>
                       </div>
                       <button onClick={()=>removeCart(c._i)}
                         style={{flexShrink:0,width:26,height:26,borderRadius:7,border:"1px solid "+C.border,background:C.redLight,color:C.red,fontSize:13,fontWeight:700,cursor:"pointer"}}>{"×"}</button>
@@ -5085,7 +5300,23 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
                     <input value={aTemp} onChange={e=>setATemp(e.target.value)} placeholder="z. B. Tingting" style={{...inp,marginTop:6}}/>
                   )}
                 </div>
-                {isOnigiriFiliale(aFil) ? (
+                {/* 🧋 ARBEITSTYP — Onigiri 선택 시 시간 입력 숨김 */}
+                <div style={{marginBottom:8}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>ARBEITSTYP</div>
+                  <div style={{display:"flex",gap:6}}>
+                    {ARBEITSTYPEN.map(({typ,icon,lbl})=>(
+                      <button key={typ} onClick={()=>setATyp(typ)}
+                        style={{flex:1,padding:"8px 4px",borderRadius:9,fontSize:10,fontWeight:800,cursor:"pointer",
+                          border:`2px solid ${aTyp===typ?C.mintDark:C.border}`,
+                          background:aTyp===typ?"#fff":"rgba(255,255,255,.6)",
+                          color:aTyp===typ?C.mintDark:C.muted}}>
+                        <div style={{fontSize:14}}>{icon}</div>
+                        <div style={{fontSize:9,marginTop:2}}>{lbl}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {isOnigiriTyp(aTyp) ? (
                   <div style={{fontSize:10,color:C.mintDark,fontWeight:700,background:"#fff",
                     border:"1px solid "+C.mint,borderRadius:9,padding:"9px 11px",marginBottom:10}}>
                     {"🍙 Onigiri: Keine Uhrzeit nötig – nur Name eintragen."}
