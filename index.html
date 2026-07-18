@@ -491,7 +491,8 @@ function today() {
 
 // ═══════════════════════════════════════════════════════════════
 //  📊 3차원 교차 통계: 직원 → 지점(Filiale) → 근무타입(Arbeitstyp)
-//   · records의 typ: "normal" | "einspringen" | "onigiri" | "nachtrag"
+//   · records의 typ: "normal"(Regulär) | "einspringen" | "nachtrag"
+//     (구 데이터의 "onigiri"는 typNorm()이 Regulär로 귀속시키고, 지점 ONIGIRI가 구분)
 //   · "nachtrag"(사후등록)은 별도 타입이 아니라 정규 근무의 보정이므로
 //     집계상 "normal"(Regulär)로 귀속시키되, 원장부에는 Nachtrag 여부를 남긴다.
 // ═══════════════════════════════════════════════════════════════
@@ -693,8 +694,18 @@ function OnigiriMigrationPanel(){
     try{
       const rep = await migrateOnigiriData({ dryRun });
       if(dryRun) { setPreview(rep); setDone(null); }
-      else { setDone(rep); setPreview(null); }
-    }catch(e){ setErr(e.message||String(e)); }
+      else {
+        setDone(rep); setPreview(null);
+        // ✅ 완료 알림
+        window.alert("총 "+rep.total+"개의 과거 오니기리 기록이 ONIGIRI 지점으로 안전하게 이관되었습니다."
+          + (rep.duplicates.length
+              ? "\n\n⚠️ 같은 직원·같은 날짜에 ONIGIRI 기록이 중복된 건이 "+rep.duplicates.length+"건 있습니다. 이중 정산 방지를 위해 확인해 주세요."
+              : ""));
+      }
+    }catch(e){
+      setErr(e.message||String(e));
+      if(!dryRun) window.alert("❌ 이관 중 오류가 발생했습니다: "+(e.message||e));
+    }
     setBusy(false);
   }
 
@@ -717,12 +728,12 @@ function OnigiriMigrationPanel(){
             cursor:busy?"not-allowed":"pointer"}}>
           {busy?"⏳ …":"🔍 Vorschau (Dry-Run)"}
         </button>
-        <button onClick={()=>{ if(window.confirm("과거 Onigiri 데이터를 ONIGIRI 지점으로 일괄 이관합니다. 계속할까요?")) run(false); }}
+        <button onClick={()=>{ if(window.confirm("과거 Onigiri 데이터를 ONIGIRI 지점으로 일괄 이관합니다.\n(지점 → ONIGIRI / 근무형태 → Regulär)\n\n계속할까요?")) run(false); }}
           disabled={busy}
-          style={{flex:1,padding:"10px",borderRadius:9,border:"none",
+          style={{flex:2,padding:"10px",borderRadius:9,border:"none",
             background:"linear-gradient(135deg,#f59e0b,#c2410c)",color:"#fff",fontWeight:800,fontSize:11,
-            cursor:busy?"not-allowed":"pointer"}}>
-          {busy?"⏳ …":"🚚 Jetzt migrieren"}
+            cursor:busy?"not-allowed":"pointer",lineHeight:1.35}}>
+          {busy?"⏳ 이관 중…":"⚠️ 과거 Onigiri 데이터 새 지점으로 일괄 이관"}
         </button>
       </div>
 
@@ -1699,7 +1710,8 @@ function overrideWithNachtrag({ a, setRecords }){
 }
 
 // (name·date)에 shift 추가 (root + 월별). 같은 날 기존 shift는 대체.
-//  · typ: Arbeitstyp("normal"|"einspringen"|"onigiri"). Onigiri는 time이 ""여도 정상 저장.
+//  · typ: Arbeitstyp("normal"=Regulär | "einspringen"). Onigiri는 지점(ONIGIRI)으로 운영.
+//  · ONIGIRI 지점은 계획시간 없이(time:"") 이름만으로 정상 저장된다.
 async function addScheduleShift(name, date, filiale, time, typ) {
   if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !name || !date) return;
   const t = typNorm(typ);
@@ -3542,17 +3554,15 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               {/* 근무 유형 선택 */}
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Arbeitstyp</div>
               <div style={{display:"flex",gap:7}}>
-                {[
-                  {typ:"normal",    icon:"🧋", lbl:"Regulär"},
-                  {typ:"einspringen",icon:"⚡", lbl:"Einspringen"},
-                  {typ:"onigiri",   icon:"🍙", lbl:"Onigiri"},
-                ].map(({typ,icon,lbl})=>(
+                {/* 🧋 Onigiri는 Arbeitstyp에서 제외됨 → 지점(ONIGIRI)으로만 운영.
+                    옵션은 공용 상수 ARBEITSTYPEN 하나만 바라본다. */}
+                {ARBEITSTYPEN.map(({typ,icon,lbl})=>(
                   <button key={typ} onClick={()=>setClockTyp(typ)}
                     style={{flex:1,padding:"9px 4px",borderRadius:10,fontSize:10,fontWeight:700,
                       cursor:"pointer",textAlign:"center",
-                      border:`2px solid ${clockTyp===typ?(typ==="einspringen"?"#f59e0b":typ==="onigiri"?"#ec4899":C.mint):C.border}`,
-                      background:clockTyp===typ?(typ==="einspringen"?"#fef9c3":typ==="onigiri"?"#fce7f3":C.mintLight):"#fff",
-                      color:clockTyp===typ?(typ==="einspringen"?"#92400e":typ==="onigiri"?"#9d174d":C.mintDark):C.muted
+                      border:`2px solid ${clockTyp===typ?(typ==="einspringen"?"#f59e0b":C.mint):C.border}`,
+                      background:clockTyp===typ?(typ==="einspringen"?"#fef9c3":C.mintLight):"#fff",
+                      color:clockTyp===typ?(typ==="einspringen"?"#92400e":C.mintDark):C.muted
                     }}>
                     <div style={{fontSize:15}}>{icon}</div>
                     <div style={{fontSize:9,marginTop:2}}>{lbl}</div>
