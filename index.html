@@ -393,15 +393,48 @@ function stunden(ein, aus) {
 }
 function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "–" : h.toFixed(1) + "h"; }
 // 근무표(schedule)에서 name·date의 예정 종료시간("HH:MM") 추출 — 자동 강제 퇴근용
+//  · root({d,f,t}) / 월별({date,filiale,time}) 두 스키마 모두 지원
+//  · 같은 날 여러 shift가 있으면 가장 늦은 종료시간을 채택
+//  · Onigiri 등 시간이 없는 근무(time:"")는 건너뜀
 function scheduledEndTimeFor(schedule, name, date){
   const sh = schedule && schedule[name];
   const arr = !sh ? [] : (Array.isArray(sh) ? sh : Object.values(sh));
-  const hit = arr.find(s => (s && (s.date||s.d)) === date);
-  const tm = hit && (hit.time || hit.t);
-  if(tm && String(tm).includes("-")){
-    const end = String(tm).split("-")[1].trim();
-    if(/^\d{1,2}:\d{2}$/.test(end)) return end;
-  }
+  const ends = arr
+    .filter(s => s && (s.date||s.d) === date)
+    .map(s => {
+      const tm = s.time || s.t || "";
+      if(String(tm).includes("-")) return String(tm).split("-")[1].trim();
+      // 별도 필드로 저장된 경우도 지원
+      return String(s.bis || s.end || "").trim();
+    })
+    .filter(v => /^\d{1,2}:\d{2}$/.test(v))
+    .map(v => v.length===4 ? "0"+v : v);
+  if(!ends.length) return null;
+  return ends.sort()[ends.length-1];   // 가장 늦은 예정 종료시간
+}
+// 🌙 자동 강제 퇴근에 쓸 퇴근시각 결정.
+//    1순위: 근무표의 예정 종료시간  /  2순위(Fallback): 출근시각 + AUTO_FALLBACK_H 시간
+//    ⚠️ 어떤 경우에도 '출근시각과 동일한 값'을 반환하지 않는다(0시간 근무 방지).
+const AUTO_FALLBACK_H = 8;
+function autoCheckoutAus(schedule, rec){
+  const ein = rec && rec.ein;
+  const planned = scheduledEndTimeFor(schedule, rec && rec.user, rec && rec.date);
+  if(planned && planned !== ein) return { aus:planned, viaPlan:true };
+  // Fallback: 출근 + N시간 (자정 넘기면 23:59로 클램프)
+  const [h,m] = String(ein||"09:00").split(":").map(Number);
+  const total = (h||0)*60 + (m||0) + AUTO_FALLBACK_H*60;
+  const cl = Math.min(total, 23*60+59);
+  const fb = pad(Math.floor(cl/60)) + ":" + pad(cl%60);
+  return { aus: fb===ein ? "23:59" : fb, viaPlan:false };
+}
+// 📌 특정 근무(name·date)에 대한 Nachtragen 신청 상태 — 신청 버튼 락 장치용
+//    반환: "genehmigt"(승인 완료) | "offen"(승인 대기) | null(없음)
+function nachtragStatusFor(antraege, name, date){
+  const list = (Array.isArray(antraege)?antraege:[])
+    .filter(a => a && a.user===name && a.date===date &&
+      (a.typ==="nachtrag" || a.kategorie==="Nachtrag" || a.ein || a.aus));
+  if(list.some(a => a.status==="genehmigt" || a.status==="approved")) return "genehmigt";
+  if(list.some(a => !a.status || a.status==="offen" || a.status==="pending")) return "offen";
   return null;
 }
 // 실제(Ist) 근무시간: name·date의 실제 출퇴근 or 승인된 Nachtragen 시간을 반환.
@@ -1401,23 +1434,27 @@ function nachtragenSchicht({ userName, date, filiale, ein, aus, setRecords }) {
 //  최종 근무로 남긴다. → 통계/누적 시간에 하루 2번 잡히는 버그 제거.
 function overrideWithNachtrag({ a, setRecords }){
   const sameSession = (r)=> r && r.user===a.user && r.date===a.date;
-  // Firebase: 임시 clock_* / 완료 record / 자동퇴근 record / 이전 nachtrag 모두 제거
-  if(window._fbDb && window._fbRef && window._fbGet && window._fbRemove){
-    window._fbGet(window._fbRef(window._fbDb,"records")).then(snap=>{
-      const data=snap.val()||{};
-      Object.entries(data).forEach(([k,v])=>{
-        if(sameSession(v)) window._fbRemove(window._fbRef(window._fbDb,"records/"+k)).catch(()=>{});
-      });
-    }).catch(()=>{});
-  }
   const newRec={ id:Date.now(), user:a.user, date:a.date, filiale:a.filiale,
-    ein:a.ein, aus:a.aus, note:a.grund||"Nachtrag genehmigt", typ:"nachtrag" };
-  // 로컬 상태: 같은 세션 기록 모두 걷어내고 승인된 Nachtragen 하나만 남긴다.
+    ein:a.ein, aus:a.aus, note:a.grund||"Nachtrag genehmigt", typ:"nachtrag",
+    isAutoCheckedOut:false, prüfen:false, frühGrund:"" };
+  // ⚠️ records는 setRecords가 노드 전체를 다시 기록하므로, 개별 _fbRemove를 병행하면
+  //    비동기 삭제가 '새로 승인된 기록'까지 지워버리는 경합이 발생한다(근무표 미반영 원인).
+  //    → 상태 갱신 한 번으로 원자적으로 처리한다.
   if(typeof setRecords==="function"){
     setRecords(prev=>[
       ...((Array.isArray(prev)?prev:[]).filter(r=>!sameSession(r))),
       newRec
     ]);
+  } else if(window._fbDb && window._fbRef && window._fbGet && window._fbRemove && window._fbPush){
+    // setRecords가 없을 때만 직접 정리 후 추가 (새 기록은 삭제 대상에서 제외)
+    window._fbGet(window._fbRef(window._fbDb,"records")).then(snap=>{
+      const data=snap.val()||{};
+      Object.entries(data).forEach(([k,v])=>{
+        if(sameSession(v) && String(v.id)!==String(newRec.id))
+          window._fbRemove(window._fbRef(window._fbDb,"records/"+k)).catch(()=>{});
+      });
+      window._fbPush(window._fbRef(window._fbDb,"records"), newRec).catch(()=>{});
+    }).catch(()=>{});
   }
   return newRec;
 }
@@ -1524,6 +1561,10 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
   const liveClockToday = (Array.isArray(records)?records:[])
     .find(r => r.user===userName && r.date===d && r.ein && r.typ!=="nachtrag" && !r.isAutoCheckedOut);
   const blockNachtragToday = (d === todayStr) && !!liveClockToday;
+  // 🔒 Nachtragen 락: 이 근무(날짜)에 대해 이미 승인/대기 중인 신청이 있으면 재신청 차단
+  const nachLock = nachtragStatusFor(antraege, userName, d);   // "genehmigt" | "offen" | null
+  const nachLocked = nachLock !== null;
+  const cardLocked = blockNachtragToday || nachLocked;
 
   useEffect(() => {
     if (status === "prüfen" && actualRec) {
@@ -1577,6 +1618,8 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
             if(translucent) return; // 이미 넘긴/교환된 근무는 재조작 불가 (기록만 유지)
             // 🚫 당일 이미 출근 기록이 있으면 Nachtragen 진입 차단
             if(blockNachtragToday) return;
+            // 🔒 이미 승인/대기 중인 Nachtragen이 있으면 재신청 진입 차단
+            if(nachLocked && shiftPassed) return;
             // 과거: Nachtragen / 미래: Schicht frei geben
             if(shiftPassed) { setModalTab("nachtrag"); setShowModal(true); }
             else { setModalTab("future"); setShowModal(true); }
@@ -1584,7 +1627,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
           style={{display:"flex",alignItems:"center",justifyContent:"space-between",
             padding:"10px 12px",
             background:C.card,
-            cursor:(translucent||blockNachtragToday)?"default":"pointer"}}>
+            cursor:(translucent||blockNachtragToday||(nachLocked&&shiftPassed))?"default":"pointer"}}>
           <div style={{fontSize:12,fontWeight:600,color:C.text}}>
             {f}{t ? ` · ${t}` : ""}
             {isReleased && <div style={{fontSize:10,color:"#b45309",marginTop:3,fontWeight:700}}>{"🔄 Freigegeben · wartet auf Tausch"}</div>}
@@ -1593,7 +1636,16 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
             {tauschLabel && <div style={{fontSize:9,color:C.mintDark,marginTop:3,fontWeight:600}}>{tauschLabel}</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
-            {!translucent&&!blockNachtragToday&&(
+            {/* 🔒 Nachtragen 상태 배지 — 버튼(tippen) 대신 노출 */}
+            {nachLocked&&shiftPassed&&(
+              <span style={{fontSize:8,fontWeight:800,padding:"3px 7px",borderRadius:99,
+                background:nachLock==="genehmigt"?C.mintLight:C.yellowLight,
+                color:nachLock==="genehmigt"?C.mintDark:C.yellow,
+                border:`1px solid ${nachLock==="genehmigt"?C.mint:C.yellow}`,whiteSpace:"nowrap"}}>
+                {nachLock==="genehmigt"?"✅ Korrigiert":"⏳ In Prüfung"}
+              </span>
+            )}
+            {!translucent&&!blockNachtragToday&&!(nachLocked&&shiftPassed)&&(
               <span style={{fontSize:8,color:C.muted}}>tippen</span>
             )}
             <span style={{fontSize:9,fontWeight:700,padding:"3px 8px",borderRadius:99,
@@ -2911,7 +2963,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const autoOutRec = (Array.isArray(records)?records:[]).find(r =>
     r && r.user===user.vorname && r.isAutoCheckedOut &&
     !autoOutDismissed.has(r.date) &&
-    !(Array.isArray(antraege)?antraege:[]).some(a => a.user===user.vorname && a.date===r.date)
+    // 🔒 이미 신청(대기) 또는 승인된 Nachtragen이 있으면 배너를 더 이상 띄우지 않음
+    !nachtragStatusFor(antraege, user.vorname, r.date)
   );
   function dismissAutoOut(dateStr){
     try{ localStorage.setItem("teeamo_autoout_ack_"+userKey+"_"+dateStr,"1"); }catch{}
@@ -4396,6 +4449,8 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
   const todayStr = today();
   const [calYM, setCalYM] = useState(()=>{ const p=todayStr.split("-"); return {y:+p[0], m:(+p[1])-1}; });
   const [selDate, setSelDate] = useState(todayStr);
+  // 🔒 Nachtragen 락 판정을 위한 신청 목록 구독
+  const [antraegeList] = useFirebase("antraege", []);
   // 인라인 수정/양도/Nachtragen 상태
   const [editRow, setEditRow] = useState(null);   // {name, fil, von, bis}
   const [nachRow, setNachRow] = useState(null);   // {name, von, bis}
@@ -4635,6 +4690,18 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                               (근무 중 or 정상 종료 상태) — 단 자동퇴근은 수정 위해 허용
                             · 과거: 완료 기록이 없거나, 자동퇴근된 근무는 수정 위해 허용 */}
                         {(()=>{
+                          // 🔒 이미 승인/대기 중인 Nachtragen이 있으면 버튼 대신 상태 배지
+                          const lock = nachtragStatusFor(antraegeList, r.name, selDate);
+                          if(lock){
+                            return (
+                              <span style={{padding:"6px 9px",borderRadius:8,fontSize:10,fontWeight:800,whiteSpace:"nowrap",
+                                border:"1px solid "+(lock==="genehmigt"?C.mint:C.yellow),
+                                background:lock==="genehmigt"?C.mintLight:C.yellowLight,
+                                color:lock==="genehmigt"?C.mintDark:C.yellow}}>
+                                {lock==="genehmigt"?"✅ Korrigiert":"⏳ In Prüfung"}
+                              </span>
+                            );
+                          }
                           const realClock = rec && rec.ein && rec.typ!=="nachtrag" && !rec.isAutoCheckedOut;
                           const showNach = isPastOrToday && (
                             selDate===todayStr
@@ -5573,6 +5640,11 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
   function handleNachtragNotif(notifKey, n, ok) {
     setAntraege(prev=>prev.map(a=>a.id===n.antragId?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
+    // ✅ 승인 시 근무표/통계 소스(records)를 승인된 Nachtragen 시간으로 즉시 덮어쓴다.
+    //    (이 경로에서 records를 갱신하지 않아 근무표에 강제퇴근 시간이 남던 버그 수정)
+    if (ok) {
+      overrideWithNachtrag({ a:{user:n.user, date:n.date, filiale:n.filiale, ein:n.ein, aus:n.aus, grund:n.grund||""}, setRecords });
+    }
     const entscheidung = ok ? "genehmigt" : "abgelehnt";
     ["teddy","yeaji"].forEach(mgr => {
       const k = `nachtrag_${n.antragId}_${mgr}`;
@@ -5620,7 +5692,10 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
   // Nachtrag   (notifications   antraege )
   function approveNachtrag(id, ok) {
+    const target=(Array.isArray(antraege)?antraege:[]).find(a=>a.id===id);
     setAntraege(prev=>prev.map(a=>a.id===id?{...a,status:ok?"genehmigt":"abgelehnt"}:a));
+    // ✅ 승인 시 records를 승인된 Nachtragen 시간으로 덮어써 근무표를 즉시 동기화
+    if (ok && target) overrideWithNachtrag({ a:target, setRecords });
     // notifications  nachtrag  bearbeitetVon 
     ["teddy","yeaji"].forEach(mgr => {
       const k = `nachtrag_${id}_${mgr}`;
@@ -6049,7 +6124,7 @@ function App(){
   const [users,    setUsers,    usersReady]    = useFirebase("users",    INIT_USERS);
   const [records,  setRecords,  recordsReady]  = useFirebase("records",  INIT_RECORDS);
   const [antraege, setAntraege, antraegeReady] = useFirebase("antraege", INIT_ANTRAEGE);
-  const [schedule] = useFirebase("schedule", {});
+  const [schedule, , scheduleReady] = useFirebase("schedule", {});
   const csvCtx = useDienstplanCSV();
 
   // 최신 값 참조용 ref (interval 클로저에서 stale 방지)
@@ -6060,12 +6135,13 @@ function App(){
   useEffect(()=>{ cleanupJuneDummyRecords(); },[]);
 
   // 🌙 자정 자동 강제 퇴근 (Auto-Ausstempeln)
-  //    · 앱이 열려 있는 동안 매 분 검사 + 마운트 즉시 1회 검사.
-  //    · '근무 중(ein 있고 aus 없음)' 이면서 날짜가 과거(어제 이전)인 세션을
-  //      예정 종료시간(Scheduled End Time)으로 강제 종료하고 isAutoCheckedOut 표시.
-  //    · Firebase 불필요 쓰기 방지: 처리 대상이 있을 때만 setRecords 호출.
+  //    · '근무 중(ein 있고 aus 없음)'이면서 날짜가 과거인 세션을 강제 종료.
+  //    · 퇴근시각 = 근무표의 예정 종료시간(예: 20:00) — autoCheckoutAus() 참고.
+  //      찾지 못할 때만 Fallback(출근+8h)이며, 절대 출근시각과 같아지지 않는다.
+  //    ⚠️ schedule 로딩 완료(scheduleReady) 전에는 실행하지 않는다.
+  //       (예정 종료시간을 못 읽어 퇴근시간이 '출근시간'으로 저장되던 버그 방지)
   useEffect(()=>{
-    if(!recordsReady) return;
+    if(!recordsReady || !scheduleReady) return;
     const isStale = (r,td)=> r && r.ein && (r.aus===null||r.aus===undefined||r.aus==="") && r.typ!=="nachtrag" && r.date && r.date < td;
     function runAutoCheckout(){
       const td = today();
@@ -6075,9 +6151,10 @@ function App(){
         const p=Array.isArray(prev)?prev:[];
         return p.map(r=>{
           if(isStale(r,td)){
-            const end = scheduledEndTimeFor(scheduleRef.current, r.user, r.date) || r.ein;
-            return {...r, aus:end, isAutoCheckedOut:true,
-              note:(r.note?r.note+" · ":"")+"Auto-Ausstempeln", prüfen:false, frühGrund:""};
+            const { aus, viaPlan } = autoCheckoutAus(scheduleRef.current, r);
+            return {...r, aus, isAutoCheckedOut:true,
+              note:(r.note?r.note+" · ":"")+(viaPlan?"Auto-Ausstempeln (Planende)":"Auto-Ausstempeln (geschätzt)"),
+              prüfen:false, frühGrund:""};
           }
           return r;
         });
@@ -6086,7 +6163,7 @@ function App(){
     runAutoCheckout();
     const iv=setInterval(runAutoCheckout, 60*1000);
     return ()=>clearInterval(iv);
-  },[recordsReady]);
+  },[recordsReady, scheduleReady]);
 
   // INIT_USERS PIN LS  1 
   useEffect(() => { if (usersReady) initPins(INIT_USERS); }, [usersReady]);
