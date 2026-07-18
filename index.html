@@ -75,27 +75,49 @@ const C = {
   yellow:"#C8A96A", yellowLight:"#FAF4E8",
 };
 
-// 📍 Filiale = 실제 물리 지점만. (Onigiri는 지점이 아니라 Arbeitstyp으로 분류됨)
-const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
-// 🧋 Arbeitstyp(근무 타입): 저장값(typ)은 기존 데이터 호환을 위해 소문자 키 유지.
-//    - "normal"      → 화면 표기 "Regulär" 🧋
-//    - "einspringen" → ⚡
-//    - "onigiri"     → 🍙 (계획 시간 없이 이름만 등록되는 특수 근무)
+// 📍 Filiale = 독립된 지점. ONIGIRI는 정식 지점으로 격상되어 다른 매장과
+//    DB상 완전히 분리된 스케줄/근무 문서를 가진다.
+const ONIGIRI_FILIALE = "ONIGIRI";
+const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY", ONIGIRI_FILIALE];
+function isOnigiriFiliale(f){ return String(f||"").trim().toUpperCase()==="ONIGIRI"; }
+// 🧋 Arbeitstyp(근무 형태): Onigiri는 지점으로 이동했으므로 여기서 제거.
+//    저장값(typ)은 기존 데이터 호환을 위해 소문자 키 유지.
 const ARBEITSTYPEN = [
   { typ:"normal",      icon:"🧋", lbl:"Regulär"     },
   { typ:"einspringen", icon:"⚡", lbl:"Einspringen" },
-  { typ:"onigiri",     icon:"🍙", lbl:"Onigiri"     },
 ];
 const TYP_META = Object.fromEntries(ARBEITSTYPEN.map(t=>[t.typ,t]));
+// ⚠️ 구 데이터 호환: typ:"onigiri"로 저장된 기록은 Regulär로 귀속시킨다
+//    (지점 ONIGIRI가 별도로 구분해 주므로 통계가 중복되지 않는다).
 function typNorm(t){ const v=String(t||"normal").toLowerCase(); return TYP_META[v]?v:"normal"; }
 function typLabel(t){ return (TYP_META[typNorm(t)]||TYP_META.normal).lbl; }
 function typIcon(t){ return (TYP_META[typNorm(t)]||TYP_META.normal).icon; }
-// 🍙 Onigiri 근무 타입 판별 (근무표 시간 생략 대상)
-function isOnigiriTyp(t){ return typNorm(t)==="onigiri"; }
-// 지점 표시 순서
-const FILIAL_ORDER = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
-function filialRank(f){ const i=FILIAL_ORDER.indexOf(f); return i<0?500:i; }
+// 지점 표시 순서 (ONIGIRI는 항상 최하단)
+const FILIAL_ORDER = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY", ONIGIRI_FILIALE];
+function filialRank(f){ if(isOnigiriFiliale(f)) return 900; const i=FILIAL_ORDER.indexOf(f); return i<0?500:i; }
 function filialSort(a,b){ return filialRank(a)-filialRank(b) || String(a||"").localeCompare(String(b||"")); }
+// 지점 표시용 아이콘 (ONIGIRI → 🍙)
+function filialIcon(f){ return isOnigiriFiliale(f) ? "🍙" : "📍"; }
+
+// ═══════════════════════════════════════════════════════════════
+//  🔒 근무 세션 키: [직원 · 날짜 · 지점] 조합으로 유일성 보장
+//   · 하루에 여러 지점 근무(예: 오전 ONIGIRI + 오후 TEEnJOY)를 해도
+//     각 근무가 독립된 record 문서로 생성/정산되어 중복 시급을 차단한다.
+// ═══════════════════════════════════════════════════════════════
+function filialeSlug(f){ return String(f||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"none"; }
+function sessionIdFor(name, date, filiale){ return "clock_"+name+"_"+date+"_"+filialeSlug(filiale); }
+function sameFiliale(a,b){ return filialeSlug(a)===filialeSlug(b); }
+// 특정 [직원·날짜·지점] 근무의 실제 기록을 찾는다.
+//  · 지점을 지정하면 그 지점 기록만 반환(다른 지점 근무에 간섭 금지)
+//  · 구 데이터(지점 없이 저장된 record)는 지점 지정 시 매칭에서 제외
+function recordForShift(records, name, date, filiale){
+  const list=(Array.isArray(records)?records:[]).filter(r=>r&&r.user===name&&r.date===date);
+  if(filiale===undefined||filiale===null) return list[0]||null;
+  const exact=list.filter(r=>sameFiliale(r.filiale, filiale));
+  if(exact.length===0) return null;
+  // 진행 중(aus 없음) > 완료 기록 순으로 우선 반환
+  return exact.find(r=>!r.aus||r.aus==="") || exact[0];
+}
 // ⚠️ 하드코딩 더미 월 필터 제거됨. Statistik의 "Monat auswählen"은 실제 데이터가
 //    존재하는 달만 동적으로 표시된다 (StatistikTab.availMonths 참고).
 const MONTHS     = [];
@@ -396,11 +418,13 @@ function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "
 //  · root({d,f,t}) / 월별({date,filiale,time}) 두 스키마 모두 지원
 //  · 같은 날 여러 shift가 있으면 가장 늦은 종료시간을 채택
 //  · Onigiri 등 시간이 없는 근무(time:"")는 건너뜀
-function scheduledEndTimeFor(schedule, name, date){
+function scheduledEndTimeFor(schedule, name, date, filiale){
   const sh = schedule && schedule[name];
   const arr = !sh ? [] : (Array.isArray(sh) ? sh : Object.values(sh));
-  const ends = arr
-    .filter(s => s && (s.date||s.d) === date)
+  const sameDay = arr.filter(s => s && (s.date||s.d) === date);
+  // 🔒 지점이 주어지면 그 지점 스케줄의 종료시간만 사용 (다중 근무일 혼선 방지)
+  const scoped = filiale ? sameDay.filter(s => sameFiliale(s.filiale||s.f, filiale)) : sameDay;
+  const ends = (scoped.length?scoped:(filiale?[]:sameDay))
     .map(s => {
       const tm = s.time || s.t || "";
       if(String(tm).includes("-")) return String(tm).split("-")[1].trim();
@@ -418,7 +442,8 @@ function scheduledEndTimeFor(schedule, name, date){
 const AUTO_FALLBACK_H = 8;
 function autoCheckoutAus(schedule, rec){
   const ein = rec && rec.ein;
-  const planned = scheduledEndTimeFor(schedule, rec && rec.user, rec && rec.date);
+  // 해당 기록의 지점 스케줄에서 예정 종료시간을 찾는다
+  const planned = scheduledEndTimeFor(schedule, rec && rec.user, rec && rec.date, rec && rec.filiale);
   if(planned && planned !== ein) return { aus:planned, viaPlan:true };
   // Fallback: 출근 + N시간 (자정 넘기면 23:59로 클램프)
   const [h,m] = String(ein||"09:00").split(":").map(Number);
@@ -429,9 +454,10 @@ function autoCheckoutAus(schedule, rec){
 }
 // 📌 특정 근무(name·date)에 대한 Nachtragen 신청 상태 — 신청 버튼 락 장치용
 //    반환: "genehmigt"(승인 완료) | "offen"(승인 대기) | null(없음)
-function nachtragStatusFor(antraege, name, date){
+function nachtragStatusFor(antraege, name, date, filiale){
   const list = (Array.isArray(antraege)?antraege:[])
     .filter(a => a && a.user===name && a.date===date &&
+      (filiale===undefined||filiale===null||!a.filiale||sameFiliale(a.filiale, filiale)) &&
       (a.typ==="nachtrag" || a.kategorie==="Nachtrag" || a.ein || a.aus));
   if(list.some(a => a.status==="genehmigt" || a.status==="approved")) return "genehmigt";
   if(list.some(a => !a.status || a.status==="offen" || a.status==="pending")) return "offen";
@@ -448,8 +474,9 @@ function filialeMitTyp(filiale, typ, opts){
 // 실제(Ist) 근무시간: name·date의 실제 출퇴근 or 승인된 Nachtragen 시간을 반환.
 //  · 승인된 Nachtragen(typ:"nachtrag") 우선 → 그다음 완료된 실시간 출퇴근 기록.
 //  · 완전한 ein·aus 쌍이 있을 때만 반환(진행 중/미출근이면 null → Ist 미표시).
-function istTimeFor(records, name, date){
-  const list = (Array.isArray(records)?records:[]).filter(r=>r&&r.user===name&&r.date===date);
+function istTimeFor(records, name, date, filiale){
+  const list = (Array.isArray(records)?records:[]).filter(r=>r&&r.user===name&&r.date===date&&
+    (filiale===undefined||filiale===null||sameFiliale(r.filiale, filiale)));
   if(!list.length) return null;
   const nach = list.find(r=>r.typ==="nachtrag" && r.ein && r.aus);
   const done = list.find(r=>r.ein && r.aus);
@@ -537,6 +564,207 @@ function abrechnungRows(recs, schedule){
     });
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  🔧 [임시/개발자용] 과거 Onigiri 데이터 일괄 이관 마이그레이션
+//   구조 변경: Onigiri = Arbeitstyp  →  Onigiri = 독립 지점(Filiale)
+//   대상 노드:
+//     · records            : 실제 출퇴근 기록      {user,date,filiale,typ,...}
+//     · schedule           : 근무표(root)          {name:[{d,f,t,typ}]}
+//     · schedule_YYYY_MM   : 근무표(월별)          {name:{i:{date,filiale,time,typ}}}
+//   변환 규칙:
+//     1) typ/arbeitstyp === "onigiri"  → filiale = "ONIGIRI", typ = "normal"(Regulär)
+//     2) 과거에 지점명으로 저장된 "Onigiri"(대소문자 무관) → "ONIGIRI"로 표준화
+//     3) ONIGIRI 지점 근무표는 계획시간을 사용하지 않으므로 time/t = "" 로 정리
+//   ⚠️ dryRun:true 로 먼저 미리보기 → 이상 없으면 apply 실행
+// ═══════════════════════════════════════════════════════════════
+async function migrateOnigiriData({ dryRun = true } = {}) {
+  const db = window._fbDb, fbRef = window._fbRef, fbGet = window._fbGet, fbSet = window._fbSet;
+  if (!(db && fbRef && fbGet && fbSet)) throw new Error("Keine Verbindung zur Datenbank.");
+
+  const isOldOnigiriTyp = v => String(v ?? "").trim().toLowerCase() === "onigiri";
+  const isOldOnigiriFil = v => String(v ?? "").trim().toLowerCase() === "onigiri";
+  const report = { dryRun, records:0, scheduleRoot:0, scheduleMonth:0, monthNodes:[], samples:[], duplicates:[] };
+
+  // 루트 스냅샷 1회 조회 (schedule_YYYY_MM 노드를 모두 찾기 위함)
+  const rootSnap = await fbGet(fbRef(db, "/"));
+  const root = rootSnap.val() || {};
+
+  // ── 1) records ────────────────────────────────────────────────
+  const records = root.records ? JSON.parse(JSON.stringify(root.records)) : null;
+  if (records && typeof records === "object") {
+    Object.entries(records).forEach(([key, r]) => {
+      if (!r || typeof r !== "object") return;
+      const hitTyp = isOldOnigiriTyp(r.typ) || isOldOnigiriTyp(r.arbeitstyp);
+      const hitFil = isOldOnigiriFil(r.filiale) || isOldOnigiriFil(r.filialeId);
+      if (!hitTyp && !hitFil) return;
+      if (report.samples.length < 8) {
+        report.samples.push(`records/${key}: ${r.user||"?"} ${r.date||"?"} · ${r.filiale||"—"} (${r.typ||"—"}) → ONIGIRI (Regulär)`);
+      }
+      r.filiale = ONIGIRI_FILIALE;
+      if ("filialeId" in r) r.filialeId = ONIGIRI_FILIALE;
+      r.typ = "normal";                       // 🧋 Regulär
+      if ("arbeitstyp" in r) r.arbeitstyp = "normal";
+      records[key] = r;
+      report.records++;
+    });
+    // 이관 후 [직원·날짜·ONIGIRI]가 중복되면 이중 정산 위험 → 경고만 보고(자동 삭제 안 함)
+    const seen = {};
+    Object.entries(records).forEach(([key, r]) => {
+      if (!r || !isOldOnigiriFil(r.filiale) && r.filiale !== ONIGIRI_FILIALE) return;
+      if (r.filiale !== ONIGIRI_FILIALE || !r.ein) return;
+      const k = `${r.user}|${r.date}`;
+      if (seen[k]) report.duplicates.push(`${r.user} · ${r.date} (${seen[k]} / ${key})`);
+      else seen[k] = key;
+    });
+  }
+
+  // ── 2) schedule (root) ────────────────────────────────────────
+  const schedule = root.schedule ? JSON.parse(JSON.stringify(root.schedule)) : null;
+  if (schedule && typeof schedule === "object") {
+    Object.entries(schedule).forEach(([name, sh]) => {
+      const isArr = Array.isArray(sh);
+      const entries = isArr ? sh.map((v,i)=>[i,v]) : Object.entries(sh || {});
+      entries.forEach(([idx, s]) => {
+        if (!s || typeof s !== "object") return;
+        const hitTyp = isOldOnigiriTyp(s.typ) || isOldOnigiriTyp(s.arbeitstyp);
+        const hitFil = isOldOnigiriFil(s.f) || isOldOnigiriFil(s.filiale);
+        if (!hitTyp && !hitFil) return;
+        s.f = ONIGIRI_FILIALE;
+        if ("filiale" in s) s.filiale = ONIGIRI_FILIALE;
+        s.typ = "normal";
+        if ("arbeitstyp" in s) s.arbeitstyp = "normal";
+        s.t = "";                              // 🍙 ONIGIRI: 계획시간 없음
+        if ("time" in s) s.time = "";
+        if (isArr) sh[idx] = s; else sh[idx] = s;
+        report.scheduleRoot++;
+      });
+      schedule[name] = sh;
+    });
+  }
+
+  // ── 3) schedule_YYYY_MM (월별 노드 전체) ──────────────────────
+  const monthKeys = Object.keys(root).filter(k => /^schedule_\d{4}_\d{2}$/.test(k));
+  const monthPatches = {};
+  monthKeys.forEach(mk => {
+    const node = JSON.parse(JSON.stringify(root[mk] || {}));
+    let touched = 0;
+    Object.entries(node).forEach(([name, sh]) => {
+      const isArr = Array.isArray(sh);
+      const entries = isArr ? sh.map((v,i)=>[i,v]) : Object.entries(sh || {});
+      entries.forEach(([idx, s]) => {
+        if (!s || typeof s !== "object") return;
+        const hitTyp = isOldOnigiriTyp(s.typ) || isOldOnigiriTyp(s.arbeitstyp);
+        const hitFil = isOldOnigiriFil(s.filiale) || isOldOnigiriFil(s.f);
+        if (!hitTyp && !hitFil) return;
+        s.filiale = ONIGIRI_FILIALE;
+        if ("f" in s) s.f = ONIGIRI_FILIALE;
+        s.typ = "normal";
+        if ("arbeitstyp" in s) s.arbeitstyp = "normal";
+        s.time = "";
+        if ("t" in s) s.t = "";
+        sh[idx] = s;
+        touched++;
+      });
+      node[name] = sh;
+    });
+    if (touched > 0) { monthPatches[mk] = node; report.scheduleMonth += touched; report.monthNodes.push(mk+" ("+touched+")"); }
+  });
+
+  // ── 4) 쓰기 (dryRun이면 생략) ─────────────────────────────────
+  if (!dryRun) {
+    if (report.records > 0 && records)   await fbSet(fbRef(db, "records"), records);
+    if (report.scheduleRoot > 0 && schedule) await fbSet(fbRef(db, "schedule"), schedule);
+    for (const [mk, node] of Object.entries(monthPatches)) await fbSet(fbRef(db, mk), node);
+  }
+  report.total = report.records + report.scheduleRoot + report.scheduleMonth;
+  return report;
+}
+
+// 🔧 [임시/개발자용] 마이그레이션 실행 버튼 — 작업 완료 후 이 컴포넌트와
+//    <OnigiriMigrationPanel/> 호출부만 삭제하면 됩니다.
+function OnigiriMigrationPanel(){
+  const [busy,setBusy]     = useState(false);
+  const [preview,setPreview]= useState(null);
+  const [done,setDone]     = useState(null);
+  const [err,setErr]       = useState("");
+
+  async function run(dryRun){
+    setBusy(true); setErr("");
+    try{
+      const rep = await migrateOnigiriData({ dryRun });
+      if(dryRun) { setPreview(rep); setDone(null); }
+      else { setDone(rep); setPreview(null); }
+    }catch(e){ setErr(e.message||String(e)); }
+    setBusy(false);
+  }
+
+  const box={background:"rgba(255,255,255,.07)",borderRadius:10,padding:"10px 12px",marginTop:10};
+  const line={fontSize:10,color:"rgba(255,255,255,.75)",lineHeight:1.6};
+
+  return (
+    <div style={{background:"rgba(0,0,0,.25)",border:"1px dashed rgba(255,255,255,.35)",
+      borderRadius:12,padding:"12px 14px",marginTop:14}}>
+      <div style={{fontSize:11,fontWeight:800,color:"#ffd28a",marginBottom:2}}>
+        {"🔧 DEV · Onigiri-Migration"}
+      </div>
+      <div style={{fontSize:9,color:"rgba(255,255,255,.5)",marginBottom:10,lineHeight:1.5}}>
+        {"Alte Einträge mit Arbeitstyp „onigiri“ werden auf Filiale ONIGIRI + Arbeitstyp Regulär umgestellt. Zuerst Vorschau prüfen!"}
+      </div>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={()=>run(true)} disabled={busy}
+          style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid rgba(255,255,255,.3)",
+            background:"rgba(255,255,255,.1)",color:"#fff",fontWeight:800,fontSize:11,
+            cursor:busy?"not-allowed":"pointer"}}>
+          {busy?"⏳ …":"🔍 Vorschau (Dry-Run)"}
+        </button>
+        <button onClick={()=>{ if(window.confirm("과거 Onigiri 데이터를 ONIGIRI 지점으로 일괄 이관합니다. 계속할까요?")) run(false); }}
+          disabled={busy}
+          style={{flex:1,padding:"10px",borderRadius:9,border:"none",
+            background:"linear-gradient(135deg,#f59e0b,#c2410c)",color:"#fff",fontWeight:800,fontSize:11,
+            cursor:busy?"not-allowed":"pointer"}}>
+          {busy?"⏳ …":"🚚 Jetzt migrieren"}
+        </button>
+      </div>
+
+      {err&&<div style={{...box,background:"rgba(220,80,60,.25)"}}><div style={line}>{"❌ "+err}</div></div>}
+
+      {preview&&(
+        <div style={box}>
+          <div style={{fontSize:10,fontWeight:800,color:"#ffd28a",marginBottom:4}}>
+            {"🔍 Vorschau · "+preview.total+" Einträge betroffen"}
+          </div>
+          <div style={line}>{"· records: "+preview.records}</div>
+          <div style={line}>{"· schedule (root): "+preview.scheduleRoot}</div>
+          <div style={line}>{"· schedule_Monat: "+preview.scheduleMonth+(preview.monthNodes.length?" ["+preview.monthNodes.join(", ")+"]":"")}</div>
+          {preview.samples.length>0&&(
+            <div style={{marginTop:6}}>
+              <div style={{fontSize:9,color:"rgba(255,255,255,.45)",marginBottom:2}}>{"Beispiele:"}</div>
+              {preview.samples.map((x,i)=><div key={i} style={{...line,fontSize:9}}>{"– "+x}</div>)}
+            </div>
+          )}
+          {preview.duplicates.length>0&&(
+            <div style={{marginTop:6,color:"#ffb4a2"}}>
+              <div style={{fontSize:9,fontWeight:800}}>{"⚠️ Mögliche Doppel-Einträge (bitte prüfen):"}</div>
+              {preview.duplicates.slice(0,5).map((x,i)=><div key={i} style={{fontSize:9}}>{"– "+x}</div>)}
+            </div>
+          )}
+          {preview.total===0&&<div style={{...line,marginTop:4}}>{"✅ Keine alten Onigiri-Daten gefunden – nichts zu tun."}</div>}
+        </div>
+      )}
+
+      {done&&(
+        <div style={{...box,background:"rgba(60,180,120,.22)"}}>
+          <div style={{fontSize:10,fontWeight:800,color:"#c8f5dd"}}>
+            {"✅ Migration abgeschlossen · "+done.total+" Einträge aktualisiert"}
+          </div>
+          <div style={line}>{"records "+done.records+" · schedule "+done.scheduleRoot+" · Monate "+done.scheduleMonth}</div>
+          <div style={{...line,fontSize:9,marginTop:3,opacity:.7}}>{"Statistik wird automatisch neu geladen."}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const S = {
   card: { background: C.card, borderRadius: 14, padding: "13px 14px", boxShadow: "0 2px 10px rgba(44,44,44,.07)" },
   hdr: { background: C.navy, padding: "env(safe-area-inset-top,44px) 20px 22px", paddingTop: "max(44px,env(safe-area-inset-top))", color: "#fff" },
@@ -560,7 +788,7 @@ function BreakdownView({ recs, compact }){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
             <span style={{fontSize:compact?10:11,fontWeight:800,color:C.text,minWidth:0,
               overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-              {"📍 "+f.filiale}
+              {filialIcon(f.filiale)+" "+f.filiale}
             </span>
             <span style={{fontSize:compact?10:11,fontWeight:800,color:C.mintDark,flexShrink:0}}>{fmt(f.total)}</span>
           </div>
@@ -583,7 +811,7 @@ function BreakdownView({ recs, compact }){
 
 const FILIAL_NAMES = { A:"TEEAMO Arkaden", B:"TEEAMO Aegidiimarkt", C:"TEEnJOY" };
 const FILIAL_INIT = {
-  "TEEAMO Arkaden":"Ar", "TEEAMO Aegidiimarkt":"Ae", "TEEnJOY":"Tj",
+  "TEEAMO Arkaden":"Ar", "TEEAMO Aegidiimarkt":"Ae", "TEEnJOY":"Tj", "ONIGIRI":"🍙",
   "Arkaden":"Ar", "Aegidiimarkt":"Ae", "TEEnJOY":"Tj",
 };
 function filialInit(f){ return FILIAL_INIT[f]||f?.slice(0,2)||"?"; }
@@ -1441,7 +1669,10 @@ function nachtragenSchicht({ userName, date, filiale, ein, aus, setRecords }) {
 //  이전 Nachtragen 기록을 모두 무효화(삭제)하고, 승인된 Nachtragen 시간만
 //  최종 근무로 남긴다. → 통계/누적 시간에 하루 2번 잡히는 버그 제거.
 function overrideWithNachtrag({ a, setRecords }){
-  const sameSession = (r)=> r && r.user===a.user && r.date===a.date;
+  // 🔒 같은 [직원·날짜·지점] 세션만 대체한다.
+  //    (같은 날 다른 지점 근무 기록을 지워 정산이 누락되는 것을 방지)
+  const sameSession = (r)=> r && r.user===a.user && r.date===a.date &&
+    (!a.filiale || !r.filiale || sameFiliale(r.filiale, a.filiale));
   const newRec={ id:Date.now(), user:a.user, date:a.date, filiale:a.filiale,
     ein:a.ein, aus:a.aus, note:a.grund||"Nachtrag genehmigt", typ:"nachtrag",
     isAutoCheckedOut:false, prüfen:false, frühGrund:"" };
@@ -1472,7 +1703,8 @@ function overrideWithNachtrag({ a, setRecords }){
 async function addScheduleShift(name, date, filiale, time, typ) {
   if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !name || !date) return;
   const t = typNorm(typ);
-  const safeTime = isOnigiriTyp(t) ? "" : (time||"");
+  // 🍙 ONIGIRI 지점은 계획 시간 없이 등록 (시간 필드 비활성 → "")
+  const safeTime = isOnigiriFiliale(filiale) ? "" : (time||"");
   try {
     const mk = "schedule_" + date.slice(0,7).replace("-","_");
     const snap = await window._fbGet(window._fbRef(window._fbDb, mk));
@@ -1538,7 +1770,8 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
   const d = s.d || s.date;
   const f = s.f || s.filiale;
   const t = s.t || s.time;
-  const actualRec = (Array.isArray(records)?records:[]).find(r => r.user === userName && r.date === d);
+  // 🔒 이 근무 카드(지점)에 해당하는 기록만 매칭 — 같은 날 다른 지점 근무와 분리
+  const actualRec = recordForShift(records, userName, d, f);
   const status = getShiftStatus({ time: t }, actualRec, d);
   const [showModal, setShowModal] = useState(false);
   const [modalTab, setModalTab] = useState("absagen"); // "absagen" | "nachtrag"
@@ -1570,7 +1803,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
     .find(r => r.user===userName && r.date===d && r.ein && r.typ!=="nachtrag" && !r.isAutoCheckedOut);
   const blockNachtragToday = (d === todayStr) && !!liveClockToday;
   // 🔒 Nachtragen 락: 이 근무(날짜)에 대해 이미 승인/대기 중인 신청이 있으면 재신청 차단
-  const nachLock = nachtragStatusFor(antraege, userName, d);   // "genehmigt" | "offen" | null
+  const nachLock = nachtragStatusFor(antraege, userName, d, f);   // "genehmigt" | "offen" | null
   const nachLocked = nachLock !== null;
   const cardLocked = blockNachtragToday || nachLocked;
 
@@ -2950,24 +3183,25 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
       const inDay=new Date(clockInTime).toLocaleDateString("sv-SE",{timeZone:"Europe/Berlin"});
       if(inDay!==today()) return;
     }
-    const tempId="clock_"+user.vorname+"_"+today();
+    // 🔒 세션 키에 지점을 포함 → 같은 날 다른 지점 근무와 절대 섞이지 않는다.
+    const fil = clockFiliale||selFiliale;
+    const tempId = sessionIdFor(user.vorname, today(), fil);
     const inStr=clockInTime?`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`:"??:??";
-    // 🧋 선택한 Arbeitstyp을 반드시 반영 (기존엔 "normal"로 하드코딩되어
-    //    ClockModal 경유 출근 시 Onigiri/Einspringen 선택이 유실되던 버그)
+    // 🧋 선택한 Arbeitstyp을 반드시 반영
     const typ = typNorm(clockTypRef.current);
     setRecords(prev=>{
       const arr=Array.isArray(prev)?prev:[];
       const already=arr.find(r=>r.id===tempId);
-      // 이미 record가 있으면 유지하되, typ이 비었거나 선택값과 다르면 보정한다.
+      // 이미 record가 있으면 유지하되, typ이 다르면 보정한다.
       if(already){
         if(typNorm(already.typ)===typ) return prev;
         return arr.map(r=>r.id===tempId?{...r,typ}:r);
       }
       const filtered=arr.filter(r=>r.id!==tempId);
       return [...filtered,{id:tempId,user:user.vorname,date:today(),
-        filiale:clockFiliale||selFiliale,ein:inStr,aus:null,note:"",typ}];
+        filiale:fil,ein:inStr,aus:null,note:"",typ}];
     });
-  },[clockedIn, clockTyp]);
+  },[clockedIn, clockTyp, clockFiliale]);
 
   // 🕒 근무 타이머: 출근 중(clockedIn)이고 Pause가 아닐 때만 1초씩 증가.
   //    isPaused를 의존성에 포함해야 Pause 시작 즉시 interval이 정지되고,
@@ -3008,13 +3242,15 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const curMo2=(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");})();
   const myMonthRecs=myRecs.filter(r=>r.date&&r.date.startsWith(curMo2)&&r.aus);
   // 유형별 분류 (Nachtragen(사후 등록)도 정규 근무로 합산에 포함)
-  const normalH=myMonthRecs.filter(r=>!r.typ||r.typ==="normal"||r.typ==="nachtrag").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-  const einsprH=myMonthRecs.filter(r=>r.typ==="einspringen").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-  const onigiriH=myMonthRecs.filter(r=>r.typ==="onigiri").reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-  // Pause 누적: record.pauseSec 필드에서 집계
+  // 📊 관리자 Statistik과 100% 동일한 소스/계산식 사용 (buildBreakdown)
+  //    → 직원 화면과 관리자 화면의 정산 시간이 1초도 어긋나지 않는다.
+  const myBreakdown = buildBreakdown(myMonthRecs);
+  const normalH=myMonthRecs.filter(r=>statTyp(r)==="normal").reduce((a,r)=>a+recHours(r),0);
+  const einsprH=myMonthRecs.filter(r=>statTyp(r)==="einspringen").reduce((a,r)=>a+recHours(r),0);
+  // Pause 누적: record.pauseSec 필드에서 집계 (참고 표시용)
   const pauseH=myMonthRecs.reduce((a,r)=>a+((r.pauseSec||0)/3600),0);
-  // 총 근무 = (정규+Einspringen+Onigiri) - Pause
-  const totalH=Math.max(0,normalH+einsprH+onigiriH-pauseH);
+  // 총 근무 = 지점별 합계의 총합 (관리자 통계와 동일 정의)
+  const totalH=myBreakdown.total;
   function fmtH(h){const hh=Math.floor(h);const mm=Math.round((h-hh)*60);return hh+"h"+String(mm).padStart(2,"0")+"m";}
   const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
 
@@ -3032,10 +3268,11 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
   function handleEin(){
     const inStr=`${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`;
-    const tempId="clock_"+user.vorname+"_"+today();
-    // 🧋 선택한 Arbeitstyp을 정규화해서 저장 (normal | einspringen | onigiri)
+    // 🔒 [직원·날짜·지점] 단위 고유 세션 → 같은 날 다른 지점 근무와 분리
+    const tempId=sessionIdFor(user.vorname, today(), selFiliale);
+    // 🧋 선택한 Arbeitstyp을 정규화해서 저장 (normal | einspringen)
     const typ = typNorm(clockTyp);
-    // 출근 도장: aus:null 임시 record → Dienstplan에 즉시 카드 생성
+    // 출근 도장: 선택한 지점의 세션만 새로 만든다(다른 지점 기록은 건드리지 않음)
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
       return [...filtered,{id:tempId,user:user.vorname,date:today(),filiale:selFiliale,ein:inStr,aus:null,note:"",typ}];
@@ -3056,18 +3293,25 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   }
   // 실제 퇴근 처리: 임시 record 제거 + 완료 record 저장 (Pause 정산 + 조기퇴근 prüfen/사유 반영)
   function finishAus(inStr, outStr, isFrueh, gr){
-    const tempId="clock_"+user.vorname+"_"+today();
-    const existRec=(Array.isArray(records)?records:[]).find(r=>r.id===tempId);
+    // 🔒 퇴근도 '출근했던 그 지점의 세션'만 종료한다.
+    //    (기존엔 user+date만 봐서 오전 ONIGIRI 퇴근이 오후 TEEnJOY 근무까지
+    //     Feierabend로 만들고 시간이 중복 계상되던 치명적 버그)
+    const fil = clockFiliale || selFiliale;
+    const tempId=sessionIdFor(user.vorname, today(), fil);
+    const existRec=(Array.isArray(records)?records:[]).find(r=>r.id===tempId)
+      || recordForShift(records, user.vorname, today(), fil);
     // 🧋 퇴근 시에도 출근 때 저장된 Arbeitstyp을 그대로 승계 (없으면 현재 선택값)
     const typ=typNorm(existRec?.typ||clockTypRef.current||clockTyp);
     let finalPauseSec=totalPauseSec;
     if(isPaused&&pauseStart){ finalPauseSec+=Math.floor((Date.now()-pauseStart.getTime())/1000); }
     const finalId=Date.now();
-    const completed={id:finalId,user:user.vorname,date:today(),filiale:clockFiliale,ein:inStr,aus:outStr,
+    const completed={id:finalId,user:user.vorname,date:today(),filiale:fil,ein:inStr,aus:outStr,
       note:(isFrueh?gr:grund)||"", typ, pauseSec:finalPauseSec,
       prüfen:isFrueh?true:false, frühGrund:isFrueh?(gr||""):""};
     setRecords(prev=>{
-      const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
+      // 이 지점 세션(임시/기존)만 제거 — 다른 지점 근무 기록은 그대로 유지
+      const filtered=(Array.isArray(prev)?prev:[]).filter(r=>
+        r.id!==tempId && !(existRec && r.id===existRec.id));
       return [...filtered,completed];
     });
     // 임시(aus:null) record 노드 직접 제거 → 관리자 화면 즉시 Aktiv 해제
@@ -3284,9 +3528,15 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           {!clockedIn&&(
             <div style={{...S.card,marginBottom:12}}>
               <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:7}}>{"Filiale auswählen"}</div>
-              <div style={{display:"flex",gap:7,marginBottom:10}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:10}}>
                 {FILIALEN.map(f=>(
-                  <button key={f} onClick={()=>setSelFiliale(f)} style={{flex:1,padding:"8px 2px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",border:`2px solid ${selFiliale===f?C.mint:C.border}`,background:selFiliale===f?C.mintLight:"#fff",color:selFiliale===f?C.mintDark:C.muted}}>{f.replace("TEEAMO ","")}</button>
+                  <button key={f} onClick={()=>setSelFiliale(f)}
+                    style={{padding:"9px 4px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",
+                      border:`2px solid ${selFiliale===f?(isOnigiriFiliale(f)?"#ec4899":C.mint):C.border}`,
+                      background:selFiliale===f?(isOnigiriFiliale(f)?"#fce7f3":C.mintLight):"#fff",
+                      color:selFiliale===f?(isOnigiriFiliale(f)?"#9d174d":C.mintDark):C.muted}}>
+                    {(isOnigiriFiliale(f)?"🍙 ":"")+f.replace("TEEAMO ","")}
+                  </button>
                 ))}
               </div>
               {/* 근무 유형 선택 */}
@@ -3309,11 +3559,16 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
                   </button>
                 ))}
               </div>
-              {clockTyp!=="normal"&&(
-                <div style={{marginTop:8,padding:"6px 10px",borderRadius:8,
-                  background:clockTyp==="einspringen"?"#fef9c3":"#fce7f3",
-                  fontSize:10,color:clockTyp==="einspringen"?"#92400e":"#9d174d",fontWeight:600}}>
-                  {clockTyp==="einspringen"?"⚡ Einspringen: Heute ungeplant ausgeholfen (nicht Schichtbörse)":"🍙 Onigiri: Sonderarbeit wird separat berechnet"}
+              {clockTyp==="einspringen"&&(
+                <div style={{marginTop:8,padding:"6px 10px",borderRadius:8,background:"#fef9c3",
+                  fontSize:10,color:"#92400e",fontWeight:600}}>
+                  {"⚡ Einspringen: Heute ungeplant ausgeholfen (nicht Schichtbörse)"}
+                </div>
+              )}
+              {isOnigiriFiliale(selFiliale)&&(
+                <div style={{marginTop:8,padding:"6px 10px",borderRadius:8,background:"#fce7f3",
+                  fontSize:10,color:"#9d174d",fontWeight:600}}>
+                  {"🍙 ONIGIRI: Eigene Filiale – wird separat abgerechnet."}
                 </div>
               )}
             </div>
@@ -3355,16 +3610,6 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
                   {einsprH>0?fmtH(einsprH):"—"}
                 </span>
               </div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                padding:"8px 10px",borderRadius:9,background:onigiriH>0?"#fce7f3":"#f8f8f8"}}>
-                <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:14}}>🍙</span>
-                  <span style={{fontSize:11,fontWeight:700,color:C.text}}>Onigiri</span>
-                </div>
-                <span style={{fontSize:13,fontWeight:800,color:onigiriH>0?"#9d174d":C.muted}}>
-                  {onigiriH>0?fmtH(onigiriH):"—"}
-                </span>
-              </div>
               {/* Pause 항목 — 총합에서 차감됨 표시 */}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                 padding:"8px 10px",borderRadius:9,
@@ -3374,11 +3619,11 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
                   <span style={{fontSize:14}}>⏸️</span>
                   <div>
                     <span style={{fontSize:11,fontWeight:700,color:C.text}}>Pause</span>
-                    <span style={{fontSize:9,color:C.muted,marginLeft:4}}>(abgezogen)</span>
+                    <span style={{fontSize:9,color:C.muted,marginLeft:4}}>(erfasst)</span>
                   </div>
                 </div>
                 <span style={{fontSize:13,fontWeight:800,color:pauseH>0?"#ea580c":C.muted}}>
-                  {pauseH>0?"− "+fmtH(pauseH):"—"}
+                  {pauseH>0?fmtH(pauseH):"—"}
                 </span>
               </div>
             </div>
@@ -3906,11 +4151,15 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
   // 🧩 오늘 근무 로스터: 스케줄에 등록된 모든 이름(정식 계정 + 계정 없는 임시 직원)을
   //    빠짐없이 포함한다. 관리자 계정만 제외. (누락 방지 요구사항)
   const _rosterUsers = Array.isArray(safeUsers)?safeUsers:(Array.isArray(empList)?empList:[]);
+  //  ⚠️ 하루에 여러 지점 근무가 있으면 각 근무를 독립 항목으로 펼친다
+  //     (오전 ONIGIRI / 오후 TEEnJOY 가 각각 별도 카드·별도 상태로 표시)
   const todayRoster = Object.keys(schedule||{})
-    .filter(nm => norm(schedule[nm]||[]).some(s=>(s.date||s.d)===todayStr))
-    .map(nm => {
+    .flatMap(nm => {
       const emp = _rosterUsers.find(u=>u.vorname===nm) || null;
-      return { name:nm, emp, isTemp:!emp };
+      return norm(schedule[nm]||[])
+        .filter(s => (s.date||s.d)===todayStr)
+        .map(s => ({ name:nm, emp, isTemp:!emp,
+          filiale:(s.filiale||s.f||""), time:(s.time||s.t||"") }));
     })
     // 관리자 계정은 로스터에서 제외 (임시 직원은 emp=null 이므로 유지됨)
     .filter(x => !(x.emp && MANAGERS.includes(x.emp.key)));
@@ -4001,12 +4250,9 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
             //  : Arkaden  Aegidiimarkt  TEEnJOY
             const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
             //   shift  (임시 직원 포함 — todayShiftEmps 항목은 {name,emp,isTemp})
-            const withShift = todayShiftEmps.map(({name,emp,isTemp})=>{
-              const shift=norm(schedule[name]||[]).find(s=>(s.date||s.d)===todayStr);
-              const fil=shift?(shift.filiale||shift.f):"";
-              const time=shift?(shift.time||shift.t||""):"";
-              return {name,emp,isTemp,shift,fil,time};
-            });
+            // 각 항목이 이미 [직원 · 지점 · 시간] 단위로 펼쳐져 있다
+            const withShift = todayShiftEmps.map(({name,emp,isTemp,filiale,time})=>
+              ({name,emp,isTemp,fil:filiale,time}));
             //         
             return filOrder.map(fil=>{
               const group=withShift.filter(x=>x.fil===fil);
@@ -4022,10 +4268,11 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                     {fil.replace("TEEAMO ","")}
                   </div>
                   {sorted.map(({name,emp,isTemp,time,fil:f})=>{
-                    const st=getStatus(name);
-                    const rec=todayRecs.find(r=>r.user===name);
+                    // 🔒 이 지점 근무만 보고 상태/기록을 판정한다
+                    const st=getStatus(name, f);
+                    const rec=recordForShift(todayRecs, name, todayStr, f);
                     return(
-                      <div key={emp?emp.key:("temp_"+name)} style={{...S.card,padding:"11px 14px",marginBottom:7}}>
+                      <div key={(emp?emp.key:("temp_"+name))+"|"+filialeSlug(f)} style={{...S.card,padding:"11px 14px",marginBottom:7}}>
                         <button onClick={()=>{ if(emp) setDetailKey(emp.key); }}
                           style={{width:"100%",border:"none",background:"none",cursor:emp?"pointer":"default",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
                           <StaffAvatarCircle name={name} emp={emp} size={38}/>
@@ -4474,7 +4721,7 @@ function NachMitarbeiterAntrag({name, d, nList, approveNachtrag, rejectNachtrag}
 //    highlightName이 주어지면(직원 뷰) 본인 근무를 강조. 안전 렌더링(정규화)으로 크래시 방지.
 function DienstplanKalender({ schedule, records, highlightName, allowDelete, users, setRecords, FILIALEN_LIST }) {
   const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
-  const filShort = { "TEEAMO Arkaden":"Arkaden","TEEAMO Aegidiimarkt":"Aegidiimarkt","TEEnJOY":"TEEnJOY" };
+  const filShort = { "TEEAMO Arkaden":"Arkaden","TEEAMO Aegidiimarkt":"Aegidiimarkt","TEEnJOY":"TEEnJOY","ONIGIRI":"ONIGIRI" };
   const FILS = Array.isArray(FILIALEN_LIST)&&FILIALEN_LIST.length?FILIALEN_LIST:(typeof FILIALEN!=="undefined"?FILIALEN:[]);
   const todayStr = today();
   const [calYM, setCalYM] = useState(()=>{ const p=todayStr.split("-"); return {y:+p[0], m:(+p[1])-1}; });
@@ -4492,7 +4739,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
   const [addTemp, setAddTemp] = useState("");
   const [addVon, setAddVon]   = useState("");
   const [addBis, setAddBis]   = useState("");
-  const [addTyp, setAddTyp]   = useState("normal");   // 🧋 Arbeitstyp: normal | einspringen | onigiri
+  const [addTyp, setAddTyp]   = useState("normal");   // 🧋 Arbeitstyp: normal | einspringen
 
   // 날짜별 근무 인덱스 (안전 정규화)
   const byDate = React.useMemo(()=>{
@@ -4521,8 +4768,9 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
   const dayShifts=(byDate[selDate]||[]).slice()
     .sort((a,b)=>(a.filiale||"").localeCompare(b.filiale||"")||(a.time||"").localeCompare(b.time||""));
   const byFil={}; dayShifts.forEach(r=>{ (byFil[r.filiale]=byFil[r.filiale]||[]).push(r); });
-  const recFor=name=> selDate!==todayStr ? null
-    : (Array.isArray(records)?records:[]).find(r=>r.user===name&&r.date===selDate);
+  // 🔒 [직원·날짜·지점] 단위로 기록을 찾는다 (지점별 독립 판정)
+  const recFor=(name, filiale)=> selDate!==todayStr ? null
+    : recordForShift(records, name, selDate, filiale);
 
   return (
     <div>
@@ -4577,11 +4825,11 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
           Object.keys(byFil).sort(filialSort).map(fil=>(
             <div key={fil} style={{marginBottom:12}}>
               <div style={{fontSize:10,fontWeight:800,color:C.mintDark,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>
-                {"📍 "+(filShort[fil]||fil||"—")}
+                {filialIcon(fil)+" "+(filShort[fil]||fil||"—")}
               </div>
               {byFil[fil].map((r,idx)=>{
                 const isMine=highlightName&&r.name===highlightName;
-                const rec=recFor(r.name);
+                const rec=recFor(r.name, fil);
                 const transl=r.status==="freigegeben"||r.status==="getauscht";
                 const rowKey=r.name+"|"+fil+"|"+idx;
                 const editing = editRow&&editRow.key===rowKey;
@@ -4664,9 +4912,9 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:13,fontWeight:700,color:C.text,display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
                         <span>{r.name}</span>
-                        {isOnigiriTyp(r.typ)&&(
+                        {isOnigiriFiliale(fil)&&(
                           <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,
-                            background:"#fce7f3",color:"#9d174d"}}>{"🍙 Onigiri"}</span>
+                            background:"#fce7f3",color:"#9d174d"}}>{"🍙 ONIGIRI"}</span>
                         )}
                         {typNorm(r.typ)==="einspringen"&&(
                           <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,
@@ -4675,7 +4923,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                         {isMine&&<span style={{fontSize:9,color:C.mintDark,fontWeight:800}}>(Du)</span>}
                       </div>
                       {(()=>{
-                        const on=isOnigiriTyp(r.typ);
+                        const on=isOnigiriFiliale(fil);   // 🍙 ONIGIRI 지점: 시간 표시 생략
                         const timePart = on ? "" : (r.time||"—");
                         const statusPart = rec?.aus?" · ✅ Feierabend":rec?.ein?" · 🟢 Aktiv":"";
                         if(on && !statusPart) return null;  // 🍙 Onigiri: 시간 표시 영역 생략(이름만)
@@ -4685,7 +4933,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                           </div>
                         );
                       })()}
-                      {(()=>{ const ist=istTimeFor(records,r.name,selDate); if(!ist) return null;
+                      {(()=>{ const ist=istTimeFor(records,r.name,selDate,fil); if(!ist) return null;
                         return (
                           <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>
                             {"Ist: "+ist.ein+" – "+ist.aus}
@@ -4721,7 +4969,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                             · 과거: 완료 기록이 없거나, 자동퇴근된 근무는 수정 위해 허용 */}
                         {(()=>{
                           // 🔒 이미 승인/대기 중인 Nachtragen이 있으면 버튼 대신 상태 배지
-                          const lock = nachtragStatusFor(antraegeList, r.name, selDate);
+                          const lock = nachtragStatusFor(antraegeList, r.name, selDate, fil);
                           if(lock){
                             return (
                               <span style={{padding:"6px 9px",borderRadius:8,fontSize:10,fontWeight:800,whiteSpace:"nowrap",
@@ -4802,7 +5050,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                     ))}
                   </div>
                 </div>
-                {isOnigiriTyp(addTyp) ? (
+                {isOnigiriFiliale(addFil) ? (
                   <div style={{fontSize:10,color:C.mintDark,fontWeight:700,background:C.mintLight,
                     borderRadius:9,padding:"9px 11px",marginBottom:10}}>
                     {"🍙 Onigiri: Keine Uhrzeit nötig – nur Name eintragen."}
@@ -4824,7 +5072,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                   <button onClick={()=>{
                     const name=addEmp==="__temp__"?addTemp.trim():addEmp;
                     if(!name){ setActMsg("Bitte Mitarbeiter oder Temp-Name wählen."); return; }
-                    const on=isOnigiriTyp(addTyp);
+                    const on=isOnigiriFiliale(addFil);   // 🍙 ONIGIRI: 시간 없이도 유효
                     // 🍙 Onigiri: 시간 없이도 유효 — 그 외 타입만 VON/BIS 필수
                     if(!on && (!addVon||!addBis)){ setActMsg("Bitte VON und BIS angeben."); return; }
                     addScheduleShift(name, selDate, addFil, on ? "" : addVon+"-"+addBis, addTyp);
@@ -4939,8 +5187,8 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"abgelehnt"}:x));
   }
 
-  function getEmpStatus(vorname) {
-    const r = records.find(r=>r.user===vorname&&r.date===todayStr);
+  function getEmpStatus(vorname, filiale) {
+    const r = recordForShift(records, vorname, todayStr, filiale);
     if(!r) return null;
     return {ein:r.ein,aus:r.aus,filiale:r.filiale};
   }
@@ -5057,7 +5305,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                                 {new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
                               </div>
                               <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
-                              {accountExists&&(()=>{ const ist=istTimeFor(records,name,d); if(!ist) return null;
+                              {accountExists&&(()=>{ const ist=istTimeFor(records,name,d,f); if(!ist) return null;
                                 return (
                                   <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>
                                     {"Ist: "+ist.ein+" – "+ist.aus}
@@ -5110,7 +5358,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   const empOptions = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key) && u.vorname!==adminName).sort(byName);
   const QUICK = ["09:30","11:30","12:30","14:00","15:00","16:00","18:00","19:00","20:00"];
   const DRAFT_KEY = "teeamo_schicht_cart_v1";
-  const filShort = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt", "TEEnJOY":"TEEnJOY" };
+  const filShort = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt", "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI" };
 
   // 선택된 월 스케줄 (달력 점 표시용)
   const scheduleKey = selMonth ? "schedule_"+selMonth : "schedule";
@@ -5133,7 +5381,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   const [aTemp, setATemp] = useState("");
   const [aVon, setAVon]   = useState("");
   const [aBis, setABis]   = useState("");
-  const [aTyp, setATyp]   = useState("normal");   // 🧋 Arbeitstyp: normal | einspringen | onigiri
+  const [aTyp, setATyp]   = useState("normal");   // 🧋 Arbeitstyp: normal | einspringen
 
   const [calYM, setCalYM] = useState(()=>{ const p=(selDate||today()).split("-"); return {y:+p[0], m:(+p[1])-1}; });
 
@@ -5145,7 +5393,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   function addToCart(){
     const name=resolveAName();
     if(!name){ setMsg({t:"err",m:"Bitte Mitarbeiter oder Temp-Name wählen."}); return; }
-    const on=isOnigiriTyp(aTyp);
+    const on=isOnigiriFiliale(aFil);   // 🍙 ONIGIRI: 시간 없이도 유효
     // 🍙 Onigiri: 시간 없이도 유효 — 그 외 타입만 VON/BIS 필수
     if(!on && (!aVon||!aBis)){ setMsg({t:"err",m:"Bitte VON und BIS angeben."}); return; }
     setCart(prev=>[...prev, {date:selDate, filiale:aFil, name, von:on?"":aVon, bis:on?"":aBis, typ:aTyp}]);
@@ -5162,7 +5410,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
     setSaving(true); setMsg(null);
     try{
       const byName={};  // {name: [{date,filiale,time,typ}]}
-      cart.forEach(it=>{ const on=isOnigiriTyp(it.typ);
+      cart.forEach(it=>{ const on=isOnigiriFiliale(it.filiale);
         (byName[it.name]=byName[it.name]||[]).push({date:it.date, filiale:it.filiale, time: on ? "" : it.von+"-"+it.bis, typ:typNorm(it.typ)}); });
       // 1) 월별 노드
       const monthsTouched=new Set(cart.map(it=>it.date.slice(0,7).replace("-","_")));
@@ -5413,7 +5661,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
                     ))}
                   </div>
                 </div>
-                {isOnigiriTyp(aTyp) ? (
+                {isOnigiriFiliale(aFil) ? (
                   <div style={{fontSize:10,color:C.mintDark,fontWeight:700,background:"#fff",
                     border:"1px solid "+C.mint,borderRadius:9,padding:"9px 11px",marginBottom:10}}>
                     {"🍙 Onigiri: Keine Uhrzeit nötig – nur Name eintragen."}
@@ -5524,8 +5772,11 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
     || {key:userKey, vorname:userKey?.split("_")[0]||"Manager", emoji:"", kuerzel:"M", role:"Admin"};
   const empList=safeUsers.filter(u=>!MANAGERS.includes(u.key)).sort(byName);
   const todayRecs=records.filter(r=>r.date===today());
-  const getStatus=name=>{
-    const recs=todayRecs.filter(x=>x.user===name&&x.ein);
+  // 🔒 filiale를 주면 해당 지점 근무만 보고 상태를 판정한다.
+  //    (오전 ONIGIRI 퇴근이 오후 TEEnJOY 카드까지 Feierabend로 만들던 버그 방지)
+  const getStatus=(name, filiale)=>{
+    const recs=todayRecs.filter(x=>x.user===name&&x.ein&&
+      (filiale===undefined||filiale===null||sameFiliale(x.filiale, filiale)));
     if(recs.length===0) return "Nicht erschienen";
     // 진행 중(퇴근 전, aus 없음)인 record가 하나라도 있으면 Aktiv
     if(recs.some(r=>!r.aus||r.aus==="")) return "Aktiv";
@@ -5928,9 +6179,10 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             </div>
           ))}
         </div>
-      </div>
 
-      {/*  BERSICHT  */}
+        {/* 🔧 DEV · 과거 Onigiri 데이터 일괄 이관 (작업 완료 후 이 줄만 삭제) */}
+        <OnigiriMigrationPanel/>
+      </div>
       {tab==="uebersicht"&&!detailKey&&(
         <UebersichtAllTab
           empList={empList}
