@@ -437,6 +437,14 @@ function nachtragStatusFor(antraege, name, date){
   if(list.some(a => !a.status || a.status==="offen" || a.status==="pending")) return "offen";
   return null;
 }
+// 🍙 표시용 라벨: 지점명 + 근무타입 결합 (예: "Arkaden (🍙 Onigiri)")
+//    Regulär(normal)은 기본값이므로 지점명만 표시해 화면을 깔끔하게 유지한다.
+function filialeMitTyp(filiale, typ, opts){
+  const short = String(filiale||"—").replace("TEEAMO ","");
+  const t = typNorm(typ);
+  if(t==="normal" && !(opts&&opts.always)) return short;
+  return short+" ("+typIcon(t)+" "+typLabel(t)+")";
+}
 // 실제(Ist) 근무시간: name·date의 실제 출퇴근 or 승인된 Nachtragen 시간을 반환.
 //  · 승인된 Nachtragen(typ:"nachtrag") 우선 → 그다음 완료된 실시간 출퇴근 기록.
 //  · 완전한 ein·aus 쌍이 있을 때만 반환(진행 중/미출근이면 null → Ist 미표시).
@@ -2857,7 +2865,13 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   });
 
   const [selFiliale,setSelFiliale]=useState(FILIALEN[0]);
-  const [clockTyp,setClockTyp]=useState("normal"); // "normal" | "einspringen" | "onigiri"
+  // 🧋 Arbeitstyp: 새로고침 후에도 유지되도록 localStorage에서 복원
+  const [clockTyp,setClockTyp]=useState(()=>{
+    try{ const s=localStorage.getItem(CLOCK_KEY); return s?typNorm(JSON.parse(s).clockTyp):"normal"; }
+    catch{ return "normal"; }
+  });
+  // interval/effect 클로저에서 낡은 값이 잡히지 않도록 최신값 ref 유지
+  const clockTypRef=useRef(clockTyp); clockTypRef.current=clockTyp;
   const [grund,setGrund]=useState("");
   // ── Pause 상태 ──────────────────────────────────────────────
   const [isPaused,setIsPaused]=useState(()=>{
@@ -2893,9 +2907,10 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   useEffect(()=>{
     try { localStorage.setItem(CLOCK_KEY, JSON.stringify({
       clockedIn, clockInTime:clockInTime?clockInTime.toISOString():null, clockFiliale,
+      clockTyp,   // 🧋 선택한 Arbeitstyp도 함께 보존
       isPaused, pauseStart:pauseStart?pauseStart.toISOString():null, totalPauseSec
     })); } catch{}
-  },[clockedIn, clockInTime, clockFiliale, isPaused, pauseStart, totalPauseSec]);
+  },[clockedIn, clockInTime, clockFiliale, clockTyp, isPaused, pauseStart, totalPauseSec]);
 
   // 🌙 자정 넘긴(어제 시작) 세션 감지 → 로컬 근무 상태를 초기화하고 배너용 정보 저장.
   //    (시스템은 App 레벨에서 예정 종료시간으로 자동 강제 퇴근 처리한다.)
@@ -2937,13 +2952,22 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     }
     const tempId="clock_"+user.vorname+"_"+today();
     const inStr=clockInTime?`${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`:"??:??";
+    // 🧋 선택한 Arbeitstyp을 반드시 반영 (기존엔 "normal"로 하드코딩되어
+    //    ClockModal 경유 출근 시 Onigiri/Einspringen 선택이 유실되던 버그)
+    const typ = typNorm(clockTypRef.current);
     setRecords(prev=>{
-      const already=(Array.isArray(prev)?prev:[]).find(r=>r.id===tempId);
-      if(already) return prev;
-      const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
-      return [...filtered,{id:tempId,user:user.vorname,date:today(),filiale:clockFiliale||selFiliale,ein:inStr,aus:null,note:"",typ:"normal"}];
+      const arr=Array.isArray(prev)?prev:[];
+      const already=arr.find(r=>r.id===tempId);
+      // 이미 record가 있으면 유지하되, typ이 비었거나 선택값과 다르면 보정한다.
+      if(already){
+        if(typNorm(already.typ)===typ) return prev;
+        return arr.map(r=>r.id===tempId?{...r,typ}:r);
+      }
+      const filtered=arr.filter(r=>r.id!==tempId);
+      return [...filtered,{id:tempId,user:user.vorname,date:today(),
+        filiale:clockFiliale||selFiliale,ein:inStr,aus:null,note:"",typ}];
     });
-  },[clockedIn]);
+  },[clockedIn, clockTyp]);
 
   // 🕒 근무 타이머: 출근 중(clockedIn)이고 Pause가 아닐 때만 1초씩 증가.
   //    isPaused를 의존성에 포함해야 Pause 시작 즉시 interval이 정지되고,
@@ -3009,7 +3033,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   function handleEin(){
     const inStr=`${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`;
     const tempId="clock_"+user.vorname+"_"+today();
-    const typ = clockTyp; // "normal" | "einspringen" | "onigiri"
+    // 🧋 선택한 Arbeitstyp을 정규화해서 저장 (normal | einspringen | onigiri)
+    const typ = typNorm(clockTyp);
     // 출근 도장: aus:null 임시 record → Dienstplan에 즉시 카드 생성
     setRecords(prev=>{
       const filtered=(Array.isArray(prev)?prev:[]).filter(r=>r.id!==tempId);
@@ -3033,7 +3058,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   function finishAus(inStr, outStr, isFrueh, gr){
     const tempId="clock_"+user.vorname+"_"+today();
     const existRec=(Array.isArray(records)?records:[]).find(r=>r.id===tempId);
-    const typ=existRec?.typ||clockTyp||"normal";
+    // 🧋 퇴근 시에도 출근 때 저장된 Arbeitstyp을 그대로 승계 (없으면 현재 선택값)
+    const typ=typNorm(existRec?.typ||clockTypRef.current||clockTyp);
     let finalPauseSec=totalPauseSec;
     if(isPaused&&pauseStart){ finalPauseSec+=Math.floor((Date.now()-pauseStart.getTime())/1000); }
     const finalId=Date.now();
@@ -3151,8 +3177,11 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             <div>
               <div style={{fontSize:12,fontWeight:800,color:"#1a5c38"}}>
                 {"Im Dienst · "}{clockFiliale}
-                {(()=>{const t=(Array.isArray(records)?records:[]).find(r=>r.id==="clock_"+user.vorname+"_"+today())?.typ||"normal";
-                return t!=="normal"?<span style={{marginLeft:6,fontSize:10,padding:"2px 7px",borderRadius:99,background:t==="einspringen"?"#fef9c3":"#fce7f3",color:t==="einspringen"?"#92400e":"#9d174d"}}>{t==="einspringen"?"⚡ Einspringen":"🍙 Onigiri"}</span>:null;})()}
+                {(()=>{
+                  // 저장된 record의 Arbeitstyp 우선, 아직 동기화 전이면 현재 선택값 사용
+                  const rec=(Array.isArray(records)?records:[]).find(r=>r.id==="clock_"+user.vorname+"_"+today());
+                  const t=typNorm(rec?.typ||clockTyp);
+                  return t!=="normal"?<span style={{marginLeft:6,fontSize:10,padding:"2px 7px",borderRadius:99,background:t==="einspringen"?"#fef9c3":"#fce7f3",color:t==="einspringen"?"#92400e":"#9d174d"}}>{typIcon(t)+" "+typLabel(t)}</span>:null;})()}
               </div>
               <div style={{fontSize:10,color:"#3a7a55"}}>
                 {clockInTime?`seit ${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())} Uhr`:""} · {elStr}
@@ -3846,7 +3875,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
                       <div>
                         <div style={{fontSize:13,fontWeight:700,color:C.text}}>
                           {new Date(r.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
-                          <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{r.filiale}</span>
+                          <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{filialeMitTyp(r.filiale, r.typ)}</span>
                         </div>
                         <div style={{fontSize:12,color:C.muted,marginTop:1}}>{r.ein+" - "+(r.aus||"aktiv")}</div>
                       </div>
@@ -4009,6 +4038,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                             {rec?.ein&&(
                               <div style={{fontSize:10,fontWeight:600,color:st==="Feierabend"?C.mintDark:C.yellow,marginTop:2}}>
                                 {rec.ein}{rec.aus?` – ${rec.aus}`:" (läuft)"}
+                                {typNorm(rec.typ)!=="normal"&&<span style={{color:C.muted,fontWeight:700}}>{" · "+typIcon(rec.typ)+" "+typLabel(rec.typ)}</span>}
                                 {rec.aus&&<span style={{color:C.muted,fontWeight:400}}>{" · "}{stdLabel(rec.ein,rec.aus)}</span>}
                                 {rec.isAutoCheckedOut&&<span style={{color:C.muted,fontWeight:400}}>{" · ⏱ Auto"}</span>}
                               </div>
