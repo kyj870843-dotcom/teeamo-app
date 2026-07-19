@@ -75,6 +75,10 @@ const C = {
   yellow:"#C8A96A", yellowLight:"#FAF4E8",
 };
 
+// ⏰ 근무표 작성 시 추천 시간 — VON(출근) / BIS(퇴근) 독립 배열
+const QUICK_VON_TIMES = ["09:30","10:00","11:00","11:30","12:30","14:00","15:00","15:30","16:00"];
+const QUICK_BIS_TIMES = ["14:00","15:00","15:30","16:00","16:30","17:00","18:00","19:00","20:00"];
+
 // 📍 Filiale = 독립된 지점. ONIGIRI는 정식 지점으로 격상되어 다른 매장과
 //    DB상 완전히 분리된 스케줄/근무 문서를 가진다.
 const ONIGIRI_FILIALE = "ONIGIRI";
@@ -563,217 +567,6 @@ function abrechnungRows(recs, schedule){
         r.isAutoCheckedOut?"Ja":"Nein", r.note||"",
       ];
     });
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  🔧 [임시/개발자용] 과거 Onigiri 데이터 일괄 이관 마이그레이션
-//   구조 변경: Onigiri = Arbeitstyp  →  Onigiri = 독립 지점(Filiale)
-//   대상 노드:
-//     · records            : 실제 출퇴근 기록      {user,date,filiale,typ,...}
-//     · schedule           : 근무표(root)          {name:[{d,f,t,typ}]}
-//     · schedule_YYYY_MM   : 근무표(월별)          {name:{i:{date,filiale,time,typ}}}
-//   변환 규칙:
-//     1) typ/arbeitstyp === "onigiri"  → filiale = "ONIGIRI", typ = "normal"(Regulär)
-//     2) 과거에 지점명으로 저장된 "Onigiri"(대소문자 무관) → "ONIGIRI"로 표준화
-//     3) ONIGIRI 지점 근무표는 계획시간을 사용하지 않으므로 time/t = "" 로 정리
-//   ⚠️ dryRun:true 로 먼저 미리보기 → 이상 없으면 apply 실행
-// ═══════════════════════════════════════════════════════════════
-async function migrateOnigiriData({ dryRun = true } = {}) {
-  const db = window._fbDb, fbRef = window._fbRef, fbGet = window._fbGet, fbSet = window._fbSet;
-  if (!(db && fbRef && fbGet && fbSet)) throw new Error("Keine Verbindung zur Datenbank.");
-
-  const isOldOnigiriTyp = v => String(v ?? "").trim().toLowerCase() === "onigiri";
-  const isOldOnigiriFil = v => String(v ?? "").trim().toLowerCase() === "onigiri";
-  const report = { dryRun, records:0, scheduleRoot:0, scheduleMonth:0, monthNodes:[], samples:[], duplicates:[] };
-
-  // 루트 스냅샷 1회 조회 (schedule_YYYY_MM 노드를 모두 찾기 위함)
-  const rootSnap = await fbGet(fbRef(db, "/"));
-  const root = rootSnap.val() || {};
-
-  // ── 1) records ────────────────────────────────────────────────
-  const records = root.records ? JSON.parse(JSON.stringify(root.records)) : null;
-  if (records && typeof records === "object") {
-    Object.entries(records).forEach(([key, r]) => {
-      if (!r || typeof r !== "object") return;
-      const hitTyp = isOldOnigiriTyp(r.typ) || isOldOnigiriTyp(r.arbeitstyp);
-      const hitFil = isOldOnigiriFil(r.filiale) || isOldOnigiriFil(r.filialeId);
-      if (!hitTyp && !hitFil) return;
-      if (report.samples.length < 8) {
-        report.samples.push(`records/${key}: ${r.user||"?"} ${r.date||"?"} · ${r.filiale||"—"} (${r.typ||"—"}) → ONIGIRI (Regulär)`);
-      }
-      r.filiale = ONIGIRI_FILIALE;
-      if ("filialeId" in r) r.filialeId = ONIGIRI_FILIALE;
-      r.typ = "normal";                       // 🧋 Regulär
-      if ("arbeitstyp" in r) r.arbeitstyp = "normal";
-      records[key] = r;
-      report.records++;
-    });
-    // 이관 후 [직원·날짜·ONIGIRI]가 중복되면 이중 정산 위험 → 경고만 보고(자동 삭제 안 함)
-    const seen = {};
-    Object.entries(records).forEach(([key, r]) => {
-      if (!r || !isOldOnigiriFil(r.filiale) && r.filiale !== ONIGIRI_FILIALE) return;
-      if (r.filiale !== ONIGIRI_FILIALE || !r.ein) return;
-      const k = `${r.user}|${r.date}`;
-      if (seen[k]) report.duplicates.push(`${r.user} · ${r.date} (${seen[k]} / ${key})`);
-      else seen[k] = key;
-    });
-  }
-
-  // ── 2) schedule (root) ────────────────────────────────────────
-  const schedule = root.schedule ? JSON.parse(JSON.stringify(root.schedule)) : null;
-  if (schedule && typeof schedule === "object") {
-    Object.entries(schedule).forEach(([name, sh]) => {
-      const isArr = Array.isArray(sh);
-      const entries = isArr ? sh.map((v,i)=>[i,v]) : Object.entries(sh || {});
-      entries.forEach(([idx, s]) => {
-        if (!s || typeof s !== "object") return;
-        const hitTyp = isOldOnigiriTyp(s.typ) || isOldOnigiriTyp(s.arbeitstyp);
-        const hitFil = isOldOnigiriFil(s.f) || isOldOnigiriFil(s.filiale);
-        if (!hitTyp && !hitFil) return;
-        s.f = ONIGIRI_FILIALE;
-        if ("filiale" in s) s.filiale = ONIGIRI_FILIALE;
-        s.typ = "normal";
-        if ("arbeitstyp" in s) s.arbeitstyp = "normal";
-        s.t = "";                              // 🍙 ONIGIRI: 계획시간 없음
-        if ("time" in s) s.time = "";
-        if (isArr) sh[idx] = s; else sh[idx] = s;
-        report.scheduleRoot++;
-      });
-      schedule[name] = sh;
-    });
-  }
-
-  // ── 3) schedule_YYYY_MM (월별 노드 전체) ──────────────────────
-  const monthKeys = Object.keys(root).filter(k => /^schedule_\d{4}_\d{2}$/.test(k));
-  const monthPatches = {};
-  monthKeys.forEach(mk => {
-    const node = JSON.parse(JSON.stringify(root[mk] || {}));
-    let touched = 0;
-    Object.entries(node).forEach(([name, sh]) => {
-      const isArr = Array.isArray(sh);
-      const entries = isArr ? sh.map((v,i)=>[i,v]) : Object.entries(sh || {});
-      entries.forEach(([idx, s]) => {
-        if (!s || typeof s !== "object") return;
-        const hitTyp = isOldOnigiriTyp(s.typ) || isOldOnigiriTyp(s.arbeitstyp);
-        const hitFil = isOldOnigiriFil(s.filiale) || isOldOnigiriFil(s.f);
-        if (!hitTyp && !hitFil) return;
-        s.filiale = ONIGIRI_FILIALE;
-        if ("f" in s) s.f = ONIGIRI_FILIALE;
-        s.typ = "normal";
-        if ("arbeitstyp" in s) s.arbeitstyp = "normal";
-        s.time = "";
-        if ("t" in s) s.t = "";
-        sh[idx] = s;
-        touched++;
-      });
-      node[name] = sh;
-    });
-    if (touched > 0) { monthPatches[mk] = node; report.scheduleMonth += touched; report.monthNodes.push(mk+" ("+touched+")"); }
-  });
-
-  // ── 4) 쓰기 (dryRun이면 생략) ─────────────────────────────────
-  if (!dryRun) {
-    if (report.records > 0 && records)   await fbSet(fbRef(db, "records"), records);
-    if (report.scheduleRoot > 0 && schedule) await fbSet(fbRef(db, "schedule"), schedule);
-    for (const [mk, node] of Object.entries(monthPatches)) await fbSet(fbRef(db, mk), node);
-  }
-  report.total = report.records + report.scheduleRoot + report.scheduleMonth;
-  return report;
-}
-
-// 🔧 [임시/개발자용] 마이그레이션 실행 버튼 — 작업 완료 후 이 컴포넌트와
-//    <OnigiriMigrationPanel/> 호출부만 삭제하면 됩니다.
-function OnigiriMigrationPanel(){
-  const [busy,setBusy]     = useState(false);
-  const [preview,setPreview]= useState(null);
-  const [done,setDone]     = useState(null);
-  const [err,setErr]       = useState("");
-
-  async function run(dryRun){
-    setBusy(true); setErr("");
-    try{
-      const rep = await migrateOnigiriData({ dryRun });
-      if(dryRun) { setPreview(rep); setDone(null); }
-      else {
-        setDone(rep); setPreview(null);
-        // ✅ 완료 알림
-        window.alert("총 "+rep.total+"개의 과거 오니기리 기록이 ONIGIRI 지점으로 안전하게 이관되었습니다."
-          + (rep.duplicates.length
-              ? "\n\n⚠️ 같은 직원·같은 날짜에 ONIGIRI 기록이 중복된 건이 "+rep.duplicates.length+"건 있습니다. 이중 정산 방지를 위해 확인해 주세요."
-              : ""));
-      }
-    }catch(e){
-      setErr(e.message||String(e));
-      if(!dryRun) window.alert("❌ 이관 중 오류가 발생했습니다: "+(e.message||e));
-    }
-    setBusy(false);
-  }
-
-  const box={background:"rgba(255,255,255,.07)",borderRadius:10,padding:"10px 12px",marginTop:10};
-  const line={fontSize:10,color:"rgba(255,255,255,.75)",lineHeight:1.6};
-
-  return (
-    <div style={{background:"rgba(0,0,0,.25)",border:"1px dashed rgba(255,255,255,.35)",
-      borderRadius:12,padding:"12px 14px",marginTop:14}}>
-      <div style={{fontSize:11,fontWeight:800,color:"#ffd28a",marginBottom:2}}>
-        {"🔧 DEV · Onigiri-Migration"}
-      </div>
-      <div style={{fontSize:9,color:"rgba(255,255,255,.5)",marginBottom:10,lineHeight:1.5}}>
-        {"Alte Einträge mit Arbeitstyp „onigiri“ werden auf Filiale ONIGIRI + Arbeitstyp Regulär umgestellt. Zuerst Vorschau prüfen!"}
-      </div>
-      <div style={{display:"flex",gap:8}}>
-        <button onClick={()=>run(true)} disabled={busy}
-          style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid rgba(255,255,255,.3)",
-            background:"rgba(255,255,255,.1)",color:"#fff",fontWeight:800,fontSize:11,
-            cursor:busy?"not-allowed":"pointer"}}>
-          {busy?"⏳ …":"🔍 Vorschau (Dry-Run)"}
-        </button>
-        <button onClick={()=>{ if(window.confirm("과거 Onigiri 데이터를 ONIGIRI 지점으로 일괄 이관합니다.\n(지점 → ONIGIRI / 근무형태 → Regulär)\n\n계속할까요?")) run(false); }}
-          disabled={busy}
-          style={{flex:2,padding:"10px",borderRadius:9,border:"none",
-            background:"linear-gradient(135deg,#f59e0b,#c2410c)",color:"#fff",fontWeight:800,fontSize:11,
-            cursor:busy?"not-allowed":"pointer",lineHeight:1.35}}>
-          {busy?"⏳ 이관 중…":"⚠️ 과거 Onigiri 데이터 새 지점으로 일괄 이관"}
-        </button>
-      </div>
-
-      {err&&<div style={{...box,background:"rgba(220,80,60,.25)"}}><div style={line}>{"❌ "+err}</div></div>}
-
-      {preview&&(
-        <div style={box}>
-          <div style={{fontSize:10,fontWeight:800,color:"#ffd28a",marginBottom:4}}>
-            {"🔍 Vorschau · "+preview.total+" Einträge betroffen"}
-          </div>
-          <div style={line}>{"· records: "+preview.records}</div>
-          <div style={line}>{"· schedule (root): "+preview.scheduleRoot}</div>
-          <div style={line}>{"· schedule_Monat: "+preview.scheduleMonth+(preview.monthNodes.length?" ["+preview.monthNodes.join(", ")+"]":"")}</div>
-          {preview.samples.length>0&&(
-            <div style={{marginTop:6}}>
-              <div style={{fontSize:9,color:"rgba(255,255,255,.45)",marginBottom:2}}>{"Beispiele:"}</div>
-              {preview.samples.map((x,i)=><div key={i} style={{...line,fontSize:9}}>{"– "+x}</div>)}
-            </div>
-          )}
-          {preview.duplicates.length>0&&(
-            <div style={{marginTop:6,color:"#ffb4a2"}}>
-              <div style={{fontSize:9,fontWeight:800}}>{"⚠️ Mögliche Doppel-Einträge (bitte prüfen):"}</div>
-              {preview.duplicates.slice(0,5).map((x,i)=><div key={i} style={{fontSize:9}}>{"– "+x}</div>)}
-            </div>
-          )}
-          {preview.total===0&&<div style={{...line,marginTop:4}}>{"✅ Keine alten Onigiri-Daten gefunden – nichts zu tun."}</div>}
-        </div>
-      )}
-
-      {done&&(
-        <div style={{...box,background:"rgba(60,180,120,.22)"}}>
-          <div style={{fontSize:10,fontWeight:800,color:"#c8f5dd"}}>
-            {"✅ Migration abgeschlossen · "+done.total+" Einträge aktualisiert"}
-          </div>
-          <div style={line}>{"records "+done.records+" · schedule "+done.scheduleRoot+" · Monate "+done.scheduleMonth}</div>
-          <div style={{...line,fontSize:9,marginTop:3,opacity:.7}}>{"Statistik wird automatisch neu geladen."}</div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 const S = {
@@ -1816,7 +1609,10 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
   const blockNachtragToday = (d === todayStr) && !!liveClockToday;
   // 🔒 Nachtragen 락: 이 근무(날짜)에 대해 이미 승인/대기 중인 신청이 있으면 재신청 차단
   const nachLock = nachtragStatusFor(antraege, userName, d, f);   // "genehmigt" | "offen" | null
-  const nachLocked = nachLock !== null;
+  // 🔒 과거 달 원천 차단: 정산이 끝난 지난달 이전 근무는 Nachtragen 신청 불가
+  const curMonthStr = todayStr.slice(0,7);
+  const isPastMonth = String(d||"").slice(0,7) < curMonthStr;
+  const nachLocked = nachLock !== null || isPastMonth;
   const cardLocked = blockNachtragToday || nachLocked;
 
   useEffect(() => {
@@ -1892,10 +1688,10 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
             {/* 🔒 Nachtragen 상태 배지 — 버튼(tippen) 대신 노출 */}
             {nachLocked&&shiftPassed&&(
               <span style={{fontSize:8,fontWeight:800,padding:"3px 7px",borderRadius:99,
-                background:nachLock==="genehmigt"?C.mintLight:C.yellowLight,
-                color:nachLock==="genehmigt"?C.mintDark:C.yellow,
-                border:`1px solid ${nachLock==="genehmigt"?C.mint:C.yellow}`,whiteSpace:"nowrap"}}>
-                {nachLock==="genehmigt"?"✅ Korrigiert":"⏳ In Prüfung"}
+                background:nachLock==="genehmigt"?C.mintLight:(nachLock?C.yellowLight:"#f1f1f1"),
+                color:nachLock==="genehmigt"?C.mintDark:(nachLock?C.yellow:C.muted),
+                border:`1px solid ${nachLock==="genehmigt"?C.mint:(nachLock?C.yellow:C.border)}`,whiteSpace:"nowrap"}}>
+                {nachLock==="genehmigt"?"✅ Korrigiert":nachLock?"⏳ In Prüfung":"🔒 Abgeschlossen"}
               </span>
             )}
             {!translucent&&!blockNachtragToday&&!(nachLocked&&shiftPassed)&&(
@@ -2728,39 +2524,89 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   const [newPin2, setNewPin2] = useState("");
   const [pinMsg, setPinMsg] = useState("");
   // 🧹 Dienstplan(스케줄) 전체 초기화 (관리자 전용)
-  const [resetConfirm, setResetConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetMsg, setResetMsg] = useState("");
+  // 🧹 선택형 리셋: 계정은 기본 '체크 해제'(보존)
+  const [resetSel, setResetSel] = useState({ accounts:false, records:false, schedule:false });
   // 임시 계정 매칭 (Zuweisen)
   const [schedForMatch] = useFirebase("schedule", {});
   const [zuweisenSel, setZuweisenSel] = useState({});
   const [zuweisenMsg, setZuweisenMsg] = useState("");
 
   // 모든 운영 데이터를 삭제해 완전한 백지 상태로 초기화 (계정/PIN은 유지)
-  async function resetDienstplan(){
+  // ═══════════════════════════════════════════════════════════
+  //  🧹 체크박스 선택형 정밀 데이터 리셋
+  //   · accounts : users(계정) + PIN(비밀번호)  ← 기본 체크 해제
+  //   · records  : 실제 출퇴근 기록 + Nachtragen/신청/알림
+  //   · schedule : 근무표 / 스케줄 / Schichtbörse / 계획표 이미지
+  //   ⚠️ accounts를 체크하지 않으면 users·PIN은 절대 건드리지 않는다.
+  // ═══════════════════════════════════════════════════════════
+  function monthSuffixes(){
+    const yr=new Date().getFullYear(); const out=[];
+    for(let y=yr-1;y<=yr+2;y++) for(let m=1;m<=12;m++) out.push(y+"_"+String(m).padStart(2,"0"));
+    return out;
+  }
+  const RESET_GROUPS = {
+    accounts: {
+      lbl:"직원 계정 및 비밀번호",
+      sub:"users · PIN (Anmeldedaten)",
+      paths:()=>["users"],
+    },
+    records: {
+      lbl:"실제 출퇴근 기록",
+      sub:"Stempelzeiten · Nachtragen · Anträge · Benachrichtigungen",
+      paths:()=>["records","antraege","notifications","absagen","archiv"],
+    },
+    schedule: {
+      lbl:"스케줄표",
+      sub:"Dienstpläne · Schichtbörse · Planbilder",
+      paths:()=>["schedule","planImage","freieSchichten","schichttausch",
+        ...monthSuffixes().map(m=>"schedule_"+m),
+        ...monthSuffixes().map(m=>"planImage_"+m)],
+    },
+  };
+
+  async function runSelectiveReset(){
+    const chosen = Object.keys(RESET_GROUPS).filter(k=>resetSel[k]);
+    if(chosen.length===0){ setResetMsg("❌ Bitte mindestens eine Kategorie auswählen."); return; }
     if(!(window._fbDb&&window._fbRef&&window._fbRemove)){ setResetMsg("❌ Keine Verbindung zur Datenbank."); return; }
+    // 🔐 최종 확인
+    if(!window.confirm("선택한 데이터 범주가 영구히 삭제됩니다. 정말 진행하시겠습니까?\n\n· "
+      + chosen.map(k=>RESET_GROUPS[k].lbl).join("\n· ")
+      + (resetSel.accounts ? "" : "\n\n✅ 직원 계정 및 비밀번호는 보존됩니다."))) return;
+
     setResetting(true); setResetMsg("");
     try{
-      const yr=new Date().getFullYear();
-      const months=[];
-      for(let y=yr-1;y<=yr+2;y++) for(let m=1;m<=12;m++) months.push(y+"_"+String(m).padStart(2,"0"));
-      const paths=[
-        // Dienstplan / Schichtbörse
-        "schedule","planImage","freieSchichten",
-        ...months.map(m=>"schedule_"+m),
-        ...months.map(m=>"planImage_"+m),
-        // Stempelzeiten & Anträge & Benachrichtigungen (완전 초기화)
-        "records","notifications","antraege","schichttausch","absagen","archiv"
-      ];
-      await Promise.all(paths.map(p=>window._fbRemove(window._fbRef(window._fbDb,p)).catch(()=>{})));
-      // localStorage 정리: 스케줄 Draft + 모든 사용자 출퇴근 임시상태(teeamo_clock_*)
+      // 선택된 그룹의 경로만 수집 (중복 제거)
+      const paths=[...new Set(chosen.flatMap(k=>RESET_GROUPS[k].paths()))];
+      // 🛡️ 방어: accounts 미선택 시 users 경로가 섞여 들어가는 것을 원천 차단
+      const safePaths = resetSel.accounts ? paths : paths.filter(pth=>pth!=="users");
+      await Promise.all(safePaths.map(pth=>
+        window._fbRemove(window._fbRef(window._fbDb,pth)).catch(()=>{})));
+
+      // localStorage 정리 (선택 범주에 해당하는 것만)
       try{
-        localStorage.removeItem("teeamo_schicht_draft_v2");
-        localStorage.removeItem("teeamo_schicht_draft");
-        Object.keys(localStorage).forEach(k=>{ if(k.indexOf("teeamo_clock_")===0) localStorage.removeItem(k); });
+        if(resetSel.schedule){
+          localStorage.removeItem("teeamo_schicht_draft_v2");
+          localStorage.removeItem("teeamo_schicht_draft");
+        }
+        if(resetSel.records){
+          Object.keys(localStorage).forEach(k=>{
+            if(k.indexOf("teeamo_clock_")===0 || k.indexOf("teeamo_autoout_ack_")===0)
+              localStorage.removeItem(k);
+          });
+        }
+        if(resetSel.accounts){
+          // PIN(비밀번호)은 계정 삭제를 선택했을 때만 함께 제거
+          Object.keys(localStorage).forEach(k=>{
+            if(k.indexOf("teeamo_pin")===0) localStorage.removeItem(k);
+          });
+        }
       }catch{}
-      setResetMsg("✅ Alle Daten gelöscht. App wird neu geladen…");
-      setTimeout(()=>{ try{ window.location.reload(); }catch{} }, 1400);
+
+      setResetMsg("✅ "+chosen.length+" Kategorie(n) gelöscht"
+        +(resetSel.accounts?"":" · Konten & PINs bleiben erhalten")+". App wird neu geladen…");
+      setTimeout(()=>{ try{ window.location.reload(); }catch{} }, 1500);
     }catch(e){
       setResetting(false);
       setResetMsg("❌ Fehler: "+(e.message||e));
@@ -3003,40 +2849,56 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         {/* 🧹 Dienstplan 초기화 (관리자 전용) */}
         {isAdmin && (
           <div style={{...S.card,marginBottom:12,border:`1px solid ${C.red}`}}>
-            <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"🧹 Alle Daten zurücksetzen"}</div>
+            <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"🧹 Daten zurücksetzen"}</div>
             <div style={{fontSize:10,color:C.muted,marginBottom:10,lineHeight:1.55}}>
-              {"Löscht ALLE Dienstpläne, Plan-Bilder, Schichtbörsen-Angebote, Stempelzeiten (Arbeitszeiten), Anträge und Benachrichtigungen — komplett leerer Neustart. Benutzerkonten & PINs bleiben erhalten. Diese Aktion kann NICHT rückgängig gemacht werden."}
+              {"Nur die ausgewählten Kategorien werden gelöscht. Ohne Häkchen bei „직원 계정 및 비밀번호“ bleiben alle Konten und PINs vollständig erhalten. Diese Aktion kann NICHT rückgängig gemacht werden."}
             </div>
             {resetMsg && (
               <div style={{fontSize:11,fontWeight:700,marginBottom:10,
                 color:resetMsg.startsWith("✅")?C.mintDark:C.red}}>{resetMsg}</div>
             )}
-            {!resetConfirm ? (
-              <button onClick={()=>setResetConfirm(true)} disabled={resetting}
-                style={{width:"100%",padding:"10px",borderRadius:9,border:`1.5px solid ${C.red}`,
-                  background:C.redLight,color:C.red,fontWeight:800,fontSize:12,cursor:"pointer"}}>
-                {"Alle Daten löschen"}
-              </button>
-            ) : (
-              <div>
-                <div style={{fontSize:11,color:C.red,fontWeight:700,marginBottom:10,textAlign:"center"}}>
-                  {"Wirklich ALLE Daten (inkl. Stempelzeiten) unwiderruflich löschen?"}
-                </div>
-                <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>setResetConfirm(false)} disabled={resetting}
-                    style={{flex:1,padding:"10px",borderRadius:9,border:`1px solid ${C.border}`,
-                      background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                    Abbrechen
-                  </button>
-                  <button onClick={resetDienstplan} disabled={resetting}
-                    style={{flex:1,padding:"10px",borderRadius:9,border:"none",
-                      background:`linear-gradient(135deg,${C.red},#A8432E)`,
-                      color:"#fff",fontWeight:800,fontSize:11,cursor:resetting?"not-allowed":"pointer",opacity:resetting?0.7:1}}>
-                    {resetting?"⏳ Löschen…":"Ja, alles löschen"}
-                  </button>
-                </div>
+            {/* ☑️ 삭제할 범주 선택 (중복 선택 가능) */}
+            <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:12}}>
+              {Object.entries(RESET_GROUPS).map(([key,g])=>{
+                const on=!!resetSel[key];
+                const danger = key==="accounts";
+                return (
+                  <label key={key}
+                    style={{display:"flex",alignItems:"flex-start",gap:9,cursor:"pointer",
+                      padding:"10px 11px",borderRadius:10,
+                      border:`1.5px solid ${on?(danger?C.red:C.mintDark):C.border}`,
+                      background:on?(danger?C.redLight:C.mintLight):"#fff"}}>
+                    <input type="checkbox" checked={on}
+                      onChange={e=>setResetSel(prev=>({...prev,[key]:e.target.checked}))}
+                      style={{marginTop:2,width:16,height:16,accentColor:danger?C.red:C.mintDark,cursor:"pointer"}}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:11,fontWeight:800,color:danger&&on?C.red:C.text}}>
+                        {g.lbl}{danger&&<span style={{marginLeft:5,fontSize:9,fontWeight:700,color:C.red}}>{"⚠️ Vorsicht"}</span>}
+                      </div>
+                      <div style={{fontSize:9,color:C.muted,marginTop:2}}>{g.sub}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            {/* 🛡️ 계정 보존 안내 */}
+            {!resetSel.accounts&&(
+              <div style={{fontSize:10,color:C.mintDark,fontWeight:700,background:C.mintLight,
+                borderRadius:9,padding:"8px 10px",marginBottom:10}}>
+                {"🛡️ 직원 계정 및 비밀번호는 삭제되지 않고 100% 보존됩니다."}
               </div>
             )}
+            <button onClick={runSelectiveReset}
+              disabled={resetting||!Object.values(resetSel).some(Boolean)}
+              style={{width:"100%",padding:"11px",borderRadius:9,border:"none",
+                background:Object.values(resetSel).some(Boolean)
+                  ? `linear-gradient(135deg,${C.red},#A8432E)` : "#e5e5e5",
+                color:Object.values(resetSel).some(Boolean)?"#fff":C.muted,
+                fontWeight:800,fontSize:12,
+                cursor:(resetting||!Object.values(resetSel).some(Boolean))?"not-allowed":"pointer",
+                opacity:resetting?0.7:1}}>
+              {resetting?"⏳ Löschen…":"선택 항목 삭제"}
+            </button>
           </div>
         )}
 
@@ -3252,7 +3114,17 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const myAntraege=antraege.filter(a=>a.user===user.vorname);
   // 이번 달 records만
   const curMo2=(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");})();
-  const myMonthRecs=myRecs.filter(r=>r.date&&r.date.startsWith(curMo2)&&r.aus);
+  // 📅 기본은 '이번 달'만 노출 → 새 달이 시작되면 자동으로 깔끔하게 비워진 상태로 시작.
+  //    직원이 드롭다운에서 과거 달을 직접 고를 때만 지난 기록을 불러온다.
+  const [viewMonth, setViewMonth] = useState(curMo2);
+  const isCurrentMonth = viewMonth === curMo2;
+  // 선택 가능한 달: 이번 달 + 내 기록/근무표가 존재하는 과거 달 (최신순)
+  const myAvailMonths = React.useMemo(()=>{
+    const set=new Set([curMo2]);
+    myRecs.forEach(r=>{ if(r.date) set.add(r.date.slice(0,7)); });
+    return [...set].sort((a,b)=>b.localeCompare(a));
+  },[myRecs, curMo2]);
+  const myMonthRecs=myRecs.filter(r=>r.date&&r.date.startsWith(viewMonth)&&r.aus);
   // 유형별 분류 (Nachtragen(사후 등록)도 정규 근무로 합산에 포함)
   // 📊 관리자 Statistik과 100% 동일한 소스/계산식 사용 (buildBreakdown)
   //    → 직원 화면과 관리자 화면의 정산 시간이 1초도 어긋나지 않는다.
@@ -3336,6 +3208,11 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     try{localStorage.removeItem(CLOCK_KEY);}catch{}
   }
   function submitNachtrag(){
+    // 🔒 방어: 과거 달 근무에 대한 Nachtragen 신청은 서버 저장 전에 차단
+    if(String(nDatum||"").slice(0,7) < today().slice(0,7)){
+      setNMsg("Für abgeschlossene Monate ist kein Nachtragen möglich.");
+      return;
+    }
     if(!nGrund.trim()){setNMsg("Bitte einen Grund angeben.");return;}
     const id = Date.now();
     const ts = id;
@@ -3588,7 +3465,31 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             <textarea value={grund} onChange={e=>setGrund(e.target.value)} placeholder="z. B. früher erschienen wegen Lieferung…" style={{width:"100%",height:58,borderRadius:9,border:`1.5px solid ${C.border}`,padding:"8px 10px",fontSize:11,color:C.text,outline:"none",background:C.bg}}/>
           </div>
           <div style={S.card}>
-            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:10,letterSpacing:".05em",textTransform:"uppercase"}}>📊 Monatsübersicht</div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:10}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:".05em",textTransform:"uppercase"}}>📊 Monatsübersicht</div>
+              {/* 📅 과거 달 조회 필터 — 기본값은 항상 이번 달 */}
+              <select value={viewMonth} onChange={e=>setViewMonth(e.target.value)}
+                style={{...S.input,padding:"6px 8px",fontSize:11,fontWeight:700,borderRadius:8,
+                  color:isCurrentMonth?C.text:C.yellow,
+                  border:`1px solid ${isCurrentMonth?C.border:C.yellow}`}}>
+                {myAvailMonths.map(m=>(
+                  <option key={m} value={m}>{monthLabel(m)}{m===curMo2?" (aktuell)":""}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 🔒 과거 달 조회 안내 — Nachtragen 불가 */}
+            {!isCurrentMonth&&(
+              <div style={{background:C.yellowLight,border:`1px solid ${C.yellow}`,borderRadius:9,
+                padding:"8px 10px",marginBottom:10,fontSize:10,color:"#92400e",lineHeight:1.5}}>
+                {"🔒 Abgeschlossener Monat – nur zur Ansicht. Nachtragen ist nur im laufenden Monat möglich."}
+                <button onClick={()=>setViewMonth(curMo2)}
+                  style={{marginLeft:6,padding:"2px 8px",borderRadius:7,border:`1px solid ${C.yellow}`,
+                    background:"#fff",color:"#92400e",fontSize:9,fontWeight:800,cursor:"pointer"}}>
+                  {"Aktueller Monat"}
+                </button>
+              </div>
+            )}
 
             {/* 총 합산 근무 시간 — 가장 크게 */}
             <div style={{textAlign:"center",padding:"12px 0 14px",borderBottom:`1px solid ${C.border}`,marginBottom:12}}>
@@ -4978,6 +4879,16 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                               (근무 중 or 정상 종료 상태) — 단 자동퇴근은 수정 위해 허용
                             · 과거: 완료 기록이 없거나, 자동퇴근된 근무는 수정 위해 허용 */}
                         {(()=>{
+                          // 🔒 과거 달(정산 완료)은 Nachtragen 원천 차단
+                          const pastMonth = String(selDate||"").slice(0,7) < todayStr.slice(0,7);
+                          if(pastMonth){
+                            return (
+                              <span style={{padding:"6px 9px",borderRadius:8,fontSize:10,fontWeight:800,whiteSpace:"nowrap",
+                                border:"1px solid "+C.border,background:"#f1f1f1",color:C.muted}}>
+                                {"🔒 Abgeschlossen"}
+                              </span>
+                            );
+                          }
                           // 🔒 이미 승인/대기 중인 Nachtragen이 있으면 버튼 대신 상태 배지
                           const lock = nachtragStatusFor(antraegeList, r.name, selDate, fil);
                           if(lock){
@@ -5067,14 +4978,22 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                   </div>
                 ) : (
                   <div style={{display:"flex",gap:10,marginBottom:10}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"4 · VON"}</div>
-                      <TimeInput value={addVon} onChange={setAddVon} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
-                    </div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"BIS"}</div>
-                      <TimeInput value={addBis} onChange={setAddBis} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
-                    </div>
+                    {[{lbl:"4 · VON",val:addVon,set:setAddVon,quick:QUICK_VON_TIMES},
+                      {lbl:"BIS",   val:addBis,set:setAddBis,quick:QUICK_BIS_TIMES}].map(({lbl,val,set,quick})=>(
+                      <div key={lbl} style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{lbl}</div>
+                        <TimeInput value={val} onChange={set} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                        {/* ⏰ VON/BIS 각각의 추천 시간 버튼 */}
+                        <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:5}}>
+                          {quick.map(q=>(
+                            <button key={lbl+q} onClick={()=>set(q)}
+                              style={{fontSize:9,fontWeight:700,padding:"4px 6px",borderRadius:7,cursor:"pointer",flex:"0 0 auto",
+                                border:"1px solid "+(val===q?C.mintDark:C.border),
+                                background:val===q?C.mintDark:"#fff",color:val===q?"#fff":C.text}}>{q}</button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
                 <div style={{display:"flex",gap:8}}>
@@ -5366,7 +5285,8 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
   const empOptions = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key) && u.vorname!==adminName).sort(byName);
-  const QUICK = ["09:30","11:30","12:30","14:00","15:00","16:00","18:00","19:00","20:00"];
+  // ⏰ 추천 시간: VON/BIS 독립 배열 (전역 상수 공유)
+  const QUICK_VON = QUICK_VON_TIMES, QUICK_BIS = QUICK_BIS_TIMES;
   const DRAFT_KEY = "teeamo_schicht_cart_v1";
   const filShort = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt", "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI" };
 
@@ -5485,12 +5405,13 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   const inp = {...S.input, width:"100%", fontSize:13, padding:"9px 11px", boxSizing:"border-box"};
 
   // 시간 입력 + 퀵버튼 (하위 입력용)
+  //  label("VON"/"BIS")에 따라 각기 다른 추천 시간 배열을 렌더링
   const timeField = (val, setter, label) => (
     <div style={{flex:1,minWidth:0}}>
       <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{label}</div>
       <TimeInput value={val} onChange={setter} style={{...S.input,width:"100%",fontSize:14,fontWeight:700,textAlign:"center",padding:"8px 4px",boxSizing:"border-box"}}/>
       <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:5}}>
-        {QUICK.map(q=>(
+        {(label==="BIS"?QUICK_BIS:QUICK_VON).map(q=>(
           <button key={label+q} onClick={()=>setter(q)}
             style={{fontSize:10,fontWeight:700,padding:"5px 6px",borderRadius:7,cursor:"pointer",flex:"0 0 auto",
               border:"1px solid "+(val===q?C.mintDark:C.border),
@@ -6190,8 +6111,6 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           ))}
         </div>
 
-        {/* 🔧 DEV · 과거 Onigiri 데이터 일괄 이관 (작업 완료 후 이 줄만 삭제) */}
-        <OnigiriMigrationPanel/>
       </div>
       {tab==="uebersicht"&&!detailKey&&(
         <UebersichtAllTab
