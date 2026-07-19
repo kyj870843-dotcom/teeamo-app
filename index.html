@@ -1505,28 +1505,72 @@ function overrideWithNachtrag({ a, setRecords }){
 // (name·date)에 shift 추가 (root + 월별). 같은 날 기존 shift는 대체.
 //  · typ: Arbeitstyp("normal"=Regulär | "einspringen"). Onigiri는 지점(ONIGIRI)으로 운영.
 //  · ONIGIRI 지점은 계획시간 없이(time:"") 이름만으로 정상 저장된다.
-async function addScheduleShift(name, date, filiale, time, typ) {
+async function addScheduleShift(name, date, filiale, time, typ, opts) {
   if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !name || !date) return;
   const t = typNorm(typ);
   // 🍙 ONIGIRI 지점은 계획 시간 없이 등록 (시간 필드 비활성 → "")
   const safeTime = isOnigiriFiliale(filiale) ? "" : (time||"");
+  const extra = (opts && opts.autoCreated) ? { autoCreated:true } : {};
+  // 🔒 같은 날짜라도 '다른 지점' 근무는 절대 지우지 않는다.
+  //    (예: 오전 ONIGIRI + 오후 TEEnJOY 대타 → 두 카드가 함께 유지되어야 함)
+  const isSameSlot = (s) => (s.date||s.d) === date && sameFiliale(s.filiale||s.f, filiale);
   try {
     const mk = "schedule_" + date.slice(0,7).replace("-","_");
     const snap = await window._fbGet(window._fbRef(window._fbDb, mk));
     const ex = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
     let arr = Array.isArray(ex[name]) ? ex[name] : Object.values(ex[name] || {});
-    arr = arr.filter(s => (s.date||s.d) !== date);
-    arr.push({ date, filiale, time:safeTime, typ:t });
+    arr = arr.filter(s => !isSameSlot(s));
+    arr.push({ date, filiale, time:safeTime, typ:t, ...extra });
     ex[name] = Object.fromEntries(arr.map((s,i)=>[String(i), s]));
     await window._fbSet(window._fbRef(window._fbDb, mk), ex);
     const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
     const root = rsnap.val() ? JSON.parse(JSON.stringify(rsnap.val())) : {};
     let rarr = Array.isArray(root[name]) ? root[name] : Object.values(root[name] || {});
-    rarr = rarr.filter(s => (s.d||s.date) !== date);
-    rarr.push({ d:date, f:filiale, t:safeTime, typ:t });
+    rarr = rarr.filter(s => !isSameSlot(s));
+    rarr.push({ d:date, f:filiale, t:safeTime, typ:t, ...extra });
     root[name] = rarr;
     await window._fbSet(window._fbRef(window._fbDb, "schedule"), root);
   } catch(e) { console.error("addScheduleShift error:", e); }
+}
+
+// ⏰ 매장 임시 마감 시간 — 대타 자동 스케줄의 예정 퇴근(bis) 기본값
+const SHOP_CLOSING_TIME = "20:00";
+
+// 🆘 당일 대타(Einspringen) 자동 스케줄 생성
+//   · 출근 도장을 찍는 순간 해당 [직원·날짜·지점] 스케줄이 없으면 즉시 생성한다.
+//   · von = 실제 출근 시각, bis = 매장 마감시간(임시), typ = "einspringen"
+//   · autoCreated:true 플래그를 심어, 퇴근 시 실제 시간으로 보정할 수 있게 한다.
+//   · 근무표(schedule)에 기록되므로 직원/공용/관리자 화면 모두 실시간 반영된다.
+async function ensureEinspringenShift(name, date, filiale, vonTime) {
+  if (!(window._fbDb && window._fbRef && window._fbGet) || !name || !date) return false;
+  try {
+    const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
+    const root = rsnap.val() || {};
+    const sh = root[name];
+    const arr = !sh ? [] : (Array.isArray(sh) ? sh : Object.values(sh));
+    // 이미 그 날 · 그 지점 스케줄이 있으면 아무것도 하지 않는다(기존 계획 보존)
+    const exists = arr.some(s => s && (s.d||s.date) === date && sameFiliale(s.f||s.filiale, filiale));
+    if (exists) return false;
+    const bis = isOnigiriFiliale(filiale) ? "" : SHOP_CLOSING_TIME;
+    await addScheduleShift(name, date, filiale, bis ? (vonTime + "-" + bis) : "", "einspringen", { autoCreated:true });
+    return true;
+  } catch(e) { console.error("ensureEinspringenShift error:", e); return false; }
+}
+
+// 🔄 대타 자동 스케줄의 예정 퇴근시간을 '실제 퇴근시간'으로 보정
+//   · autoCreated 플래그가 있는 근무에만 적용 (관리자가 짠 계획은 건드리지 않음)
+async function syncAutoShiftEnd(name, date, filiale, vonTime, bisTime) {
+  if (!(window._fbDb && window._fbRef && window._fbGet) || !name || !date) return;
+  try {
+    const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
+    const root = rsnap.val() || {};
+    const sh = root[name];
+    const arr = !sh ? [] : (Array.isArray(sh) ? sh : Object.values(sh));
+    const hit = arr.find(s => s && (s.d||s.date) === date && sameFiliale(s.f||s.filiale, filiale));
+    if (!hit || !hit.autoCreated) return;          // 자동 생성분만 보정
+    if (isOnigiriFiliale(filiale)) return;         // ONIGIRI는 시간 미사용
+    await addScheduleShift(name, date, filiale, vonTime + "-" + bisTime, "einspringen", { autoCreated:true });
+  } catch(e) { console.error("syncAutoShiftEnd error:", e); }
 }
 
 // 임시 이름 → 정식 계정으로 데이터 귀속 (schedule + records의 user 이름을 이전)
@@ -3162,6 +3206,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
       return [...filtered,{id:tempId,user:user.vorname,date:today(),filiale:selFiliale,ein:inStr,aus:null,note:"",typ}];
     });
     setClockedIn(true);setClockInTime(new Date());setClockFiliale(selFiliale);setModal(null);
+    // 🆘 대타 자동 스케줄: 오늘 이 지점에 예정 근무가 없으면 근무표를 즉시 자동 생성
+    //    (사장님 수동 입력 없이 출근 행동만으로 스케줄이 연동됨 → 전 화면 실시간 반영)
+    ensureEinspringenShift(user.vorname, today(), selFiliale, inStr);
     // 🚨 미출근 알림 자동 제거: 지각이라도 출근 도장을 찍으면 해당 날짜·직원 알림 삭제
     if(window._fbDb&&window._fbRef&&window._fbRemove)
       window._fbRemove(window._fbRef(window._fbDb,"notifications/noshow_"+user.vorname+"_"+today())).catch(()=>{});
@@ -3198,6 +3245,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
         r.id!==tempId && !(existRec && r.id===existRec.id));
       return [...filtered,completed];
     });
+    // 🔄 대타 자동 생성 스케줄이라면 예정 퇴근시간(임시 20:00)을 실제 퇴근시간으로 보정
+    syncAutoShiftEnd(user.vorname, today(), fil, inStr, outStr);
     // 임시(aus:null) record 노드 직접 제거 → 관리자 화면 즉시 Aktiv 해제
     if(window._fbDb&&window._fbRef&&window._fbRemove){
       window._fbRemove(window._fbRef(window._fbDb,"records/"+tempId)).catch(()=>{});
@@ -3608,6 +3657,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           CLOCK_KEY={CLOCK_KEY}
           onClose={()=>setModal(null)}
           onEin={(d)=>{setClockedIn(true);setClockInTime(d);setClockFiliale(selFiliale);setModal(null);
+            // 🆘 대타 자동 스케줄 (ClockModal 경유 출근에도 동일 적용)
+            ensureEinspringenShift(user.vorname, today(), selFiliale,
+              `${pad(d.getHours())}:${pad(d.getMinutes())}`);
             if(window._fbDb&&window._fbRef&&window._fbRemove)
               window._fbRemove(window._fbRef(window._fbDb,"notifications/noshow_"+user.vorname+"_"+today())).catch(()=>{});
           }}
@@ -4661,6 +4713,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
         const d=s.date||s.d; if(!d) return;
         (map[d]=map[d]||[]).push({
           name, filiale:s.filiale||s.f||"", time:s.time||s.t||"", typ:typNorm(s.typ),
+          autoCreated:!!s.autoCreated,
           status:s.status||null, getauschtMit:s.getauschtMit||null, getauschtVon:s.getauschtVon||null
         });
       });
@@ -4829,7 +4882,9 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                         )}
                         {typNorm(r.typ)==="einspringen"&&(
                           <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,
-                            background:"#fef9c3",color:"#92400e"}}>{"⚡ Einspringen"}</span>
+                            background:"#fef9c3",color:"#92400e"}}>
+                            {r.autoCreated?"⚡ Einspringen (auto)":"⚡ Einspringen"}
+                          </span>
                         )}
                         {isMine&&<span style={{fontSize:9,color:C.mintDark,fontWeight:800}}>(Du)</span>}
                       </div>
