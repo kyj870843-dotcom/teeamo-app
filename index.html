@@ -1918,7 +1918,11 @@ async function addScheduleShift(name, date, filiale, time, typ, opts) {
   const uid = (opts && opts.uid) || uidOf(window._teeamoUsers, name) || "";
   // 🍙 ONIGIRI 지점은 계획 시간 없이 등록 (시간 필드 비활성 → "")
   const safeTime = isOnigiriFiliale(filiale) ? "" : (time||"");
-  const extra = Object.assign({}, (opts && opts.autoCreated) ? { autoCreated:true } : {}, uid ? { uid } : {});
+  // opts.extra 로 추가 필드(getauschtVon, status 등)를 함께 저장할 수 있다
+  const extra = Object.assign({},
+    (opts && opts.autoCreated) ? { autoCreated:true } : {},
+    uid ? { uid } : {},
+    (opts && opts.extra && typeof opts.extra==="object") ? opts.extra : {});
   // 🔒 같은 날짜라도 '다른 지점' 근무는 절대 지우지 않는다.
   //    (예: 오전 ONIGIRI + 오후 TEEnJOY 대타 → 두 카드가 함께 유지되어야 함)
   const isSameSlot = (s) => (s.date||s.d) === date && sameFiliale(s.filiale||s.f, filiale);
@@ -2325,6 +2329,10 @@ function SchichtboerseView({ userName, users, isAdmin }) {
   const [fsTimeTo, setFsTimeTo] = useState("17:00");
   const [fsNote, setFsNote] = useState("");
 
+  // 🆔 로그인한 사람의 고유 ID — 관리자 모드/직원 모드 어디서 눌러도 동일한 값.
+  //    수락한 근무는 '직원으로서 배정받은 근무'로 이 uid에 귀속된다.
+  const myUid = uidOf(users, userName);
+
   // ── 전체 직원 목록 (알림 발송용) ──────────────────────────────
   const allStaff = safeList(users).filter(u=>!u.isAdmin && !sameName(u.vorname,userName));
   const allManagers = MANAGERS;
@@ -2337,7 +2345,7 @@ function SchichtboerseView({ userName, users, isAdmin }) {
       id, date:fsDate, filiale:fsFiliale,
       time: fsTimeFrom&&fsTimeTo ? fsTimeFrom+"-"+fsTimeTo : null,
       note:fsNote, besetzt:false, angeboten_von:userName,
-      angeboten_von_uid:uidOf(users,userName)||"", ts:id
+      angeboten_von_uid:myUid||"", ts:id
     };
 
     // Firebase에 freieSchichten 저장
@@ -2406,36 +2414,33 @@ function SchichtboerseView({ userName, users, isAdmin }) {
       }
     }catch(e){ console.error("overlap check error:",e); }
     // 1) schedule 자동 업데이트 (관리자 승인 불필요)
-    if (window._fbDb && window._fbRef && window._fbGet && window._fbSet) {
-      try {
-        const monthKey = "schedule_"+schicht.date.slice(0,7).replace("-","_");
-        // root schedule
-        const rootSnap = await window._fbGet(window._fbRef(window._fbDb,"schedule"));
-        const rootSched = rootSnap.val()?JSON.parse(JSON.stringify(rootSnap.val())):{};
-        if (!rootSched[userName]) rootSched[userName]=[];
-        if (!Array.isArray(rootSched[userName])) rootSched[userName]=Object.values(rootSched[userName]);
-        rootSched[userName]=rootSched[userName].filter(s=>(s.d||s.date)!==schicht.date);
-        rootSched[userName].push({d:schicht.date,f:schicht.filiale,t:schicht.time||null,getauschtVon:schicht.angeboten_von||null});
-        await window._fbSet(window._fbRef(window._fbDb,"schedule"),rootSched);
-        // 월별 schedule_YYYY_MM
-        const mSnap=await window._fbGet(window._fbRef(window._fbDb,monthKey));
-        const mSched=mSnap.val()?JSON.parse(JSON.stringify(mSnap.val())):{};
-        const mArr=Object.values(mSched[userName]||{}).filter(s=>(s.date||s.d)!==schicht.date);
-        mArr.push({date:schicht.date,filiale:schicht.filiale,time:schicht.time||null,getauschtVon:schicht.angeboten_von||null});
-        mSched[userName]=Object.fromEntries(mArr.map((s,i)=>[String(i),s]));
-        await window._fbSet(window._fbRef(window._fbDb,monthKey),mSched);
-      } catch(e){console.error("schedule update error:",e);}
+    //    ⚠️ 예전에는 여기서 직접 노드를 써서 3가지 문제가 있었다:
+    //       ① uid 미저장 → 이름이 바뀌면 '내 근무' 인식이 깨짐
+    //       ② rootSched[userName] 직접 접근 → 기존 키("yeaji")와 별개의
+    //          새 키("Yeaji 🤖")가 생겨 같은 근무가 두 줄로 보임
+    //       ③ 같은 날짜 근무를 지점 구분 없이 전부 삭제
+    //          → 오전 ONIGIRI 근무가 있는데 오후 대타를 수락하면 오전 근무가 사라짐
+    //    → addScheduleShift()가 세 문제를 모두 올바르게 처리하므로 그것으로 통일한다.
+    //      (지점별 격리 + scheduleKeyOf로 기존 키 유지 + uid 저장 + root/월별 동시 기록)
+    try{
+      await addScheduleShift(
+        userName, schicht.date, schicht.filiale, schicht.time || "", "normal",
+        { uid: myUid, extra: { getauschtVon: schicht.angeboten_von || null } }
+      );
+    }catch(e){
+      console.error("✅ [uebernehmen] schedule 기록 실패:", e, { schicht, userName, myUid });
+      throw e;   // 상위 uebernehmenSafe가 잡아 사용자에게 알린다
     }
 
     // 2) freieSchichten besetzt 처리
     setFreieSchichten(prev=>safeList(prev).map(s=>
       s?.id===schicht?.id?{...s,besetzt:true,uebernommen_von:userName,
-        uebernommen_von_uid:uidOf(users,userName)||""}:s
+        uebernommen_von_uid:myUid||""}:s
     ));
     if(window._fbDb&&window._fbRef&&window._fbSet){
       window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+schicht.id),
         {...schicht,besetzt:true,uebernommen_von:userName,
-          uebernommen_von_uid:uidOf(users,userName)||""}).catch(()=>{});
+          uebernommen_von_uid:myUid||""}).catch(()=>{});
     }
 
     // 2b) 🔄 원 소유자의 스케줄 shift를 삭제하지 않고 'getauscht'로 갱신 (반투명 + 원 주인 추적)
@@ -2511,7 +2516,11 @@ function SchichtboerseView({ userName, users, isAdmin }) {
   //   freieSchichten 노드에서 제거하므로 모든 Dienstplan 리스트의
   //   [Offene Schicht] 행도 실시간으로 함께 사라진다.
   async function zuruecknehmen(schicht){
-    if(!schicht || schicht.besetzt) return;
+    console.log("↩️ [zuruecknehmen] 시작:", { schicht, userName });
+    if(!schicht || typeof schicht!=="object" || schicht.besetzt){
+      console.error("↩️ [zuruecknehmen] 처리 불가한 데이터:", schicht);
+      return;
+    }
     const own = sameName(schicht.angeboten_von, userName);
     const label = own ? "Zurücknehmen?" : "Diese offene Schicht löschen?";
     const dateStr = new Date(schicht.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"});
@@ -2537,7 +2546,9 @@ function SchichtboerseView({ userName, users, isAdmin }) {
         });
       }catch(e){}
     }
-    setMsg({type:"ok",text: own ? "↩️ Schicht zurückgenommen." : "🗑 Offene Schicht gelöscht."});
+    // ⚠️ msg는 화면에 {msg}로 그대로 렌더링되므로 반드시 '문자열'이어야 한다.
+    //    객체를 넣으면 React error #31 (Objects are not valid as a React child)로 앱이 죽는다.
+    setMsg(own ? "↩️ Schicht zurückgenommen." : "🗑 Offene Schicht gelöscht.");
     setTimeout(()=>setMsg(null),4000);
   }
 
@@ -2572,7 +2583,8 @@ function SchichtboerseView({ userName, users, isAdmin }) {
       {msg&&(
         <div style={{padding:"10px 14px",borderRadius:10,background:C.mintLight,border:"1px solid "+C.mint,
           fontSize:12,fontWeight:600,color:C.mintDark,marginBottom:12}}>
-          {msg}
+          {/* 🛡 실수로 객체가 들어와도 앱이 죽지 않도록 문자열로 변환해 렌더링 */}
+          {typeof msg==="string" ? msg : (msg?.text || JSON.stringify(msg))}
         </div>
       )}
 
@@ -6206,7 +6218,11 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
               setSelMonth(mk);
             }}/>
           <div style={{marginTop:16}}>
-            <DienstplanKalender schedule={schedule} records={records} allowDelete={true} users={users}/>
+            {/* 🆔 관리자 모드에서도 본인 근무를 인식하도록 highlightName을 넘긴다.
+                   (사장님·매니저가 직원으로도 근무하는 경우 → 모드와 무관하게 (Du) 표시)
+                   allowDelete={true}이므로 본인 근무여도 수정·삭제 권한은 그대로 유지된다. */}
+            <DienstplanKalender schedule={schedule} records={records} allowDelete={true}
+              users={users} highlightName={manager?.vorname||userKey}/>
           </div>
         </div>
       )}
