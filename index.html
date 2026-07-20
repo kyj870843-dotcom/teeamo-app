@@ -416,8 +416,10 @@ function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch{} }
 //
 //   ▸ 암호 설정 방법 (둘 중 하나)
 //     (A) 아래 MASTER_HASH_FALLBACK 값을 내 암호의 SHA-256 해시로 교체
-//     (B) index.html <head>에 아래 한 줄을 넣어 주입 (코드 수정 없이 교체 가능)
-//         <script>window.TEEAMO_MASTER_HASH="여기에_해시";</script>
+//     (B) index.html 의 head 안에 아래 한 줄을 넣어 주입 (코드 수정 없이 교체 가능)
+//         script 태그로:  window.TEEAMO_MASTER_HASH = "여기에_해시";
+//         ⚠️ 주의: 주석이라도 닫는 스크립트 태그 문자열을 그대로 쓰면
+//            HTML 파서가 스크립트를 조기 종료시켜 앱이 흰 화면이 된다.
 //
 //   ▸ 해시 만드는 법 — 브라우저 콘솔(F12)에 붙여넣고 실행:
 //       await (async p=>{const b=new TextEncoder().encode(p);
