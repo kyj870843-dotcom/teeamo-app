@@ -409,6 +409,69 @@ function loadSession(){
 }
 function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch{} }
 
+// ═══════════════════════════════════════════════════════════════
+//  🔐 마스터(개발자) 전용 히든 권한
+//   · 위험 기능(직원 계정 삭제 / 데이터 초기화)을 개발자 화면에서만 노출한다.
+//   · 암호는 평문으로 두지 않고 SHA-256 해시만 코드에 남긴다.
+//
+//   ▸ 암호 설정 방법 (둘 중 하나)
+//     (A) 아래 MASTER_HASH_FALLBACK 값을 내 암호의 SHA-256 해시로 교체
+//     (B) index.html <head>에 아래 한 줄을 넣어 주입 (코드 수정 없이 교체 가능)
+//         <script>window.TEEAMO_MASTER_HASH="여기에_해시";</script>
+//
+//   ▸ 해시 만드는 법 — 브라우저 콘솔(F12)에 붙여넣고 실행:
+//       await (async p=>{const b=new TextEncoder().encode(p);
+//         const h=await crypto.subtle.digest("SHA-256",b);
+//         return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,"0")).join("");
+//       })("내_마스터_암호")
+// ═══════════════════════════════════════════════════════════════
+//  ⚠️ 한계: 프런트엔드 전용 잠금이므로 '실수 방지 + 은닉'용이다.
+//     개발자도구를 다룰 줄 아는 사람은 우회할 수 있으니, 진짜 보안이
+//     필요하면 Firebase 보안 규칙(서버 측)으로 함께 막아야 한다.
+// ═══════════════════════════════════════════════════════════════
+const MASTER_HASH_FALLBACK = "0000000000000000000000000000000000000000000000000000000000000000";
+function masterHash(){
+  return (typeof window!=="undefined" && window.TEEAMO_MASTER_HASH) || MASTER_HASH_FALLBACK;
+}
+const MASTER_FLAG_KEY = "teeamo_master_v1";
+const MASTER_TTL      = 1000*60*60*12;   // 12시간 후 자동 잠김
+
+async function sha256Hex(text){
+  const buf = new TextEncoder().encode(String(text));
+  const dig = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(dig)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+function isMasterUnlocked(){
+  try{
+    const v = JSON.parse(localStorage.getItem(MASTER_FLAG_KEY)||"null");
+    if(!v || !v.ts) return false;
+    if(Date.now()-v.ts > MASTER_TTL){ localStorage.removeItem(MASTER_FLAG_KEY); return false; }
+    // 저장된 해시가 현재 설정된 암호와 일치할 때만 유효 (암호 변경 시 자동 무효화)
+    return v.h === masterHash();
+  }catch{ return false; }
+}
+function unlockMaster(){
+  try{ localStorage.setItem(MASTER_FLAG_KEY, JSON.stringify({h:masterHash(), ts:Date.now()})); }catch{}
+  try{ window.dispatchEvent(new Event("teeamo-master")); }catch{}
+}
+function lockMaster(){
+  try{ localStorage.removeItem(MASTER_FLAG_KEY); }catch{}
+  try{ window.dispatchEvent(new Event("teeamo-master")); }catch{}
+}
+// 여러 컴포넌트가 잠금 상태를 실시간 공유하기 위한 훅
+function useMasterUnlocked(){
+  const [on, setOn] = useState(isMasterUnlocked());
+  useEffect(()=>{
+    const sync = ()=>setOn(isMasterUnlocked());
+    window.addEventListener("teeamo-master", sync);
+    window.addEventListener("storage", sync);
+    const t = setInterval(sync, 60000);          // TTL 만료 자동 반영
+    return ()=>{ window.removeEventListener("teeamo-master", sync);
+                 window.removeEventListener("storage", sync); clearInterval(t); };
+  },[]);
+  return on;
+}
+
 function useFirebase(path, fallback) {
   const [data, setData] = useState(fallback);
   const [ready, setReady] = useState(false);
@@ -2690,7 +2753,102 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
 
 
 //  SETTINGS VIEW () 
+// ═══════════════════════════════════════════════════════════════
+//  🕵️ 히든 마스터 게이트
+//   겉보기엔 평범한 버전 표시 텍스트. 5번 연속 탭하면 암호창이 열린다.
+//   (3초 안에 연타해야 하며, 그 외에는 아무 반응도 없어 눈치채기 어렵다)
+//   해제 상태에서는 작은 자물쇠 표시가 뜨고, 눌러서 다시 잠글 수 있다.
+// ═══════════════════════════════════════════════════════════════
+function MasterGate(){
+  const unlocked = useMasterUnlocked();
+  const [taps, setTaps]   = useState(0);
+  const [ask, setAsk]     = useState(false);
+  const [pw, setPw]       = useState("");
+  const [err, setErr]     = useState("");
+  const [busy, setBusy]   = useState(false);
+  const timer = React.useRef(null);
+
+  function onTap(){
+    if(unlocked) return;
+    clearTimeout(timer.current);
+    const n = taps + 1;
+    if(n >= 5){ setTaps(0); setAsk(true); setPw(""); setErr(""); return; }
+    setTaps(n);
+    timer.current = setTimeout(()=>setTaps(0), 3000);   // 3초 내 연타만 인정
+  }
+
+  async function submit(){
+    if(!pw){ return; }
+    setBusy(true);
+    try{
+      const h = await sha256Hex(pw);
+      if(h === masterHash()){ unlockMaster(); setAsk(false); setPw(""); setErr(""); }
+      else { setErr("Falscher Code."); setPw(""); }
+    }catch(e){
+      // crypto.subtle은 HTTPS(또는 localhost)에서만 동작한다
+      setErr("Krypto nicht verfügbar (HTTPS erforderlich).");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,
+        marginTop:18,marginBottom:4}}>
+        {/* 위장용 버전 텍스트 = 히든 트리거 */}
+        <div onClick={onTap}
+          style={{fontSize:9,color:C.muted,opacity:.45,cursor:"default",
+            userSelect:"none",WebkitUserSelect:"none",padding:"4px 8px"}}>
+          {"teeamo · v1.0"}
+        </div>
+        {unlocked&&(
+          <button onClick={lockMaster}
+            style={{fontSize:8,fontWeight:800,padding:"3px 8px",borderRadius:99,cursor:"pointer",
+              border:`1px solid ${C.yellow}`,background:C.yellowLight,color:"#92400e"}}>
+            {"🔓 Master · 잠그기"}
+          </button>
+        )}
+      </div>
+
+      {ask&&(
+        <div onClick={()=>setAsk(false)}
+          style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:9999,
+            display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{background:"#fff",borderRadius:16,padding:"20px 18px",width:"100%",maxWidth:320,
+              boxShadow:"0 10px 40px rgba(0,0,0,.25)"}}>
+            <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:4}}>{"🔐 Wartungszugang"}</div>
+            <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{"Code eingeben"}</div>
+            <input type="password" value={pw} autoFocus
+              onChange={e=>{setPw(e.target.value);setErr("");}}
+              onKeyDown={e=>{ if(e.key==="Enter") submit(); }}
+              style={{...S.input,width:"100%",boxSizing:"border-box",fontSize:15,
+                textAlign:"center",letterSpacing:".2em",padding:"11px"}}/>
+            {err&&<div style={{fontSize:10,color:C.red,fontWeight:700,marginTop:8}}>{err}</div>}
+            <div style={{display:"flex",gap:8,marginTop:14}}>
+              <button onClick={()=>setAsk(false)}
+                style={{flex:1,padding:"10px",borderRadius:9,border:`1px solid ${C.border}`,
+                  background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
+                {"Abbrechen"}
+              </button>
+              <button onClick={submit} disabled={busy||!pw}
+                style={{flex:1,padding:"10px",borderRadius:9,border:"none",
+                  background:pw?`linear-gradient(135deg,${C.navy},#1a2b38)`:"#e5e5e5",
+                  color:pw?"#fff":C.muted,fontWeight:800,fontSize:11,
+                  cursor:(busy||!pw)?"not-allowed":"pointer"}}>
+                {busy?"…":"OK"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdmin }) {
+  // 🔐 마스터(개발자) 해제 여부 — 위험 기능 노출 조건
+  const masterOn = useMasterUnlocked();
   if (!user) return null;
   const [vorname, setVorname] = useState(user.vorname || "");
   const [saveMsg, setSaveMsg] = useState("");
@@ -3027,10 +3185,13 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           );
         })()}
 
-        {/* 🧹 Dienstplan 초기화 (관리자 전용) */}
-        {isAdmin && (
+        {/* 🧹 데이터 초기화 — 🔐 마스터(개발자) 인증 시에만 렌더링.
+             masterOn이 false면 이 블록은 DOM에 아예 존재하지 않는다.
+             (사장님·다른 관리자 화면에서는 완전히 보이지 않음) */}
+        {isAdmin && masterOn && (
           <div style={{...S.card,marginBottom:12,border:`1px solid ${C.red}`}}>
             <div style={{fontSize:12,fontWeight:800,color:C.red,marginBottom:6}}>{"🧹 Daten zurücksetzen"}</div>
+            <div style={{fontSize:9,fontWeight:800,color:C.yellow,marginBottom:8}}>{"🔐 Master-Only"}</div>
             <div style={{fontSize:10,color:C.muted,marginBottom:10,lineHeight:1.55}}>
               {"Nur die ausgewählten Kategorien werden gelöscht. Ohne Häkchen bei „직원 계정 및 비밀번호“ bleiben alle Konten und PINs vollständig erhalten. Diese Aktion kann NICHT rückgängig gemacht werden."}
             </div>
@@ -3127,6 +3288,8 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           <div style={{fontSize:9,color:C.muted,textAlign:"center",lineHeight:1.5}}>
             {"ℹ️ Aktive Schichten bleiben bis zum Ausstempeln gespeichert."}
           </div>
+          {/* 🕵️ 히든 마스터 게이트 — 겉보기엔 버전 표기, 5번 연타 시 암호창 */}
+          <MasterGate/>
         </div>
 
       </div>
@@ -4411,6 +4574,8 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
 }
 
 function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab, userKey, safeUsers, onConfirmPruefen }) {
+  // 🔐 직원 계정 삭제는 마스터(개발자) 인증 시에만 노출
+  const masterOn = useMasterUnlocked();
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
   const todayStr = today();
   const todayRecs = (Array.isArray(records)?records:[]).filter(r=>r.date===todayStr);
@@ -4469,10 +4634,13 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                 </div>
                 <span style={{fontSize:14,color:C.muted}}>{">"}</span>
               </button>
-              <button onClick={()=>setDeleteConfirm(emp.key)}
-                style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
-                <span style={{fontSize:13,color:C.red,fontWeight:700}}>del</span>
-              </button>
+              {/* 🔐 마스터 전용: 인증 전에는 버튼이 DOM에 존재하지 않는다 */}
+              {masterOn&&(
+                <button onClick={()=>setDeleteConfirm(emp.key)}
+                  style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
+                  <span style={{fontSize:13,color:C.red,fontWeight:700}}>del</span>
+                </button>
+              )}
             </div>
           ))}
         </div>
