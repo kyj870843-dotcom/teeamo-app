@@ -413,109 +413,92 @@ function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch{} }
 
 // ═══════════════════════════════════════════════════════════════
 //  🔐 마스터(개발자) 전용 히든 권한
-//   · 위험 기능(직원 계정 삭제 / 데이터 초기화)을 개발자 화면에서만 노출한다.
-//   · 암호는 평문으로 두지 않고 SHA-256 해시만 코드에 남긴다.
+//   위험 기능(직원 계정 삭제 / 데이터 초기화)을 개발자 화면에서만 노출한다.
 //
-//   ▸ 암호 설정 방법 (둘 중 하나)
-//     (A) 아래 MASTER_HASH_FALLBACK 값을 내 암호의 SHA-256 해시로 교체
-//     (B) index.html 의 head 안에 아래 한 줄을 넣어 주입 (코드 수정 없이 교체 가능)
-//         script 태그로:  window.TEEAMO_MASTER_HASH = "여기에_해시";
-//         ⚠️ 주의: 주석이라도 닫는 스크립트 태그 문자열을 그대로 쓰면
-//            HTML 파서가 스크립트를 조기 종료시켜 앱이 흰 화면이 된다.
+//   ⚠️ 한계: 프런트엔드 전용 잠금이라 '실수 방지 + 은닉'용이다.
+//      개발자도구를 다룰 줄 아는 사람은 우회할 수 있으므로, 진짜 보안이
+//      필요하면 Firebase 보안 규칙(서버 측)으로 함께 막아야 한다.
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  ★★★ 암호 설정 — 여기 두 줄만 고치면 됩니다 ★★★
 //
-//   ▸ 해시 만드는 법 — 브라우저 콘솔(F12)에 붙여넣고 실행:
-//       await (async p=>{const b=new TextEncoder().encode(p);
-//         const h=await crypto.subtle.digest("SHA-256",b);
-//         return [...new Uint8Array(h)].map(x=>x.toString(16).padStart(2,"0")).join("");
-//       })("내_마스터_암호")
+//  [권장] MASTER_HASH 방식 — 암호 원문이 코드에 남지 않습니다.
+//     1) 앱을 연 뒤 브라우저 콘솔(F12)에 아래를 입력:
+//            await teeamoMakeHash("내가정한암호")
+//     2) 출력된 64자 해시를 MASTER_HASH 에 붙여넣기
+//     3) MASTER_KEY 는 "" 로 비워둡니다
+//
+//  [간편] MASTER_KEY 방식 — 암호를 그대로 적습니다. 코드를 열면 보입니다.
+//
+//  ※ 둘 다 채우면 MASTER_HASH 가 우선합니다.
 // ═══════════════════════════════════════════════════════════════
-//  ⚠️ 한계: 프런트엔드 전용 잠금이므로 '실수 방지 + 은닉'용이다.
-//     개발자도구를 다룰 줄 아는 사람은 우회할 수 있으니, 진짜 보안이
-//     필요하면 Firebase 보안 규칙(서버 측)으로 함께 막아야 한다.
-// ═══════════════════════════════════════════════════════════════
-// ── 암호 설정 자리 ────────────────────────────────────────────
-//   아래 둘 중 '하나만' 채우면 된다. (평문을 쓰기 싫으면 해시 사용)
-const MASTER_KEY_FALLBACK  = "";   // 평문 암호   예) "teeamo-dev-2026!"
-const MASTER_HASH_FALLBACK = "";   // 또는 SHA-256 해시 64자
+const MASTER_KEY  = "";   // 예) "teeamo-dev-2026!"   ← 평문 방식
+const MASTER_HASH = "";   // 예) "7e27893cd9a1...(64자)"  ← 해시 방식(권장)
 
-// 🔎 환경변수 안전 읽기
-//   이 앱은 번들러가 없어 브라우저에 process 객체가 존재하지 않는다.
-//   그냥 process.env를 읽으면 ReferenceError로 앱 전체가 죽으므로 반드시 감싼다.
-//   (나중에 Next.js로 옮기면 이 함수가 자동으로 값을 집어온다)
-function readEnvMasterKey(){
-  try{
-    if(typeof process !== "undefined" && process && process.env){
-      const v = process.env.NEXT_PUBLIC_MASTER_KEY;
-      if(typeof v === "string" && v.trim()) return v.trim();
-    }
-  }catch(e){ /* process 미정의 → 무시 */ }
-  return "";
-}
-
-// 🔑 암호 출처 결정 (우선순위: window 주입 → 빌드 환경변수 → 코드 상수)
-//   window 주입이 1순위인 이유: 코드를 건드리지 않고 배포 시 교체할 수 있어서.
-function resolveMaster(){
-  const w = (typeof window !== "undefined") ? window : {};
-  const pick = v => (typeof v === "string" ? v.trim() : "");
-  const wKey  = pick(w.TEEAMO_MASTER_KEY);
-  const wHash = pick(w.TEEAMO_MASTER_HASH);
-  const eKey  = readEnvMasterKey();
-  const cKey  = pick(MASTER_KEY_FALLBACK);
-  const cHash = pick(MASTER_HASH_FALLBACK);
-  if(wKey)  return { key:wKey,  hash:"",    source:"window.TEEAMO_MASTER_KEY" };
-  if(wHash) return { key:"",    hash:wHash, source:"window.TEEAMO_MASTER_HASH" };
-  if(eKey)  return { key:eKey,  hash:"",    source:"process.env.NEXT_PUBLIC_MASTER_KEY" };
-  if(cKey)  return { key:cKey,  hash:"",    source:"MASTER_KEY_FALLBACK (코드 상수)" };
-  if(cHash) return { key:"",    hash:cHash, source:"MASTER_HASH_FALLBACK (코드 상수)" };
-  return { key:"", hash:"", source:"" };     // 미설정
-}
-function masterHash(){ return resolveMaster().hash; }
-
-// ✅ 입력값 검증 — 입력·설정값 양쪽 모두 trim 후 비교
-//   반환: {ok, reason, source}
-//   reason: "no-config" | "mismatch" | "crypto" | ""
-async function verifyMasterCode(input){
-  const cfg = resolveMaster();
-  const typed = String(input == null ? "" : input).trim();
-  if(!cfg.key && !cfg.hash) return { ok:false, reason:"no-config", source:"" };
-  if(!typed)                return { ok:false, reason:"mismatch",  source:cfg.source };
-  if(cfg.key)  return { ok: typed === cfg.key, reason:"mismatch", source:cfg.source };
-  try{
-    const h = await sha256Hex(typed);
-    return { ok: h === cfg.hash, reason:"mismatch", source:cfg.source };
-  }catch(e){
-    // crypto.subtle은 HTTPS(또는 localhost)에서만 제공된다
-    return { ok:false, reason:"crypto", source:cfg.source };
-  }
-}
-
-// 🐞 임시 디버깅 — 암호 값 자체는 절대 출력하지 않고 '설정 상태'만 보여준다.
-//   문제가 해결되면 이 함수 호출부만 지우면 된다.
-function masterDiagnostics(typed){
-  const cfg = resolveMaster();
-  const w = (typeof window !== "undefined") ? window : {};
-  return {
-    "설정된 암호 출처": cfg.source || "❌ 없음 (아무 곳에도 설정 안 됨)",
-    "설정값 방식": cfg.key ? "평문" : (cfg.hash ? "해시" : "-"),
-    "설정값 길이": (cfg.key || cfg.hash || "").length,
-    "입력값 길이(trim 후)": String(typed==null?"":typed).trim().length,
-    "window.TEEAMO_MASTER_KEY": typeof w.TEEAMO_MASTER_KEY,
-    "window.TEEAMO_MASTER_HASH": typeof w.TEEAMO_MASTER_HASH,
-    "process 객체 존재": (typeof process !== "undefined"),
-    "crypto.subtle 사용가능": !!(typeof crypto!=="undefined" && crypto.subtle),
-    "HTTPS 여부": (typeof location!=="undefined" ? location.protocol : "?"),
+// 🛠 해시 생성 도우미 — 콘솔에서 teeamoMakeHash("암호") 로 사용
+if(typeof window !== "undefined"){
+  window.teeamoMakeHash = async (pw)=>{
+    const h = await sha256Hex(String(pw||"").trim());
+    console.log("%c🔐 MASTER_HASH = \"" + h + "\"", "font-weight:bold;color:#2e7d5b");
+    return h;
   };
 }
 
 const MASTER_FLAG_KEY = "teeamo_master_v1";
-const MASTER_TTL      = 1000*60*60*12;   // 12시간 후 자동 잠김
+// ⏱ 시간 기반 자동 잠김 없음 — 버전 텍스트를 3번 더 탭하면 즉시 잠긴다(토글).
 
 async function sha256Hex(text){
   const buf = new TextEncoder().encode(String(text));
   const dig = await crypto.subtle.digest("SHA-256", buf);
   return [...new Uint8Array(dig)].map(b=>b.toString(16).padStart(2,"0")).join("");
 }
-// 잠금 플래그는 '현재 설정된 암호'와 묶어 저장 → 암호가 바뀌면 자동 무효화
+
+// 🔑 설정된 암호 읽기 (코드 상수만 사용 — 빌드 환경변수에 의존하지 않는다)
+//    아직 안 바꾼 예시 문구는 '미설정'으로 처리해 사고를 막는다.
+function resolveMaster(){
+  const PLACEHOLDERS = ["여기에암호작성","여기에_해시","내가정한암호","teeamo-dev-2026!",""];
+  const clean = v => {
+    const t = (typeof v === "string" ? v.trim() : "");
+    return PLACEHOLDERS.indexOf(t) >= 0 ? "" : t;
+  };
+  const hash = clean(MASTER_HASH);
+  const key  = clean(MASTER_KEY);
+  if(hash) return { key:"",  hash, source:"MASTER_HASH (해시)" };
+  if(key)  return { key, hash:"", source:"MASTER_KEY (평문)" };
+  return { key:"", hash:"", source:"" };          // 미설정
+}
+
+// ✅ 입력값 검증 — 설정값·입력값 양쪽 모두 trim 후 비교
+//    반환: { ok, reason }   reason: "no-config" | "mismatch" | "crypto" | ""
+async function verifyMasterCode(input){
+  const cfg = resolveMaster();
+  const typed = String(input == null ? "" : input).trim();
+  if(!cfg.key && !cfg.hash) return { ok:false, reason:"no-config" };
+  if(!typed)                return { ok:false, reason:"mismatch" };
+  if(cfg.key)               return { ok: typed === cfg.key, reason:"mismatch" };
+  try{
+    return { ok: (await sha256Hex(typed)) === cfg.hash, reason:"mismatch" };
+  }catch(e){
+    return { ok:false, reason:"crypto" };   // crypto.subtle은 HTTPS에서만 동작
+  }
+}
+
+// 🐞 디버깅 표 — 암호 값 자체는 절대 표시하지 않고 '설정 상태'만 보여준다.
+//    문제가 해결되면 MasterGate 안의 diag 블록만 지우면 된다.
+function masterDiagnostics(typed){
+  const cfg = resolveMaster();
+  const t = String(typed==null?"":typed).trim();
+  return {
+    "암호 설정 위치": cfg.source || "❌ 미설정 (MASTER_KEY / MASTER_HASH 둘 다 비어있음)",
+    "설정값 길이": (cfg.key || cfg.hash || "").length,
+    "입력값 길이(trim 후)": t.length,
+    "해시 길이 정상(64)": cfg.hash ? (cfg.hash.length===64 ? "✅" : "❌ "+cfg.hash.length+"자") : "-",
+    "crypto.subtle 사용가능": !!(typeof crypto!=="undefined" && crypto.subtle),
+    "프로토콜": (typeof location!=="undefined" ? location.protocol : "?"),
+  };
+}
+
+// 잠금 플래그는 '현재 설정된 암호'와 묶어 저장 → 암호를 바꾸면 자동 무효화
 function masterFingerprint(){
   const c = resolveMaster();
   return (c.source||"") + "|" + String(c.key||c.hash||"").length;
@@ -524,8 +507,8 @@ function isMasterUnlocked(){
   try{
     const v = JSON.parse(localStorage.getItem(MASTER_FLAG_KEY)||"null");
     if(!v || !v.ts) return false;
-    if(Date.now()-v.ts > MASTER_TTL){ localStorage.removeItem(MASTER_FLAG_KEY); return false; }
-    return v.fp === masterFingerprint();
+    if(!resolveMaster().source) return false;      // 암호 미설정이면 항상 잠금
+    return v.fp === masterFingerprint();           // 암호를 바꾸면 자동 무효화
   }catch{ return false; }
 }
 function unlockMaster(){
@@ -543,9 +526,8 @@ function useMasterUnlocked(){
     const sync = ()=>setOn(isMasterUnlocked());
     window.addEventListener("teeamo-master", sync);
     window.addEventListener("storage", sync);
-    const t = setInterval(sync, 60000);          // TTL 만료 자동 반영
     return ()=>{ window.removeEventListener("teeamo-master", sync);
-                 window.removeEventListener("storage", sync); clearInterval(t); };
+                 window.removeEventListener("storage", sync); };
   },[]);
   return on;
 }
@@ -2845,13 +2827,26 @@ function MasterGate(){
   const [err, setErr]     = useState("");
   const [busy, setBusy]   = useState(false);
   const [diag, setDiag]   = useState(null);   // 🐞 임시 디버깅 정보
+  const [locked, setLocked] = useState(false); // 잠금 완료 안내 표시
   const timer = React.useRef(null);
 
+  // 3초 안에 3번 탭 = 토글
+  //   · 잠긴 상태  → 암호 입력창 열기
+  //   · 해제된 상태 → 즉시 다시 잠그기 (암호 불필요)
   function onTap(){
-    if(unlocked) return;
     clearTimeout(timer.current);
     const n = taps + 1;
-    if(n >= 3){ setTaps(0); setAsk(true); setPw(""); setErr(""); return; }   // 3초 내 3연타
+    if(n >= 3){
+      setTaps(0);
+      if(unlocked){
+        lockMaster();                                   // 🔒 3연타로 즉시 잠금
+        setLocked(true);
+        setTimeout(()=>setLocked(false), 1600);         // 잠금 완료 표시 잠깐 노출
+      }else{
+        setAsk(true); setPw(""); setErr(""); setDiag(null);
+      }
+      return;
+    }
     setTaps(n);
     timer.current = setTimeout(()=>setTaps(0), 3000);   // 3초 내 연타만 인정
   }
@@ -2887,12 +2882,18 @@ function MasterGate(){
             userSelect:"none",WebkitUserSelect:"none",padding:"4px 8px"}}>
           {"teeamo · v1.0"}
         </div>
-        {unlocked&&(
+        {unlocked&&!locked&&(
           <button onClick={lockMaster}
             style={{fontSize:8,fontWeight:800,padding:"3px 8px",borderRadius:99,cursor:"pointer",
               border:`1px solid ${C.yellow}`,background:C.yellowLight,color:"#92400e"}}>
-            {"🔓 Master · 잠그기"}
+            {"🔓 Master · 3번 탭하면 잠김"}
           </button>
+        )}
+        {locked&&(
+          <span style={{fontSize:8,fontWeight:800,padding:"3px 8px",borderRadius:99,
+            border:`1px solid ${C.border}`,background:"#f1f1f1",color:C.muted}}>
+            {"🔒 잠금 완료"}
+          </span>
         )}
       </div>
 
@@ -4412,6 +4413,9 @@ function StatistikTab({records,users,schedule}){
 //   ▸ 자동 분배가 아니라 최고 관리자가 요청 시 수동 지정하는 방식
 // ═══════════════════════════════════════════════════════════════
 function BranchAccessPanel({ emp, setUsers }){
+  // 🔐 마스터(개발자) 인증자에게만 노출. 일반 관리자 화면에는 렌더링되지 않는다.
+  //    컴포넌트 자체에서 막으므로 어디에 배치하더라도 새어나가지 않는다.
+  const masterOn = useMasterUnlocked();
   const branches = allBranches();
   const [master, setMaster]   = useState(!!emp.allBranches);
   const [picked, setPicked]   = useState(()=>new Set(accessibleBranchIds(emp)));
@@ -4426,6 +4430,9 @@ function BranchAccessPanel({ emp, setUsers }){
     setHomeId(branchIdOf(emp));
     setMsg("");
   },[emp.key]);
+
+  // ⚠️ 조기 반환은 반드시 모든 훅을 호출한 '뒤'에 와야 한다 (React 훅 규칙)
+  if(!masterOn) return null;
 
   function toggle(id){
     if(master) return;                       // 만능키 상태에서는 개별 선택 잠금
@@ -4577,7 +4584,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
           <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:99,marginTop:4,display:"inline-block",color:sColor(getStatus(emp.vorname)),background:sBg(getStatus(emp.vorname))}}>{getStatus(emp.vorname)}</span>
         </div>
       </div>
-      {/* 🔑 지점 접근 권한 제어판 (최고 관리자 수동 설정) */}
+      {/* 🔑 지점 접근 권한 제어판 — 🔐 마스터 인증 시에만 표시 (내부에서 자체 차단) */}
       <BranchAccessPanel emp={emp} setUsers={setUsers}/>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:12,marginBottom:12}}>
