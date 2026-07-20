@@ -2757,7 +2757,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
 //  SETTINGS VIEW () 
 // ═══════════════════════════════════════════════════════════════
 //  🕵️ 히든 마스터 게이트
-//   겉보기엔 평범한 버전 표시 텍스트. 5번 연속 탭하면 암호창이 열린다.
+//   겉보기엔 평범한 버전 표시 텍스트. 3번 연속 탭하면 암호창이 열린다.
 //   (3초 안에 연타해야 하며, 그 외에는 아무 반응도 없어 눈치채기 어렵다)
 //   해제 상태에서는 작은 자물쇠 표시가 뜨고, 눌러서 다시 잠글 수 있다.
 // ═══════════════════════════════════════════════════════════════
@@ -2774,7 +2774,7 @@ function MasterGate(){
     if(unlocked) return;
     clearTimeout(timer.current);
     const n = taps + 1;
-    if(n >= 5){ setTaps(0); setAsk(true); setPw(""); setErr(""); return; }
+    if(n >= 3){ setTaps(0); setAsk(true); setPw(""); setErr(""); return; }   // 3초 내 3연타
     setTaps(n);
     timer.current = setTimeout(()=>setTaps(0), 3000);   // 3초 내 연타만 인정
   }
@@ -3290,7 +3290,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           <div style={{fontSize:9,color:C.muted,textAlign:"center",lineHeight:1.5}}>
             {"ℹ️ Aktive Schichten bleiben bis zum Ausstempeln gespeichert."}
           </div>
-          {/* 🕵️ 히든 마스터 게이트 — 겉보기엔 버전 표기, 5번 연타 시 암호창 */}
+          {/* 🕵️ 히든 마스터 게이트 — 겉보기엔 버전 표기, 3번 연타 시 암호창 */}
           <MasterGate/>
         </div>
 
