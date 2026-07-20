@@ -185,6 +185,60 @@ function personLabel(users, uid, fallbackName){
   const core = stripEmoji(raw).replace(/\s+/g," ").trim();
   return (core.charAt(0).toUpperCase()+core.slice(1)) || raw;
 }
+// 🛡 Firebase 리스트 안전 정규화
+//   Realtime DB는 배열에 구멍이 생기면 null을 넣어 돌려준다.
+//   그대로 .filter(s=>!s.besetzt) 같은 코드를 돌리면 null.besetzt 로 앱이 죽는다(흰 화면).
+//   모든 리스트 소비 지점에서 이 함수를 거쳐 null/비객체를 걸러낸다.
+function safeList(v){
+  const arr = Array.isArray(v) ? v : (v && typeof v==="object" ? Object.values(v) : []);
+  return arr.filter(x => x && typeof x === "object");
+}
+
+// 🗑 근무를 '모든 저장소'에서 확실히 제거한다.
+//   Dienstplan 리스트는 schedule + freieSchichten을 합쳐 보여주므로,
+//   schedule만 지우면 Schichtbörse 항목이 다시 살아나 '삭제가 안 된 것처럼' 보인다.
+//   → 두 곳을 함께 정리해야 실제로 사라진다.
+async function deleteShiftEverywhere({ rawName, uid, date, filiale, freieSchichten, users }){
+  const result = { schedule:false, boerse:0, errors:[] };
+  // 1) 근무표(schedule / schedule_YYYY_MM)에서 제거
+  if(rawName && rawName !== OFFENE_SCHICHT){
+    try{
+      await deleteScheduleShift(rawName, date);
+      result.schedule = true;
+    }catch(e){
+      console.error("🗑 [deleteShiftEverywhere] schedule 삭제 실패:", e, { rawName, date, filiale });
+      result.errors.push(e);
+    }
+  }
+  // 2) Schichtbörse(freieSchichten)에서 같은 날짜·지점의 관련 항목 제거
+  try{
+    if(window._fbDb && window._fbRef && window._fbRemove){
+      const targets = safeList(freieSchichten).filter(fs=>{
+        if((fs.date||fs.d) !== date) return false;
+        if(!sameFiliale(fs.filiale||fs.f, filiale)) return false;
+        if(rawName === OFFENE_SCHICHT) return !fs.besetzt;      // 빈 근무 행 삭제
+        const owner = { uid: fs.uebernommen_von_uid || fs.angeboten_von_uid || "",
+                        name: fs.uebernommen_von   || fs.angeboten_von   || "" };
+        return samePerson(owner, { uid, name: rawName });
+      });
+      for(const t of targets){
+        try{
+          await window._fbRemove(window._fbRef(window._fbDb, "freieSchichten/"+t.id));
+          result.boerse++;
+        }catch(e){
+          console.error("🗑 [deleteShiftEverywhere] Schichtbörse 삭제 실패:", e, { id:t?.id, date, filiale });
+          result.errors.push(e);
+        }
+      }
+    }
+  }catch(e){
+    console.error("🗑 [deleteShiftEverywhere] Schichtbörse 조회 실패:", e, { rawName, uid, date, filiale });
+    result.errors.push(e);
+  }
+  console.log("🗑 [deleteShiftEverywhere] 결과:", result, { rawName, uid, date, filiale });
+  return result;
+}
+
 // 같은 사람인지 판정 — uid 우선, 없으면 이름 정규화 비교(구 데이터 호환)
 function samePerson(a, b){
   const ua=String(a&&a.uid||"").trim(), ub=String(b&&b.uid||"").trim();
@@ -2272,7 +2326,7 @@ function SchichtboerseView({ userName, users, isAdmin }) {
   const [fsNote, setFsNote] = useState("");
 
   // ── 전체 직원 목록 (알림 발송용) ──────────────────────────────
-  const allStaff = (Array.isArray(users)?users:[]).filter(u=>!u.isAdmin&&u.vorname!==userName);
+  const allStaff = safeList(users).filter(u=>!u.isAdmin && !sameName(u.vorname,userName));
   const allManagers = MANAGERS;
 
   // ── [2] 근무 내놓기 → 전체 직원 실시간 알림 ──────────────────
@@ -2287,7 +2341,7 @@ function SchichtboerseView({ userName, users, isAdmin }) {
     };
 
     // Firebase에 freieSchichten 저장
-    setFreieSchichten(prev=>[...(Array.isArray(prev)?prev:[]), newSchicht]);
+    setFreieSchichten(prev=>[...safeList(prev), newSchicht]);
     if (window._fbDb && window._fbRef && window._fbSet) {
       window._fbSet(window._fbRef(window._fbDb, "freieSchichten/"+id), newSchicht).catch(()=>{});
 
@@ -2321,6 +2375,15 @@ function SchichtboerseView({ userName, users, isAdmin }) {
 
   // ── [3] 근무 이어받기 → 자동 승인 + 관리자 확인 알림 ─────────
   async function uebernehmen(schicht) {
+    // 🐞 임시 디버깅: 수락 시점의 입력 데이터 기록
+    console.log("✅ [uebernehmen] 시작:", { schicht, userName, uid: uidOf(users,userName) });
+    // 🛡 방어: 잘못된 데이터로 들어오면 조용히 중단 (앱이 죽지 않도록)
+    if(!schicht || typeof schicht!=="object" || !schicht.date){
+      console.error("✅ [uebernehmen] 잘못된 schicht 데이터:", schicht);
+      setMsg("❌ Ungültige Schicht-Daten.");
+      setTimeout(()=>setMsg(null),4000);
+      return;
+    }
     // ⛔ 중복 근무 방지: 같은 날 본인 기존 근무와 시간이 1분이라도 겹치면 차단
     try{
       if(window._fbDb&&window._fbRef&&window._fbGet&&schicht.time&&schicht.time.includes("-")){
@@ -2365,8 +2428,8 @@ function SchichtboerseView({ userName, users, isAdmin }) {
     }
 
     // 2) freieSchichten besetzt 처리
-    setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).map(s=>
-      s.id===schicht.id?{...s,besetzt:true,uebernommen_von:userName,
+    setFreieSchichten(prev=>safeList(prev).map(s=>
+      s?.id===schicht?.id?{...s,besetzt:true,uebernommen_von:userName,
         uebernommen_von_uid:uidOf(users,userName)||""}:s
     ));
     if(window._fbDb&&window._fbRef&&window._fbSet){
@@ -2403,7 +2466,7 @@ function SchichtboerseView({ userName, users, isAdmin }) {
 
       // 근무 내놓은 직원에게도 매칭 완료 알림
       if(schicht.angeboten_von&&schicht.angeboten_von!==userName){
-        const origUser=(Array.isArray(users)?users:[]).find(u=>sameName(u.vorname,schicht.angeboten_von));
+        const origUser=safeList(users).find(u=>sameName(u?.vorname,schicht?.angeboten_von));
         if(origUser){
           window._fbSet(window._fbRef(window._fbDb,
             "notifications/boerse_taken_"+schicht.id+"_"+origUser.key),{
@@ -2420,8 +2483,26 @@ function SchichtboerseView({ userName, users, isAdmin }) {
       }
     }
 
+    console.log("✅ [uebernehmen] 완료:", { id:schicht?.id, date:schicht?.date, filiale:schicht?.filiale });
     setMsg("✅ Schicht übernommen & in deinen Dienstplan eingetragen!");
     setTimeout(()=>setMsg(null),5000);
+  }
+
+  // 🛡 수락 처리 중 어떤 예외가 나도 앱이 흰 화면이 되지 않도록 감싸는 래퍼
+  //    (에러 오브젝트 전체를 콘솔에 남겨 원인 추적 가능)
+  async function uebernehmenSafe(schicht){
+    try{
+      await uebernehmen(schicht);
+    }catch(e){
+      console.error("✅ [uebernehmen] 처리 중 예외 발생:", e, {
+        schicht, userName,
+        stack: e?.stack,
+        freieSchichtenTyp: Array.isArray(freieSchichten)?"array":typeof freieSchichten,
+        usersAnzahl: safeList(users).length
+      });
+      setMsg("❌ Fehler bei der Übernahme — Details in der Konsole (F12).");
+      setTimeout(()=>setMsg(null),6000);
+    }
   }
 
   // ── 🗑 마켓에서 근무 내리기 (취소 / 삭제) ─────────────────────
@@ -2437,7 +2518,7 @@ function SchichtboerseView({ userName, users, isAdmin }) {
     if(!window.confirm(label+"\n"+dateStr+" · "+schicht.filiale+(schicht.time?" · "+schicht.time:""))) return;
 
     // 1) 마켓에서 제거 (로컬 + Firebase)
-    setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==schicht.id));
+    setFreieSchichten(prev=>safeList(prev).filter(x=>x?.id!==schicht?.id));
     if(window._fbDb&&window._fbRef&&window._fbRemove){
       await window._fbRemove(window._fbRef(window._fbDb,"freieSchichten/"+schicht.id)).catch(()=>{});
     }
@@ -2460,9 +2541,10 @@ function SchichtboerseView({ userName, users, isAdmin }) {
     setTimeout(()=>setMsg(null),4000);
   }
 
-  const offene = (Array.isArray(freieSchichten)?freieSchichten:[]).filter(s=>!s.besetzt);
+  // 🛡 safeList로 null 항목 제거 후 필터 (기존엔 null.besetzt 접근으로 앱이 죽었다)
+  const offene = safeList(freieSchichten).filter(s=>!s.besetzt);
   // 👤 대소문자 무시 비교 — 과거에 소문자로 저장된 데이터도 '내 제안'으로 인식
-  const meineAngebote = (Array.isArray(freieSchichten)?freieSchichten:[]).filter(s=>sameName(s.angeboten_von,userName));
+  const meineAngebote = safeList(freieSchichten).filter(s=>sameName(s?.angeboten_von,userName));
 
   return (
     <div style={{padding:"14px"}}>
@@ -2529,7 +2611,7 @@ function SchichtboerseView({ userName, users, isAdmin }) {
                 </button>
               ) : (
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>uebernehmen(s)}
+                  <button onClick={()=>uebernehmenSafe(s)}
                     style={{flex:1,padding:"11px",borderRadius:10,border:"none",
                       background:"linear-gradient(135deg,"+C.navy+",#444)",
                       color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
@@ -5545,9 +5627,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
     //   · 아직 주인이 없으면      → 이름 자리에 "[Offene Schicht]"
     //   · 누군가 übernehmen 하면  → 그 직원 이름으로 자동 교체 (실시간)
     //   · 이미 schedule에 같은 근무가 있으면 중복 행을 만들지 않는다.
-    const boerse = Array.isArray(freieSchichten)
-      ? freieSchichten
-      : Object.values(freieSchichten||{});
+    const boerse = safeList(freieSchichten);   // 🛡 null 구멍 제거 (흰 화면 방지)
     boerse.forEach(fs=>{
       if(!fs) return;
       const d = fs.date||fs.d; if(!d) return;
@@ -5788,13 +5868,36 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                       {r.status==="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>{"🔄 Getauscht mit "+(r.getauschtMit||"?")}</div>}
                       {r.getauschtVon&&r.status!=="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>{"✔️ Getauscht mit "+r.getauschtVon}</div>}
                     </div>
-                    {/* 관리자: 수정/삭제 — 빈 근무는 Schichtbörse에서 관리하므로 제외 */}
-                    {allowDelete&&!r.isOffen&&(
+                    {/* 관리자: 수정/삭제 (빈 근무는 삭제만 가능) */}
+                    {allowDelete&&(
                       <div style={{display:"flex",gap:6,flexShrink:0}}>
-                        <button onClick={()=>{ const p=(r.time||"").split("-"); setEditRow({key:rowKey,name:r.rawName,fil,von:p[0]||"",bis:p[1]||""}); }}
-                          style={{...iBtn,background:"#fff",color:C.navy}}>{"✏️"}</button>
-                        {/* 🗑 DB에 저장된 실제 키(rawName)로 삭제해야 확실히 지워진다 */}
-                        <button onClick={()=>{ if(window.confirm(r.name+" · "+selDate+"\nSchicht löschen?")) deleteScheduleShift(r.rawName, selDate); }}
+                        {!r.isOffen&&(
+                          <button onClick={()=>{ const p=(r.time||"").split("-"); setEditRow({key:rowKey,name:r.rawName,fil,von:p[0]||"",bis:p[1]||""}); }}
+                            style={{...iBtn,background:"#fff",color:C.navy}}>{"✏️"}</button>
+                        )}
+                        {/* 🗑 근무표 + Schichtbörse 양쪽에서 함께 제거해야 실제로 사라진다.
+                               (schedule만 지우면 Schichtbörse 항목이 다시 살아난다) */}
+                        <button onClick={async()=>{
+                          if(!window.confirm(r.name+" · "+selDate+"\nSchicht löschen?")) return;
+                          setActMsg("");
+                          try{
+                            const res = await deleteShiftEverywhere({
+                              rawName:r.rawName, uid:r.uid, date:selDate, filiale:fil,
+                              freieSchichten, users
+                            });
+                            if(res?.errors?.length){
+                              setActMsg("❌ Löschen fehlgeschlagen — Details in der Konsole.");
+                            }else if(!res?.schedule && !res?.boerse){
+                              setActMsg("⚠️ Nichts gefunden zum Löschen.");
+                            }else{
+                              setActMsg("✅ Schicht gelöscht.");
+                            }
+                          }catch(e){
+                            console.error("🗑 [Dienstplan] 삭제 중 예외:", e, { row:r, selDate, fil });
+                            setActMsg("❌ Fehler: "+(e?.message||e));
+                          }
+                          setTimeout(()=>setActMsg(""),4000);
+                        }}
                           style={{...iBtn,background:C.redLight,color:C.red}}>{"×"}</button>
                       </div>
                     )}
