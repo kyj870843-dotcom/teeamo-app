@@ -146,6 +146,33 @@ function canAccessBranch(user, branchId){
 // 🔄 Schichtbörse에 올라왔지만 아직 아무도 가져가지 않은 근무의 표시 이름
 const OFFENE_SCHICHT = "[Offene Schicht]";
 
+// 👤 직원 이름 비교/정규화
+//   관리자 로그인 키는 소문자("yeaji")인데 표시 이름은 "Yeaji"라서
+//   과거 데이터에 두 형태가 섞여 있다. 비교는 항상 대소문자·공백 무시로 한다.
+function nameKey(n){ return String(n==null?"":n).trim().toLowerCase(); }
+function sameName(a,b){
+  const x=nameKey(a), y=nameKey(b);
+  return !!x && x===y;
+}
+// 🖋 화면 표시용 이름 — 저장된 값이 "yeaji"라도 항상 "Yeaji"로 보이게 한다.
+//    데이터는 건드리지 않고 표시만 통일하므로 기존 기록이 안전하다.
+//    users 목록이 없는 화면(로그인 전 공개 근무표)에서는 첫 글자만 대문자 처리.
+function prettyName(name, users){
+  const raw = String(name==null?"":name).trim();
+  if(!raw || raw === OFFENE_SCHICHT) return raw;
+  const hit = (Array.isArray(users)?users:[]).find(u=>u && sameName(u.vorname, raw));
+  if(hit && hit.vorname) return hit.vorname;
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+// 로그인 키 또는 이름으로 '표시용 정식 이름(vorname)'을 찾아 반환
+//   users에 없으면 입력값을 그대로 쓴다 (임시 인력 등)
+function displayNameOf(users, keyOrName){
+  const list = Array.isArray(users)?users:[];
+  const hit = list.find(u=>u && (sameName(u.key,keyOrName) || sameName(u.vorname,keyOrName)));
+  return (hit && hit.vorname) ? hit.vorname : String(keyOrName==null?"":keyOrName).trim();
+}
+
 // ⏰ 근무표 작성 시 추천 시간 — VON(출근) / BIS(퇴근) 독립 배열
 const QUICK_VON_TIMES = ["09:30","10:00","11:00","11:30","12:30","14:00","15:00","15:30","16:00"];
 const QUICK_BIS_TIMES = ["14:00","15:00","15:30","16:00","16:30","17:00","18:00","19:00","20:00"];
@@ -186,7 +213,7 @@ function sameFiliale(a,b){ return filialeSlug(a)===filialeSlug(b); }
 //  · 지점을 지정하면 그 지점 기록만 반환(다른 지점 근무에 간섭 금지)
 //  · 구 데이터(지점 없이 저장된 record)는 지점 지정 시 매칭에서 제외
 function recordForShift(records, name, date, filiale){
-  const list=(Array.isArray(records)?records:[]).filter(r=>r&&r.user===name&&r.date===date);
+  const list=(Array.isArray(records)?records:[]).filter(r=>r&&sameName(r.user,name)&&r.date===date);
   if(filiale===undefined||filiale===null) return list[0]||null;
   const exact=list.filter(r=>sameFiliale(r.filiale, filiale));
   if(exact.length===0) return null;
@@ -695,7 +722,7 @@ function autoCheckoutAus(schedule, rec){
 //    반환: "genehmigt"(승인 완료) | "offen"(승인 대기) | null(없음)
 function nachtragStatusFor(antraege, name, date, filiale){
   const list = (Array.isArray(antraege)?antraege:[])
-    .filter(a => a && a.user===name && a.date===date &&
+    .filter(a => a && sameName(a.user,name) && a.date===date &&
       (filiale===undefined||filiale===null||!a.filiale||sameFiliale(a.filiale, filiale)) &&
       (a.typ==="nachtrag" || a.kategorie==="Nachtrag" || a.ein || a.aus));
   if(list.some(a => a.status==="genehmigt" || a.status==="approved")) return "genehmigt";
@@ -714,7 +741,7 @@ function filialeMitTyp(filiale, typ, opts){
 //  · 승인된 Nachtragen(typ:"nachtrag") 우선 → 그다음 완료된 실시간 출퇴근 기록.
 //  · 완전한 ein·aus 쌍이 있을 때만 반환(진행 중/미출근이면 null → Ist 미표시).
 function istTimeFor(records, name, date, filiale){
-  const list = (Array.isArray(records)?records:[]).filter(r=>r&&r.user===name&&r.date===date&&
+  const list = (Array.isArray(records)?records:[]).filter(r=>r&&sameName(r.user,name)&&r.date===date&&
     (filiale===undefined||filiale===null||sameFiliale(r.filiale, filiale)));
   if(!list.length) return null;
   // ⏱ 같은 날 같은 지점에서 여러 번 근무했다면 '가장 최근(출근 시각이 늦은)' 기록을 쓴다.
@@ -1639,26 +1666,38 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
 // ── 스케줄 shift 부분 수정 헬퍼: root schedule({d,f,t}) + 월별({date,filiale,time}) 두 노드에서
 //    (직원 name · 날짜 date)에 해당하는 shift를 찾아 patch(status/getauschtMit/getauschtVon 등)를 병합 저장.
 //    교환(Freigeben/Getauscht) 히스토리를 스케줄 자체에 기록하여 직원·관리자 모든 화면에 실시간 반영한다.
+// 🔑 schedule 노드에서 실제로 저장된 키를 대소문자 무시로 찾아준다.
+//    "Yeaji"로 조회해도 과거에 "yeaji"로 저장된 데이터를 찾아낸다.
+//    (못 찾으면 입력값 그대로 → 신규 저장 시 정식 표기 유지)
+function scheduleKeyOf(obj, name){
+  if(!obj || typeof obj!=="object") return name;
+  if(Object.prototype.hasOwnProperty.call(obj, name)) return name;
+  const hit = Object.keys(obj).find(k=>sameName(k, name));
+  return hit || name;
+}
+
 async function patchScheduleShift(name, date, patch) {
   if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet)) return;
   try {
     // 1) root schedule
     const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
     const root = rsnap.val() ? JSON.parse(JSON.stringify(rsnap.val())) : {};
-    if (root[name]) {
-      let arr = Array.isArray(root[name]) ? root[name] : Object.values(root[name] || {});
+    const rKey = scheduleKeyOf(root, name);
+    if (root[rKey]) {
+      let arr = Array.isArray(root[rKey]) ? root[rKey] : Object.values(root[rKey] || {});
       arr = arr.map(s => (s.d || s.date) === date ? { ...s, ...patch } : s);
-      root[name] = arr;
+      root[rKey] = arr;
       await window._fbSet(window._fbRef(window._fbDb, "schedule"), root);
     }
     // 2) 월별 schedule_YYYY_MM
     const mk = "schedule_" + date.slice(0, 7).replace("-", "_");
     const msnap = await window._fbGet(window._fbRef(window._fbDb, mk));
     const mdata = msnap.val() ? JSON.parse(JSON.stringify(msnap.val())) : null;
-    if (mdata && mdata[name]) {
-      let arr = Array.isArray(mdata[name]) ? mdata[name] : Object.values(mdata[name] || {});
+    const mKey = mdata ? scheduleKeyOf(mdata, name) : name;
+    if (mdata && mdata[mKey]) {
+      let arr = Array.isArray(mdata[mKey]) ? mdata[mKey] : Object.values(mdata[mKey] || {});
       arr = arr.map(s => (s.date || s.d) === date ? { ...s, ...patch } : s);
-      mdata[name] = Object.fromEntries(arr.map((s, i) => [String(i), s]));
+      mdata[mKey] = Object.fromEntries(arr.map((s, i) => [String(i), s]));
       await window._fbSet(window._fbRef(window._fbDb, mk), mdata);
     }
   } catch (e) { console.error("patchScheduleShift error:", e); }
@@ -1671,18 +1710,21 @@ async function deleteScheduleShift(name, date) {
     const mk = "schedule_" + date.slice(0,7).replace("-","_");
     const snap = await window._fbGet(window._fbRef(window._fbDb, mk));
     const ex = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
-    if (ex[name]) {
-      let arr = Array.isArray(ex[name]) ? ex[name] : Object.values(ex[name] || {});
+    // 👤 대소문자가 다르게 저장된 과거 데이터도 확실히 삭제되도록 키를 해석한다
+    const eKey = scheduleKeyOf(ex, name);
+    if (ex[eKey]) {
+      let arr = Array.isArray(ex[eKey]) ? ex[eKey] : Object.values(ex[eKey] || {});
       arr = arr.filter(s => (s.date || s.d) !== date);
-      ex[name] = Object.fromEntries(arr.map((s,i)=>[String(i), s]));
+      ex[eKey] = Object.fromEntries(arr.map((s,i)=>[String(i), s]));
       await window._fbSet(window._fbRef(window._fbDb, mk), ex);
     }
     const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
     const root = rsnap.val() ? JSON.parse(JSON.stringify(rsnap.val())) : {};
-    if (root[name]) {
-      let rarr = Array.isArray(root[name]) ? root[name] : Object.values(root[name] || {});
+    const rKey = scheduleKeyOf(root, name);
+    if (root[rKey]) {
+      let rarr = Array.isArray(root[rKey]) ? root[rKey] : Object.values(root[rKey] || {});
       rarr = rarr.filter(s => (s.d || s.date) !== date);
-      root[name] = rarr;
+      root[rKey] = rarr;
       await window._fbSet(window._fbRef(window._fbDb, "schedule"), root);
     }
   } catch (e) { console.error("deleteScheduleShift error:", e); }
@@ -1738,7 +1780,7 @@ function nachtragenSchicht({ userName, date, filiale, ein, aus, setRecords }) {
 function overrideWithNachtrag({ a, setRecords }){
   // 🔒 같은 [직원·날짜·지점] 세션만 대체한다.
   //    (같은 날 다른 지점 근무 기록을 지워 정산이 누락되는 것을 방지)
-  const sameSession = (r)=> r && r.user===a.user && r.date===a.date &&
+  const sameSession = (r)=> r && sameName(r.user,a.user) && r.date===a.date &&
     (!a.filiale || !r.filiale || sameFiliale(r.filiale, a.filiale));
   const newRec={ id:Date.now(), user:a.user, date:a.date, filiale:a.filiale,
     ein:a.ein, aus:a.aus, note:a.grund||"Nachtrag genehmigt", typ:"nachtrag",
@@ -1781,17 +1823,19 @@ async function addScheduleShift(name, date, filiale, time, typ, opts) {
     const mk = "schedule_" + date.slice(0,7).replace("-","_");
     const snap = await window._fbGet(window._fbRef(window._fbDb, mk));
     const ex = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
-    let arr = Array.isArray(ex[name]) ? ex[name] : Object.values(ex[name] || {});
+    const eKey = scheduleKeyOf(ex, name);           // 👤 기존 키(대소문자) 유지
+    let arr = Array.isArray(ex[eKey]) ? ex[eKey] : Object.values(ex[eKey] || {});
     arr = arr.filter(s => !isSameSlot(s));
     arr.push({ date, filiale, time:safeTime, typ:t, ...extra });
-    ex[name] = Object.fromEntries(arr.map((s,i)=>[String(i), s]));
+    ex[eKey] = Object.fromEntries(arr.map((s,i)=>[String(i), s]));
     await window._fbSet(window._fbRef(window._fbDb, mk), ex);
     const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
     const root = rsnap.val() ? JSON.parse(JSON.stringify(rsnap.val())) : {};
-    let rarr = Array.isArray(root[name]) ? root[name] : Object.values(root[name] || {});
+    const rKey = scheduleKeyOf(root, name);
+    let rarr = Array.isArray(root[rKey]) ? root[rKey] : Object.values(root[rKey] || {});
     rarr = rarr.filter(s => !isSameSlot(s));
     rarr.push({ d:date, f:filiale, t:safeTime, typ:t, ...extra });
-    root[name] = rarr;
+    root[rKey] = rarr;
     await window._fbSet(window._fbRef(window._fbDb, "schedule"), root);
   } catch(e) { console.error("addScheduleShift error:", e); }
 }
@@ -1912,7 +1956,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
   // 🚫 당일 Nachtragen 차단: 오늘 이미 실시간 출퇴근 기록(Einstempeln 완료 → 근무 중 or
   //    정상 종료)이 있으면 당일 카드의 Nachtragen을 막는다. (자동퇴근은 수정 위해 허용)
   const liveClockToday = (Array.isArray(records)?records:[])
-    .find(r => r.user===userName && r.date===d && r.ein && r.typ!=="nachtrag" && !r.isAutoCheckedOut);
+    .find(r => sameName(r.user,userName) && r.date===d && r.ein && r.typ!=="nachtrag" && !r.isAutoCheckedOut);
   const blockNachtragToday = (d === todayStr) && !!liveClockToday;
   // 🔒 Nachtragen 락: 이 근무(날짜)에 대해 이미 승인/대기 중인 신청이 있으면 재신청 차단
   const nachLock = nachtragStatusFor(antraege, userName, d, f);   // "genehmigt" | "offen" | null
@@ -2029,7 +2073,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
         )}
         {/* Nachtrag 제출 대기/완료 표시 */}
         {(()=>{
-          const myNachtrag=(Array.isArray(antraege)?antraege:[]).find(a=>a.user===userName&&a.date===d);
+          const myNachtrag=(Array.isArray(antraege)?antraege:[]).find(a=>sameName(a.user,userName)&&a.date===d);
           if(!myNachtrag) return null;
           const isPending=myNachtrag.status==="offen";
           const isApproved=myNachtrag.status==="genehmigt";
@@ -2306,7 +2350,7 @@ function SchichtboerseView({ userName, users, isAdmin }) {
 
       // 근무 내놓은 직원에게도 매칭 완료 알림
       if(schicht.angeboten_von&&schicht.angeboten_von!==userName){
-        const origUser=(Array.isArray(users)?users:[]).find(u=>u.vorname===schicht.angeboten_von);
+        const origUser=(Array.isArray(users)?users:[]).find(u=>sameName(u.vorname,schicht.angeboten_von));
         if(origUser){
           window._fbSet(window._fbRef(window._fbDb,
             "notifications/boerse_taken_"+schicht.id+"_"+origUser.key),{
@@ -2327,8 +2371,45 @@ function SchichtboerseView({ userName, users, isAdmin }) {
     setTimeout(()=>setMsg(null),5000);
   }
 
+  // ── 🗑 마켓에서 근무 내리기 (취소 / 삭제) ─────────────────────
+  //   · 본인이 내놓은 근무   → 되가져오기(Zurücknehmen): 원래 내 근무로 복구
+  //   · 관리자              → 어떤 빈 근무든 삭제(Löschen) 가능
+  //   freieSchichten 노드에서 제거하므로 모든 Dienstplan 리스트의
+  //   [Offene Schicht] 행도 실시간으로 함께 사라진다.
+  async function zuruecknehmen(schicht){
+    if(!schicht || schicht.besetzt) return;
+    const own = sameName(schicht.angeboten_von, userName);
+    const label = own ? "Zurücknehmen?" : "Diese offene Schicht löschen?";
+    const dateStr = new Date(schicht.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"});
+    if(!window.confirm(label+"\n"+dateStr+" · "+schicht.filiale+(schicht.time?" · "+schicht.time:""))) return;
+
+    // 1) 마켓에서 제거 (로컬 + Firebase)
+    setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).filter(x=>x.id!==schicht.id));
+    if(window._fbDb&&window._fbRef&&window._fbRemove){
+      await window._fbRemove(window._fbRef(window._fbDb,"freieSchichten/"+schicht.id)).catch(()=>{});
+    }
+    // 2) 직원이 내놓은 근무였다면 'freigegeben' 표시를 풀어 원래 상태로 되돌린다
+    if(schicht.angeboten_von){
+      await patchScheduleShift(schicht.angeboten_von, schicht.date, {status:null});
+    }
+    // 3) 관련 알림 정리 (남아있으면 눌렀을 때 없는 근무로 이동)
+    if(window._fbDb&&window._fbRef&&window._fbGet&&window._fbRemove){
+      try{
+        const snap=await window._fbGet(window._fbRef(window._fbDb,"notifications"));
+        const all=snap.val()||{};
+        Object.entries(all).forEach(([k,v])=>{
+          if(v && String(v.schichtId)===String(schicht.id))
+            window._fbRemove(window._fbRef(window._fbDb,"notifications/"+k)).catch(()=>{});
+        });
+      }catch(e){}
+    }
+    setMsg({type:"ok",text: own ? "↩️ Schicht zurückgenommen." : "🗑 Offene Schicht gelöscht."});
+    setTimeout(()=>setMsg(null),4000);
+  }
+
   const offene = (Array.isArray(freieSchichten)?freieSchichten:[]).filter(s=>!s.besetzt);
-  const meineAngebote = (Array.isArray(freieSchichten)?freieSchichten:[]).filter(s=>s.angeboten_von===userName);
+  // 👤 대소문자 무시 비교 — 과거에 소문자로 저장된 데이터도 '내 제안'으로 인식
+  const meineAngebote = (Array.isArray(freieSchichten)?freieSchichten:[]).filter(s=>sameName(s.angeboten_von,userName));
 
   return (
     <div style={{padding:"14px"}}>
@@ -2378,7 +2459,7 @@ function SchichtboerseView({ userName, users, isAdmin }) {
                   </div>
                   <div style={{fontSize:11,color:C.muted,marginTop:2}}>{s.filiale}</div>
                   {s.time&&<div style={{fontSize:11,fontWeight:600,color:C.mintDark,marginTop:2}}>{"🕐 "}{s.time}</div>}
-                  {s.angeboten_von&&<div style={{fontSize:10,color:C.muted,marginTop:3}}>{"von "}{s.angeboten_von}</div>}
+                  {s.angeboten_von&&<div style={{fontSize:10,color:C.muted,marginTop:3}}>{"von "}{prettyName(s.angeboten_von,users)}</div>}
                   {s.note&&<div style={{fontSize:10,color:C.muted,marginTop:4}}>{"📌 "}{s.note}</div>}
                 </div>
                 <div style={{width:40,height:40,borderRadius:10,background:"#EEF4FF",
@@ -2386,19 +2467,31 @@ function SchichtboerseView({ userName, users, isAdmin }) {
                   {s.filiale==="TEEnJOY"?"🧋":s.filiale==="TEEAMO Aegidiimarkt"?"🏬":"🏪"}
                 </div>
               </div>
-              {s.angeboten_von===userName ? (
-                <button onClick={()=>uebernehmen(s)}
+              {sameName(s.angeboten_von,userName) ? (
+                /* 내가 내놓은 근무 → 마켓에서 내리고 내 근무로 되돌린다 */
+                <button onClick={()=>zuruecknehmen(s)}
                   style={{width:"100%",padding:"10px",borderRadius:10,border:`1.5px solid ${C.yellow}`,
                     background:C.yellowLight,cursor:"pointer",fontWeight:700,fontSize:12,color:"#7c5c00"}}>
                   {"↩️ Zurücknehmen (eigene Schicht)"}
                 </button>
               ) : (
-                <button onClick={()=>uebernehmen(s)}
-                  style={{width:"100%",padding:"11px",borderRadius:10,border:"none",
-                    background:"linear-gradient(135deg,"+C.navy+",#444)",
-                    color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
-                  {"✅ Übernehmen → Dienstplan"}
-                </button>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>uebernehmen(s)}
+                    style={{flex:1,padding:"11px",borderRadius:10,border:"none",
+                      background:"linear-gradient(135deg,"+C.navy+",#444)",
+                      color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer"}}>
+                    {"✅ Übernehmen → Dienstplan"}
+                  </button>
+                  {/* 🗑 관리자: 잘못 올렸거나 필요 없어진 빈 근무를 마켓에서 삭제 */}
+                  {isAdmin&&(
+                    <button onClick={()=>zuruecknehmen(s)} title="Offene Schicht löschen"
+                      style={{flexShrink:0,padding:"11px 13px",borderRadius:10,
+                        border:`1.5px solid ${C.border}`,background:C.redLight,
+                        color:C.red,fontWeight:800,fontSize:13,cursor:"pointer"}}>
+                      {"🗑"}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           ))
@@ -2468,11 +2561,22 @@ function SchichtboerseView({ userName, users, isAdmin }) {
                     </div>
                     {s.besetzt
                       ? <span style={{fontSize:10,padding:"3px 8px",borderRadius:99,background:C.mintLight,color:C.mintDark,fontWeight:700}}>
-                          {"✅ Übernommen"+(s.uebernommen_von?" von "+s.uebernommen_von:"")}
+                          {"✅ Übernommen"+(s.uebernommen_von?" von "+prettyName(s.uebernommen_von,users):"")}
                         </span>
-                      : <span style={{fontSize:10,padding:"3px 8px",borderRadius:99,background:"#fef9c3",color:"#92400e",fontWeight:700}}>
-                          Offen
-                        </span>
+                      : (
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:10,padding:"3px 8px",borderRadius:99,background:"#fef9c3",color:"#92400e",fontWeight:700}}>
+                            Offen
+                          </span>
+                          {/* ↩️ 아직 아무도 안 가져갔으면 되가져올 수 있다 */}
+                          <button onClick={()=>zuruecknehmen(s)}
+                            style={{padding:"4px 9px",borderRadius:8,cursor:"pointer",
+                              border:`1px solid ${C.border}`,background:"#fff",
+                              color:C.red,fontSize:10,fontWeight:800,whiteSpace:"nowrap"}}>
+                            {"↩️ Zurücknehmen"}
+                          </button>
+                        </div>
+                      )
                     }
                   </div>
                 </div>
@@ -3608,12 +3712,12 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   },[clockedIn, isPaused]);
 
   const displayName=user.vorname;
-  const myRecs=records.filter(r=>r.user===user.vorname);
+  const myRecs=records.filter(r=>sameName(r.user,user.vorname));
 
   // 🌙 자동 강제 퇴근 배너: 내 이름으로 isAutoCheckedOut 기록이 있고, 아직
   //    [확인]으로 닫지 않았으며, 해당 날짜에 대한 Nachtragen 신청이 없을 때 노출.
   const autoOutRec = (Array.isArray(records)?records:[]).find(r =>
-    r && r.user===user.vorname && r.isAutoCheckedOut &&
+    r && sameName(r.user,user.vorname) && r.isAutoCheckedOut &&
     !autoOutDismissed.has(r.date) &&
     // 🔒 이미 신청(대기) 또는 승인된 Nachtragen이 있으면 배너를 더 이상 띄우지 않음
     !nachtragStatusFor(antraege, user.vorname, r.date)
@@ -3631,7 +3735,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     setNMsg("");
     setModal("nachtragAuto");
   }
-  const myAntraege=antraege.filter(a=>a.user===user.vorname);
+  const myAntraege=antraege.filter(a=>sameName(a.user,user.vorname));
   // 이번 달 records만
   const curMo2=(()=>{const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");})();
   // 📅 기본은 '이번 달'만 노출 → 새 달이 시작되면 자동으로 깔끔하게 비워진 상태로 시작.
@@ -4333,7 +4437,7 @@ function StatistikTab({records,users,schedule}){
   function exportSummary(fmt="xlsx"){
     const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","TEEnJOY (Std)","Ø Std/Tag"];
     const rows=[hdr,...empList.map(emp=>{
-      const er=monthRecs.filter(r=>r.user===emp.vorname);
+      const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
       const total=er.reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
       return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["TEEnJOY"].toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
@@ -4351,7 +4455,7 @@ function StatistikTab({records,users,schedule}){
   }
   // 📥 B. 직원별 개별 CSV — 일자별 상세 + 지점별/타입별 집계 요약 포함
   function exportAbrechnungMitarbeiter(emp){
-    const er=monthRecs.filter(r=>r.user===emp.vorname);
+    const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
     const bd=buildBreakdown(er);
     const num=h=>h.toFixed(2).replace(".",",");
     const rows=[
@@ -4391,7 +4495,7 @@ function StatistikTab({records,users,schedule}){
       <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,letterSpacing:".06em",textTransform:"uppercase"}}>{"Übersicht – "}{selMonth?new Date(selMonth+"-01").toLocaleDateString("de-DE",{month:"long",year:"numeric"}):""}</div>
       <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:14}}>
         {empList.map(emp=>{
-          const er=monthRecs.filter(r=>r.user===emp.vorname);
+          const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
           const total=er.reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
           const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
           const fColors=[C.mintLight,C.yellowLight,C.redLight];
@@ -4619,7 +4723,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
   const emp = safeUsers.find(u=>u.key===empKey);
   if (!emp) return null;
 
-  const empRecs = records.filter(r=>r.user===emp.vorname);
+  const empRecs = records.filter(r=>sameName(r.user,emp.vorname));
   const total = empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
   const byMonth={};
   empRecs.forEach(r=>{const m=r.date.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(r);});
@@ -4769,7 +4873,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
   //     (오전 ONIGIRI / 오후 TEEnJOY 가 각각 별도 카드·별도 상태로 표시)
   const todayRoster = Object.keys(schedule||{})
     .flatMap(nm => {
-      const emp = _rosterUsers.find(u=>u.vorname===nm) || null;
+      const emp = _rosterUsers.find(u=>sameName(u.vorname,nm)) || null;
       return norm(schedule[nm]||[])
         .filter(s => (s.date||s.d)===todayStr)
         .map(s => ({ name:nm, emp, isTemp:!emp,
@@ -4966,7 +5070,7 @@ function AntraegeTab({ antraege, setAntraege, tauschAntraege, setTauschAntraege,
           });
         });
       }
-      setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>!(r.user===a.user&&r.date===a.date&&r.typ==="nachtrag")));
+      setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>!(sameName(r.user,a.user)&&r.date===a.date&&r.typ==="nachtrag")));
     }
     setOpenAId(null);
   }
@@ -5132,7 +5236,7 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
     } else {
       setRecords(function(prev) {
         return (Array.isArray(prev)?prev:[]).filter(function(r){
-          return !(r.user===a.user && r.date===a.date && r.typ==="nachtrag");
+          return !(sameName(r.user,a.user) && r.date===a.date && r.typ==="nachtrag");
         });
       });
     }
@@ -5243,9 +5347,9 @@ function RecStatusBadge({rec, t}) {
 function NachDatumFilRow({name, d, t, schedule, users, records, todayStr, C, S}) {
   const arr = !schedule[name]?[]:Array.isArray(schedule[name])?schedule[name]:Object.values(schedule[name]);
   const shift = arr.find(s=>(s.date||s.d)===d);
-  const accountExists = Array.isArray(users)&&users.some(u=>u.vorname===name);
-  const emp = accountExists?(Array.isArray(users)?users:[]).find(u=>u.vorname===name):null;
-  const rec = accountExists?records.find(r=>r.user===name&&r.date===d):null;
+  const accountExists = Array.isArray(users)&&users.some(u=>sameName(u.vorname,name));
+  const emp = accountExists?(Array.isArray(users)?users:[]).find(u=>sameName(u.vorname,name)):null;
+  const rec = accountExists?records.find(r=>sameName(r.user,name)&&r.date===d):null;
   const sSt = shift?.status||null, gMit = shift?.getauschtMit||null, gVon = shift?.getauschtVon||null;
   const transl = sSt==="freigegeben"||sSt==="getauscht";
   let statusLabel, statusColor, statusBg;
@@ -5295,8 +5399,8 @@ function NachDatumFilRow({name, d, t, schedule, users, records, todayStr, C, S})
 
 function NachMitarbeiterAntrag({name, d, nList, approveNachtrag, rejectNachtrag}) {
   const [exp, setExp] = useState(false);
-  const pN = nList.find(a=>a.user===name&&a.date===d&&a.status==="offen");
-  const dN = nList.find(a=>a.user===name&&a.date===d&&a.status!=="offen");
+  const pN = nList.find(a=>sameName(a.user,name)&&a.date===d&&a.status==="offen");
+  const dN = nList.find(a=>sameName(a.user,name)&&a.date===d&&a.status!=="offen");
   if(!pN&&!dN) return null;
   return(
     <div style={{borderTop:`1px solid ${pN?C.yellow:C.border}`,marginTop:0}}>
@@ -5369,7 +5473,9 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
         if(!s) return;
         const d=s.date||s.d; if(!d) return;
         (map[d]=map[d]||[]).push({
-          name, filiale:s.filiale||s.f||"", time:s.time||s.t||"", typ:typNorm(s.typ),
+          // 🖋 표시 이름은 정식 표기로 통일 (저장값은 그대로 유지)
+          name: prettyName(name, users),
+          filiale:s.filiale||s.f||"", time:s.time||s.t||"", typ:typNorm(s.typ),
           autoCreated:!!s.autoCreated,
           status:s.status||null, getauschtMit:s.getauschtMit||null, getauschtVon:s.getauschtVon||null
         });
@@ -5390,9 +5496,9 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
       const owner = fs.besetzt ? (fs.uebernommen_von||"") : "";
       // 중복 방지: 수락자(또는 원 제공자)의 근무가 이미 스케줄에 있으면 건너뛴다
       const dupName = owner || fs.angeboten_von || "";
-      if(dupName && (map[d]||[]).some(r=>r.name===dupName && sameFiliale(r.filiale, fil))) return;
+      if(dupName && (map[d]||[]).some(r=>sameName(r.name,dupName) && sameFiliale(r.filiale, fil))) return;
       (map[d]=map[d]||[]).push({
-        name: owner || OFFENE_SCHICHT,          // 주인 없으면 [Offene Schicht]
+        name: owner ? prettyName(owner, users) : OFFENE_SCHICHT,   // 주인 없으면 [Offene Schicht]
         filiale: fil,
         time: fs.time||fs.t||"",
         typ: typNorm(fs.typ),
@@ -5404,7 +5510,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
       });
     });
     return map;
-  },[schedule, freieSchichten]);
+  },[schedule, freieSchichten, users]);
 
   const daysInMonth=new Date(calYM.y, calYM.m+1, 0).getDate();
   const firstDow=(new Date(calYM.y, calYM.m, 1).getDay()+6)%7;
@@ -5438,7 +5544,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
             if(d===null) return <div key={"e"+i}/>;
             const ds=ymStr(d);
             const shifts=byDate[ds]||[];
-            const mine=highlightName&&shifts.some(s=>s.name===highlightName);
+            const mine=highlightName&&shifts.some(s=>sameName(s.name,highlightName));
             const isSel=ds===selDate;
             const isToday=ds===todayStr;
             return(
@@ -5477,7 +5583,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                 {filialIcon(fil)+" "+(filShort[fil]||fil||"—")}
               </div>
               {byFil[fil].map((r,idx)=>{
-                const isMine=highlightName&&r.name===highlightName&&!r.isOffen;
+                const isMine=highlightName&&sameName(r.name,highlightName)&&!r.isOffen;
                 // 🔄 [Offene Schicht]는 실존 직원이 아니므로 출퇴근 기록을 조회하지 않는다
                 const rec=r.isOffen?null:recFor(r.name, fil);
                 const transl=r.status==="freigegeben"||r.status==="getauscht";
@@ -5849,7 +5955,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
     ...empList.map(e=>e.vorname)
   ])].sort((a,b)=>a.localeCompare(b));
 
-  const hasAccount = name => empList.some(e=>e.vorname===name);
+  const hasAccount = name => empList.some(e=>sameName(e.vorname,name));
 
   const allDates = [...new Set(
     allNames.flatMap(name => norm(activeSchedule[name]||[]).map(s=>s.date||s.d))
@@ -5931,7 +6037,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
       {viewMode==="by_emp"&&(
         <div style={{padding:"14px"}}>
           {allNames.map(name=>{
-            const emp = empList.find(e=>e.vorname===name);
+            const emp = empList.find(e=>sameName(e.vorname,name));
             const accountExists = !!emp;
             const shifts = norm(activeSchedule[name]||[])
               .filter(s=>s.date||s.d)
@@ -5967,7 +6073,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                       const d=s.date||s.d, f=s.filiale||s.f, t=s.time||s.t;
                       const sSt=s.status||null, gMit=s.getauschtMit||null, gVon=s.getauschtVon||null;
                       const transl=sSt==="freigegeben"||sSt==="getauscht";
-                      const rec=accountExists?records.find(r=>r.user===name&&r.date===d):null;
+                      const rec=accountExists?records.find(r=>sameName(r.user,name)&&r.date===d):null;
                       return(
                         <React.Fragment key={i}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
@@ -6429,7 +6535,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
               // 실제 출근 기록 체크
               window._fbGet(window._fbRef(window._fbDb,"records")).then(recSnap=>{
                 const recs=Object.values(recSnap.val()||{});
-                const clocked=recs.some(r=>r.user===name&&r.date===todayStr&&r.ein);
+                const clocked=recs.some(r=>sameName(r.user,name)&&r.date===todayStr&&r.ein);
                 if(clocked) return; // 이미 출근함
                 // 미출근 경보 발송 (단 1개)
                 const alertMsg="🚨 [No-Show] "+name+" — "+(sh.f||sh.filiale)+" · "+startTime+" — kein Einstempeln.";
@@ -6457,7 +6563,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   // 🔒 filiale를 주면 해당 지점 근무만 보고 상태를 판정한다.
   //    (오전 ONIGIRI 퇴근이 오후 TEEnJOY 카드까지 Feierabend로 만들던 버그 방지)
   const getStatus=(name, filiale)=>{
-    const recs=todayRecs.filter(x=>x.user===name&&x.ein&&
+    const recs=todayRecs.filter(x=>sameName(x.user,name)&&x.ein&&
       (filiale===undefined||filiale===null||sameFiliale(x.filiale, filiale)));
     if(recs.length===0) return "Nicht erschienen";
     // 진행 중(퇴근 전, aus 없음)인 record가 하나라도 있으면 Aktiv
@@ -6471,7 +6577,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
     if(!rec||!rec.id) return;
     setRecords(prev=>(Array.isArray(prev)?prev:[]).map(r=>r.id===rec.id?{...r,prüfen:false,geprüft:true}:r));
   }
-  const getBranch=name=>{const r=todayRecs.find(x=>x.user===name);return r?.filiale||null;};
+  const getBranch=name=>{const r=todayRecs.find(x=>sameName(x.user,name));return r?.filiale||null;};
   const sColor=s=>s==="Aktiv"?C.mintDark:s==="Feierabend"?C.muted:s==="Prüfen"?C.yellow:C.red;
   const sBg=s=>s==="Aktiv"?C.mintLight:s==="Feierabend"?"#F0F0F0":s==="Prüfen"?C.yellowLight:C.redLight;
 
@@ -6918,12 +7024,12 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       {tab==="antraege"&&(
         <div>
           {/* 🚨 미출근 긴급 경보 */}
-          {Object.entries(notifications||{}).filter(([,n])=>n.type==="noshow_alert"&&!n.gelesen&&!(Array.isArray(records)?records:[]).some(r=>r.user===n.user&&r.date===n.date&&r.ein)).length>0&&(
+          {Object.entries(notifications||{}).filter(([,n])=>n.type==="noshow_alert"&&!n.gelesen&&!(Array.isArray(records)?records:[]).some(r=>sameName(r.user,n.user)&&r.date===n.date&&r.ein)).length>0&&(
             <div style={{padding:"14px 14px 0"}}>
               <div style={{fontSize:10,fontWeight:800,color:C.red,marginBottom:8,textTransform:"uppercase"}}>
                 🚨 Mierschienen Alarm
               </div>
-              {Object.entries(notifications||{}).filter(([,n])=>n.type==="noshow_alert"&&!n.gelesen&&!(Array.isArray(records)?records:[]).some(r=>r.user===n.user&&r.date===n.date&&r.ein))
+              {Object.entries(notifications||{}).filter(([,n])=>n.type==="noshow_alert"&&!n.gelesen&&!(Array.isArray(records)?records:[]).some(r=>sameName(r.user,n.user)&&r.date===n.date&&r.ein))
                 .sort(([,a],[,b])=>b.ts-a.ts).map(([k,n])=>(
                 <div key={k} style={{...S.card,marginBottom:8,border:"2px solid "+C.red,background:C.redLight}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -7016,7 +7122,9 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       {/*  SCHICHTBRSE (Admin)  */}
       {tab==="schichtboerse_mgr"&&(
         <div style={{padding:"14px 0"}}>
-          <SchichtboerseView userName={userKey} users={safeUsers} isAdmin={true}/>
+          {/* 👤 userKey는 소문자 로그인 키("yeaji")라 표시 이름("Yeaji")과 어긋난다.
+                 정식 vorname을 넘겨 저장·비교가 일관되게 한다. */}
+          <SchichtboerseView userName={displayNameOf(safeUsers, userKey)} users={safeUsers} isAdmin={true}/>
           {/* Freie Schicht Formular ist in SchichtboerseView */}
         </div>
       )}
