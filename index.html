@@ -433,7 +433,7 @@ function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch{} }
 //  ※ 둘 다 채우면 MASTER_HASH 가 우선합니다.
 // ═══════════════════════════════════════════════════════════════
 const MASTER_KEY  = "";   // 예) "teeamo-dev-2026!"   ← 평문 방식
-const MASTER_HASH = "";   // 예) "7e27893cd9a1...(64자)"  ← 해시 방식(권장)
+const MASTER_HASH = "93cf55f0a4843d1bd2d40eb0f09e9cfbc89d9bac139667d09207c3f9bd517bf5";
 
 // 🛠 해시 생성 도우미 — 콘솔에서 teeamoMakeHash("암호") 로 사용
 if(typeof window !== "undefined"){
