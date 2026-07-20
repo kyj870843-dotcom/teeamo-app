@@ -103,7 +103,9 @@ const BRANCHES = {
   muenster_01: {
     id: "muenster_01",
     city: "Münster",
-    nr: 1,                       // 도시 내 몇 호점인지
+    // 현재는 3개 매장을 하나로 합쳐 운영 → 도시 이름만 표기한다.
+    // 나중에 지점이 늘면 nr:2 처럼 숫자를 넣으면 "Münster 2호점"으로 자동 표기된다.
+    nr: null,
     logo: BRANCH_LOGO_SRC,
     // ⚠️ FILIALEN은 아래쪽에서 선언되므로 getter로 '사용 시점'에 읽는다 (TDZ 방지)
     get filialen(){ return FILIALEN; },
@@ -431,10 +433,80 @@ function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch{} }
 //     개발자도구를 다룰 줄 아는 사람은 우회할 수 있으니, 진짜 보안이
 //     필요하면 Firebase 보안 규칙(서버 측)으로 함께 막아야 한다.
 // ═══════════════════════════════════════════════════════════════
-const MASTER_HASH_FALLBACK = "0000000000000000000000000000000000000000000000000000000000000000";
-function masterHash(){
-  return (typeof window!=="undefined" && window.TEEAMO_MASTER_HASH) || MASTER_HASH_FALLBACK;
+// ── 암호 설정 자리 ────────────────────────────────────────────
+//   아래 둘 중 '하나만' 채우면 된다. (평문을 쓰기 싫으면 해시 사용)
+const MASTER_KEY_FALLBACK  = "";   // 평문 암호   예) "teeamo-dev-2026!"
+const MASTER_HASH_FALLBACK = "";   // 또는 SHA-256 해시 64자
+
+// 🔎 환경변수 안전 읽기
+//   이 앱은 번들러가 없어 브라우저에 process 객체가 존재하지 않는다.
+//   그냥 process.env를 읽으면 ReferenceError로 앱 전체가 죽으므로 반드시 감싼다.
+//   (나중에 Next.js로 옮기면 이 함수가 자동으로 값을 집어온다)
+function readEnvMasterKey(){
+  try{
+    if(typeof process !== "undefined" && process && process.env){
+      const v = process.env.NEXT_PUBLIC_MASTER_KEY;
+      if(typeof v === "string" && v.trim()) return v.trim();
+    }
+  }catch(e){ /* process 미정의 → 무시 */ }
+  return "";
 }
+
+// 🔑 암호 출처 결정 (우선순위: window 주입 → 빌드 환경변수 → 코드 상수)
+//   window 주입이 1순위인 이유: 코드를 건드리지 않고 배포 시 교체할 수 있어서.
+function resolveMaster(){
+  const w = (typeof window !== "undefined") ? window : {};
+  const pick = v => (typeof v === "string" ? v.trim() : "");
+  const wKey  = pick(w.TEEAMO_MASTER_KEY);
+  const wHash = pick(w.TEEAMO_MASTER_HASH);
+  const eKey  = readEnvMasterKey();
+  const cKey  = pick(MASTER_KEY_FALLBACK);
+  const cHash = pick(MASTER_HASH_FALLBACK);
+  if(wKey)  return { key:wKey,  hash:"",    source:"window.TEEAMO_MASTER_KEY" };
+  if(wHash) return { key:"",    hash:wHash, source:"window.TEEAMO_MASTER_HASH" };
+  if(eKey)  return { key:eKey,  hash:"",    source:"process.env.NEXT_PUBLIC_MASTER_KEY" };
+  if(cKey)  return { key:cKey,  hash:"",    source:"MASTER_KEY_FALLBACK (코드 상수)" };
+  if(cHash) return { key:"",    hash:cHash, source:"MASTER_HASH_FALLBACK (코드 상수)" };
+  return { key:"", hash:"", source:"" };     // 미설정
+}
+function masterHash(){ return resolveMaster().hash; }
+
+// ✅ 입력값 검증 — 입력·설정값 양쪽 모두 trim 후 비교
+//   반환: {ok, reason, source}
+//   reason: "no-config" | "mismatch" | "crypto" | ""
+async function verifyMasterCode(input){
+  const cfg = resolveMaster();
+  const typed = String(input == null ? "" : input).trim();
+  if(!cfg.key && !cfg.hash) return { ok:false, reason:"no-config", source:"" };
+  if(!typed)                return { ok:false, reason:"mismatch",  source:cfg.source };
+  if(cfg.key)  return { ok: typed === cfg.key, reason:"mismatch", source:cfg.source };
+  try{
+    const h = await sha256Hex(typed);
+    return { ok: h === cfg.hash, reason:"mismatch", source:cfg.source };
+  }catch(e){
+    // crypto.subtle은 HTTPS(또는 localhost)에서만 제공된다
+    return { ok:false, reason:"crypto", source:cfg.source };
+  }
+}
+
+// 🐞 임시 디버깅 — 암호 값 자체는 절대 출력하지 않고 '설정 상태'만 보여준다.
+//   문제가 해결되면 이 함수 호출부만 지우면 된다.
+function masterDiagnostics(typed){
+  const cfg = resolveMaster();
+  const w = (typeof window !== "undefined") ? window : {};
+  return {
+    "설정된 암호 출처": cfg.source || "❌ 없음 (아무 곳에도 설정 안 됨)",
+    "설정값 방식": cfg.key ? "평문" : (cfg.hash ? "해시" : "-"),
+    "설정값 길이": (cfg.key || cfg.hash || "").length,
+    "입력값 길이(trim 후)": String(typed==null?"":typed).trim().length,
+    "window.TEEAMO_MASTER_KEY": typeof w.TEEAMO_MASTER_KEY,
+    "window.TEEAMO_MASTER_HASH": typeof w.TEEAMO_MASTER_HASH,
+    "process 객체 존재": (typeof process !== "undefined"),
+    "crypto.subtle 사용가능": !!(typeof crypto!=="undefined" && crypto.subtle),
+    "HTTPS 여부": (typeof location!=="undefined" ? location.protocol : "?"),
+  };
+}
+
 const MASTER_FLAG_KEY = "teeamo_master_v1";
 const MASTER_TTL      = 1000*60*60*12;   // 12시간 후 자동 잠김
 
@@ -443,17 +515,21 @@ async function sha256Hex(text){
   const dig = await crypto.subtle.digest("SHA-256", buf);
   return [...new Uint8Array(dig)].map(b=>b.toString(16).padStart(2,"0")).join("");
 }
+// 잠금 플래그는 '현재 설정된 암호'와 묶어 저장 → 암호가 바뀌면 자동 무효화
+function masterFingerprint(){
+  const c = resolveMaster();
+  return (c.source||"") + "|" + String(c.key||c.hash||"").length;
+}
 function isMasterUnlocked(){
   try{
     const v = JSON.parse(localStorage.getItem(MASTER_FLAG_KEY)||"null");
     if(!v || !v.ts) return false;
     if(Date.now()-v.ts > MASTER_TTL){ localStorage.removeItem(MASTER_FLAG_KEY); return false; }
-    // 저장된 해시가 현재 설정된 암호와 일치할 때만 유효 (암호 변경 시 자동 무효화)
-    return v.h === masterHash();
+    return v.fp === masterFingerprint();
   }catch{ return false; }
 }
 function unlockMaster(){
-  try{ localStorage.setItem(MASTER_FLAG_KEY, JSON.stringify({h:masterHash(), ts:Date.now()})); }catch{}
+  try{ localStorage.setItem(MASTER_FLAG_KEY, JSON.stringify({fp:masterFingerprint(), ts:Date.now()})); }catch{}
   try{ window.dispatchEvent(new Event("teeamo-master")); }catch{}
 }
 function lockMaster(){
@@ -2768,6 +2844,7 @@ function MasterGate(){
   const [pw, setPw]       = useState("");
   const [err, setErr]     = useState("");
   const [busy, setBusy]   = useState(false);
+  const [diag, setDiag]   = useState(null);   // 🐞 임시 디버깅 정보
   const timer = React.useRef(null);
 
   function onTap(){
@@ -2780,15 +2857,22 @@ function MasterGate(){
   }
 
   async function submit(){
-    if(!pw){ return; }
+    if(!pw) return;
     setBusy(true);
-    try{
-      const h = await sha256Hex(pw);
-      if(h === masterHash()){ unlockMaster(); setAsk(false); setPw(""); setErr(""); }
-      else { setErr("Falscher Code."); setPw(""); }
-    }catch(e){
-      // crypto.subtle은 HTTPS(또는 localhost)에서만 동작한다
-      setErr("Krypto nicht verfügbar (HTTPS erforderlich).");
+    const res = await verifyMasterCode(pw);          // 입력·설정값 모두 trim 후 비교
+    if(res.ok){
+      unlockMaster(); setAsk(false); setPw(""); setErr(""); setDiag(null);
+    }else{
+      // 🐞 임시 디버깅: 실패 원인을 콘솔 + 화면에 표시 (암호 값은 출력하지 않음)
+      const d = masterDiagnostics(pw);
+      console.log("🔐 [Master] 인증 실패:", res.reason, d);
+      setDiag(d);
+      setErr(
+        res.reason === "no-config" ? "암호가 설정되어 있지 않습니다."
+      : res.reason === "crypto"    ? "Krypto nicht verfügbar (HTTPS erforderlich)."
+      : "Falscher Code."
+      );
+      setPw("");
     }
     setBusy(false);
   }
@@ -2827,6 +2911,18 @@ function MasterGate(){
               style={{...S.input,width:"100%",boxSizing:"border-box",fontSize:15,
                 textAlign:"center",letterSpacing:".2em",padding:"11px"}}/>
             {err&&<div style={{fontSize:10,color:C.red,fontWeight:700,marginTop:8}}>{err}</div>}
+            {/* 🐞 임시 디버깅 패널 — 원인 파악 후 이 블록만 지우면 된다 */}
+            {diag&&(
+              <div style={{marginTop:8,padding:"8px 9px",borderRadius:8,background:"#f8f8f8",
+                border:`1px solid ${C.border}`,fontSize:9,color:C.muted,lineHeight:1.6}}>
+                {Object.entries(diag).map(([k,v])=>(
+                  <div key={k} style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                    <span>{k}</span>
+                    <b style={{color:C.text,textAlign:"right"}}>{String(v)}</b>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{display:"flex",gap:8,marginTop:14}}>
               <button onClick={()=>setAsk(false)}
                 style={{flex:1,padding:"10px",borderRadius:9,border:`1px solid ${C.border}`,
