@@ -149,7 +149,48 @@ const OFFENE_SCHICHT = "[Offene Schicht]";
 // 👤 직원 이름 비교/정규화
 //   관리자 로그인 키는 소문자("yeaji")인데 표시 이름은 "Yeaji"라서
 //   과거 데이터에 두 형태가 섞여 있다. 비교는 항상 대소문자·공백 무시로 한다.
-function nameKey(n){ return String(n==null?"":n).trim().toLowerCase(); }
+// 이름 비교용 정규화: 이모지·기호·공백을 제거하고 소문자로 (한글/라틴 문자는 보존)
+//   "Yeaji 🤖" · "yeaji" · " YEAJI " → 모두 "yeaji"
+const _EMOJI_RE = (()=>{ try{
+  return new RegExp("[\\u{FE00}-\\u{FE0F}\\u{200D}\\u{2190}-\\u{2BFF}\\u{2600}-\\u{27BF}\\u{1F000}-\\u{1FAFF}]","gu");
+}catch(e){ return /[\u2190-\u2BFF\u2600-\u27BF\uFE0F\u200D]/g; } })();
+function stripEmoji(v){ return String(v==null?"":v).replace(_EMOJI_RE,""); }
+function nameKey(n){ return stripEmoji(n).replace(/\s+/g," ").trim().toLowerCase(); }
+
+// ═══════════════════════════════════════════════════════════════
+//  🆔 사용자 고유 ID 체계
+//   이 앱은 Firebase Auth 대신 users[].key를 로그인 식별자로 쓴다.
+//   key는 계정 생성 후 바뀌지 않으므로 이것을 uid로 삼는다.
+//   (이름·이모지는 언제든 바뀔 수 있으므로 식별에 쓰면 안 된다)
+// ═══════════════════════════════════════════════════════════════
+function uidOf(users, keyOrName){
+  const v = String(keyOrName==null?"":keyOrName).trim();
+  if(!v) return "";
+  const list = Array.isArray(users)?users:[];
+  const hit = list.find(u=>u && (sameName(u.key,v) || sameName(u.vorname,v)));
+  return hit ? String(hit.key) : "";
+}
+function userByUid(users, uid){
+  if(!uid) return null;
+  return (Array.isArray(users)?users:[]).find(u=>u && sameName(u.key,uid)) || null;
+}
+// 🖋 화면 표시 문자열 = 최신 프로필(이모지 + 이름)
+//   uid로 찾으므로 관리자가 이름·이모지를 바꾸면 모든 화면에 즉시 반영된다.
+function personLabel(users, uid, fallbackName){
+  const u = userByUid(users, uid);
+  if(u) return (u.emoji ? u.emoji+" " : "") + (u.vorname || u.key);
+  // 계정이 없는 임시 인력 등 → 저장된 이름을 표기만 정리해서 사용
+  const raw = String(fallbackName==null?"":fallbackName).trim();
+  if(!raw) return "";
+  const core = stripEmoji(raw).replace(/\s+/g," ").trim();
+  return (core.charAt(0).toUpperCase()+core.slice(1)) || raw;
+}
+// 같은 사람인지 판정 — uid 우선, 없으면 이름 정규화 비교(구 데이터 호환)
+function samePerson(a, b){
+  const ua=String(a&&a.uid||"").trim(), ub=String(b&&b.uid||"").trim();
+  if(ua && ub) return sameName(ua, ub);
+  return sameName(a&&a.name, b&&b.name);
+}
 function sameName(a,b){
   const x=nameKey(a), y=nameKey(b);
   return !!x && x===y;
@@ -561,6 +602,10 @@ function useMasterUnlocked(){
   },[]);
   return on;
 }
+
+// 🆔 컴포넌트 밖 헬퍼(addScheduleShift 등)에서도 users를 참조할 수 있게 보관
+//    App이 users를 구독할 때마다 갱신된다.
+if(typeof window !== "undefined" && !window._teeamoUsers) window._teeamoUsers = [];
 
 function useFirebase(path, fallback) {
   const [data, setData] = useState(fallback);
@@ -1734,7 +1779,9 @@ async function deleteScheduleShift(name, date) {
 // ⚠️ 이 로직은 데이터 초기화(Reset)와 무관하게 항상 코드에 존재한다(격리/보호).
 function freigebenSchicht({ userName, date, filiale, time, grund, users }) {
   const schichtId = Date.now();
-  const newFrei = { id:schichtId, date, filiale, time:time||null, note:grund||"", besetzt:false, angeboten_von:userName, ts:schichtId };
+  // 🆔 제공자의 고유 ID를 함께 저장 (이름이 바뀌어도 추적 가능)
+  const newFrei = { id:schichtId, date, filiale, time:time||null, note:grund||"", besetzt:false,
+    angeboten_von:userName, angeboten_von_uid:uidOf(users,userName)||"", ts:schichtId };
   if (window._fbDb && window._fbRef && window._fbSet) {
     window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+schichtId), newFrei).catch(()=>{});
     const dateStr = new Date(date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"});
@@ -1813,9 +1860,11 @@ function overrideWithNachtrag({ a, setRecords }){
 async function addScheduleShift(name, date, filiale, time, typ, opts) {
   if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !name || !date) return;
   const t = typNorm(typ);
+  // 🆔 근무의 주인을 고유 ID로 함께 기록한다 (이름·이모지가 바뀌어도 매칭 유지)
+  const uid = (opts && opts.uid) || uidOf(window._teeamoUsers, name) || "";
   // 🍙 ONIGIRI 지점은 계획 시간 없이 등록 (시간 필드 비활성 → "")
   const safeTime = isOnigiriFiliale(filiale) ? "" : (time||"");
-  const extra = (opts && opts.autoCreated) ? { autoCreated:true } : {};
+  const extra = Object.assign({}, (opts && opts.autoCreated) ? { autoCreated:true } : {}, uid ? { uid } : {});
   // 🔒 같은 날짜라도 '다른 지점' 근무는 절대 지우지 않는다.
   //    (예: 오전 ONIGIRI + 오후 TEEnJOY 대타 → 두 카드가 함께 유지되어야 함)
   const isSameSlot = (s) => (s.date||s.d) === date && sameFiliale(s.filiale||s.f, filiale);
@@ -2137,7 +2186,8 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
                 <button onClick={()=>{
                   const schichtId=Date.now();
                   const newFrei={id:schichtId,date:d,filiale:f,time:t||null,
-                    note:absGrund||"",besetzt:false,angeboten_von:userName,ts:schichtId};
+                    note:absGrund||"",besetzt:false,angeboten_von:userName,
+                    angeboten_von_uid:uidOf(users,userName)||"",ts:schichtId};
                   if(window._fbDb&&window._fbRef&&window._fbSet){
                     window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+schichtId),newFrei).catch(()=>{});
                     const dateStr=new Date(d).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"});
@@ -2232,7 +2282,8 @@ function SchichtboerseView({ userName, users, isAdmin }) {
     const newSchicht = {
       id, date:fsDate, filiale:fsFiliale,
       time: fsTimeFrom&&fsTimeTo ? fsTimeFrom+"-"+fsTimeTo : null,
-      note:fsNote, besetzt:false, angeboten_von:userName, ts:id
+      note:fsNote, besetzt:false, angeboten_von:userName,
+      angeboten_von_uid:uidOf(users,userName)||"", ts:id
     };
 
     // Firebase에 freieSchichten 저장
@@ -2315,11 +2366,13 @@ function SchichtboerseView({ userName, users, isAdmin }) {
 
     // 2) freieSchichten besetzt 처리
     setFreieSchichten(prev=>(Array.isArray(prev)?prev:[]).map(s=>
-      s.id===schicht.id?{...s,besetzt:true,uebernommen_von:userName}:s
+      s.id===schicht.id?{...s,besetzt:true,uebernommen_von:userName,
+        uebernommen_von_uid:uidOf(users,userName)||""}:s
     ));
     if(window._fbDb&&window._fbRef&&window._fbSet){
       window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+schicht.id),
-        {...schicht,besetzt:true,uebernommen_von:userName}).catch(()=>{});
+        {...schicht,besetzt:true,uebernommen_von:userName,
+          uebernommen_von_uid:uidOf(users,userName)||""}).catch(()=>{});
     }
 
     // 2b) 🔄 원 소유자의 스케줄 shift를 삭제하지 않고 'getauscht'로 갱신 (반투명 + 원 주인 추적)
@@ -5465,6 +5518,9 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
   const [addBis, setAddBis]   = useState("");
   const [addTyp, setAddTyp]   = useState("normal");   // 🧋 Arbeitstyp: normal | einspringen
 
+  // 🆔 현재 로그인한 사람의 고유 ID — 모드(관리자/직원)와 무관하게 동일한 값
+  const myUid = uidOf(users, highlightName);
+
   // 날짜별 근무 인덱스 (안전 정규화 + 🔄 Schichtbörse 병합)
   const byDate = React.useMemo(()=>{
     const map={};
@@ -5472,9 +5528,12 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
       norm(sh).forEach(s=>{
         if(!s) return;
         const d=s.date||s.d; if(!d) return;
+        // 🆔 uid = 근무에 저장된 값 우선, 없으면(구 데이터) 이름으로 역추적
+        const uid = s.uid || uidOf(users, name) || "";
         (map[d]=map[d]||[]).push({
-          // 🖋 표시 이름은 정식 표기로 통일 (저장값은 그대로 유지)
-          name: prettyName(name, users),
+          uid,                                   // 본인 판별용 고유 ID
+          rawName: name,                         // DB의 실제 키 (수정/삭제에 사용)
+          name: personLabel(users, uid, name),   // 화면 표시용 (이모지+최신 이름)
           filiale:s.filiale||s.f||"", time:s.time||s.t||"", typ:typNorm(s.typ),
           autoCreated:!!s.autoCreated,
           status:s.status||null, getauschtMit:s.getauschtMit||null, getauschtVon:s.getauschtVon||null
@@ -5494,11 +5553,18 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
       const d = fs.date||fs.d; if(!d) return;
       const fil = fs.filiale||fs.f||"";
       const owner = fs.besetzt ? (fs.uebernommen_von||"") : "";
+      // 🆔 uid 우선 (übernehmen 시 저장됨) → 없으면 이름으로 역추적
+      const ownerUid = owner ? (fs.uebernommen_von_uid || uidOf(users, owner) || "") : "";
       // 중복 방지: 수락자(또는 원 제공자)의 근무가 이미 스케줄에 있으면 건너뛴다
       const dupName = owner || fs.angeboten_von || "";
-      if(dupName && (map[d]||[]).some(r=>sameName(r.name,dupName) && sameFiliale(r.filiale, fil))) return;
+      const dupUid  = ownerUid || fs.angeboten_von_uid || uidOf(users, dupName) || "";
+      if(dupName && (map[d]||[]).some(r=>
+          samePerson({uid:r.uid,name:r.rawName},{uid:dupUid,name:dupName}) &&
+          sameFiliale(r.filiale, fil))) return;
       (map[d]=map[d]||[]).push({
-        name: owner ? prettyName(owner, users) : OFFENE_SCHICHT,   // 주인 없으면 [Offene Schicht]
+        uid: ownerUid,
+        rawName: owner || OFFENE_SCHICHT,
+        name: owner ? personLabel(users, ownerUid, owner) : OFFENE_SCHICHT,   // 주인 없으면 [Offene Schicht]
         filiale: fil,
         time: fs.time||fs.t||"",
         typ: typNorm(fs.typ),
@@ -5544,7 +5610,8 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
             if(d===null) return <div key={"e"+i}/>;
             const ds=ymStr(d);
             const shifts=byDate[ds]||[];
-            const mine=highlightName&&shifts.some(s=>sameName(s.name,highlightName));
+            const mine=highlightName&&shifts.some(s=>
+              samePerson({uid:s.uid,name:s.rawName},{uid:myUid,name:highlightName}));
             const isSel=ds===selDate;
             const isToday=ds===todayStr;
             return(
@@ -5583,11 +5650,13 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                 {filialIcon(fil)+" "+(filShort[fil]||fil||"—")}
               </div>
               {byFil[fil].map((r,idx)=>{
-                const isMine=highlightName&&sameName(r.name,highlightName)&&!r.isOffen;
+                // 🆔 이름·이모지가 아니라 고유 ID로 본인 근무를 판별한다
+                const isMine=!!highlightName&&!r.isOffen&&
+                  samePerson({uid:r.uid,name:r.rawName},{uid:myUid,name:highlightName});
                 // 🔄 [Offene Schicht]는 실존 직원이 아니므로 출퇴근 기록을 조회하지 않는다
-                const rec=r.isOffen?null:recFor(r.name, fil);
+                const rec=r.isOffen?null:recFor(r.rawName, fil);
                 const transl=r.status==="freigegeben"||r.status==="getauscht";
-                const rowKey=r.name+"|"+fil+"|"+idx;
+                const rowKey=(r.uid||r.rawName)+"|"+fil+"|"+idx;
                 const editing = editRow&&editRow.key===rowKey;
                 const nachting = nachRow&&nachRow.key===rowKey;
                 const isPastOrToday = selDate<=todayStr;
@@ -5620,7 +5689,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                         <button onClick={()=>setEditRow(null)} style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
                         <button onClick={()=>{
                           const nt=(editRow.von&&editRow.bis)?editRow.von+"-"+editRow.bis:(r.time||"");
-                          patchScheduleShift(r.name, selDate, {f:editRow.fil, filiale:editRow.fil, t:nt, time:nt});
+                          patchScheduleShift(r.rawName, selDate, {f:editRow.fil, filiale:editRow.fil, t:nt, time:nt});
                           setEditRow(null);
                         }} style={{flex:2,padding:"10px",borderRadius:9,border:"none",background:C.navy,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"💾 Speichern"}</button>
                       </div>
@@ -5647,7 +5716,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                         <button onClick={()=>setNachRow(null)} style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
                         <button onClick={()=>{
                           if(!nachRow.von||!nachRow.bis){ setActMsg("Bitte VON und BIS angeben."); return; }
-                          nachtragenSchicht({userName:r.name, date:selDate, filiale:fil, ein:nachRow.von, aus:nachRow.bis, setRecords});
+                          nachtragenSchicht({userName:r.rawName, date:selDate, filiale:fil, ein:nachRow.von, aus:nachRow.bis, setRecords});
                           setNachRow(null); setActMsg("✅ Nachgetragen & genehmigt.");
                           setTimeout(()=>setActMsg(""),2500);
                         }} style={{flex:2,padding:"10px",borderRadius:9,border:"none",background:C.yellow,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"✅ Nachtragen"}</button>
@@ -5666,7 +5735,12 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                       color:r.isOffen?"#92400e":"#fff",
                       border:r.isOffen?`1.5px dashed ${C.yellow}`:"none",
                       display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,flexShrink:0}}>
-                      {r.isOffen ? "🔄" : (r.name||"?").slice(0,2)}
+                      {(()=>{
+                        if(r.isOffen) return "🔄";
+                        const u = userByUid(users, r.uid);
+                        if(u && u.emoji) return u.emoji;                    // 프로필 이모지 우선
+                        return stripEmoji(r.name||"?").trim().slice(0,2);
+                      })()}
                     </div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:13,fontWeight:700,color:C.text,display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
@@ -5701,7 +5775,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                         );
                       })()}
                       {(()=>{ if(r.isOffen) return null;
-                        const ist=istTimeFor(records,r.name,selDate,fil); if(!ist) return null;
+                        const ist=istTimeFor(records,r.rawName,selDate,fil); if(!ist) return null;
                         return (
                           <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>
                             {"Ist: "+ist.ein+" – "+ist.aus}
@@ -5717,9 +5791,10 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                     {/* 관리자: 수정/삭제 — 빈 근무는 Schichtbörse에서 관리하므로 제외 */}
                     {allowDelete&&!r.isOffen&&(
                       <div style={{display:"flex",gap:6,flexShrink:0}}>
-                        <button onClick={()=>{ const p=(r.time||"").split("-"); setEditRow({key:rowKey,name:r.name,fil,von:p[0]||"",bis:p[1]||""}); }}
+                        <button onClick={()=>{ const p=(r.time||"").split("-"); setEditRow({key:rowKey,name:r.rawName,fil,von:p[0]||"",bis:p[1]||""}); }}
                           style={{...iBtn,background:"#fff",color:C.navy}}>{"✏️"}</button>
-                        <button onClick={()=>{ if(window.confirm(r.name+" · "+selDate+"\nSchicht löschen?")) deleteScheduleShift(r.name, selDate); }}
+                        {/* 🗑 DB에 저장된 실제 키(rawName)로 삭제해야 확실히 지워진다 */}
+                        <button onClick={()=>{ if(window.confirm(r.name+" · "+selDate+"\nSchicht löschen?")) deleteScheduleShift(r.rawName, selDate); }}
                           style={{...iBtn,background:C.redLight,color:C.red}}>{"×"}</button>
                       </div>
                     )}
@@ -5728,7 +5803,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                       <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
                         {/* Freigeben: 내일(미래) 근무만 — 과거/당일은 차단 */}
                         {selDate>todayStr&&(
-                          <button onClick={()=>{ if(window.confirm("Schicht freigeben?\n"+r.name+" · "+selDate)) freigebenSchicht({userName:highlightName,date:selDate,filiale:fil,time:r.time,users}); }}
+                          <button onClick={()=>{ if(window.confirm("Schicht freigeben?\n"+r.name+" · "+selDate)) freigebenSchicht({userName:r.rawName,date:selDate,filiale:fil,time:r.time,users}); }}
                             style={{padding:"6px 9px",borderRadius:8,border:"none",background:C.navy,color:"#fff",fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{"🔁 Freigeben"}</button>
                         )}
                         {/* Nachtragen 노출 규칙:
@@ -5747,7 +5822,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                             );
                           }
                           // 🔒 이미 승인/대기 중인 Nachtragen이 있으면 버튼 대신 상태 배지
-                          const lock = nachtragStatusFor(antraegeList, r.name, selDate, fil);
+                          const lock = nachtragStatusFor(antraegeList, r.rawName, selDate, fil);
                           if(lock){
                             return (
                               <span style={{padding:"6px 9px",borderRadius:8,fontSize:10,fontWeight:800,whiteSpace:"nowrap",
@@ -7193,6 +7268,8 @@ function App(){
 
   //   Firebase  
   const [users,    setUsers,    usersReady]    = useFirebase("users",    INIT_USERS);
+  // 🆔 전역 헬퍼(addScheduleShift 등)가 uid를 조회할 수 있도록 최신 users를 노출
+  useEffect(()=>{ try{ window._teeamoUsers = Array.isArray(users)?users:[]; }catch(e){} },[users]);
   const [records,  setRecords,  recordsReady]  = useFirebase("records",  INIT_RECORDS);
   const [antraege, setAntraege, antraegeReady] = useFirebase("antraege", INIT_ANTRAEGE);
   const [schedule, , scheduleReady] = useFirebase("schedule", {});
