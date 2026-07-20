@@ -2830,6 +2830,7 @@ function MasterGate(){
   const [locked, setLocked] = useState(false); // 잠금 완료 안내 표시
   const [genHash, setGenHash] = useState("");  // 🆕 앱 안에서 만든 해시 결과
   const [copied, setCopied]   = useState(false);
+  const [showPw, setShowPw]   = useState(false);  // 👁 암호 표시/숨김 토글
   const timer = React.useRef(null);
   // 암호가 아직 코드에 설정되지 않았다면 '설정 도우미' 모드로 전환
   const notConfigured = !resolveMaster().source;
@@ -2930,7 +2931,7 @@ function MasterGate(){
       </div>
 
       {ask&&(
-        <div onClick={()=>setAsk(false)}
+        <div onClick={()=>{setAsk(false);setShowPw(false);}}
           style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:9999,
             display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
           <div onClick={e=>e.stopPropagation()}
@@ -2944,11 +2945,23 @@ function MasterGate(){
                 ? "원하는 암호를 입력하면 코드에 붙여넣을 값을 만들어 드립니다."
                 : "Code eingeben"}
             </div>
-            <input type="password" value={pw} autoFocus
-              onChange={e=>{setPw(e.target.value);setErr("");}}
-              onKeyDown={e=>{ if(e.key==="Enter") submit(); }}
-              style={{...S.input,width:"100%",boxSizing:"border-box",fontSize:15,
-                textAlign:"center",letterSpacing:".2em",padding:"11px"}}/>
+            {/* 👁 눈 아이콘을 누르면 입력한 암호가 보이고, 다시 누르면 숨겨진다 */}
+            <div style={{position:"relative"}}>
+              <input type={showPw ? "text" : "password"} value={pw} autoFocus
+                autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false}
+                onChange={e=>{setPw(e.target.value);setErr("");}}
+                onKeyDown={e=>{ if(e.key==="Enter") (notConfigured?makeHash:submit)(); }}
+                style={{...S.input,width:"100%",boxSizing:"border-box",fontSize:15,
+                  textAlign:"center",letterSpacing:showPw?".05em":".2em",
+                  padding:"11px 42px 11px 42px"}}/>
+              <button type="button" onClick={()=>setShowPw(v=>!v)}
+                aria-label={showPw?"암호 숨기기":"암호 보기"}
+                style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",
+                  border:"none",background:"transparent",cursor:"pointer",
+                  fontSize:16,lineHeight:1,padding:"6px 8px",opacity:.65}}>
+                {showPw ? "🙈" : "👁"}
+              </button>
+            </div>
             {err&&<div style={{fontSize:10,color:C.red,fontWeight:700,marginTop:8}}>{err}</div>}
             {/* 🐞 임시 디버깅 패널 — 원인 파악 후 이 블록만 지우면 된다 */}
             {diag&&(
@@ -2986,7 +2999,7 @@ function MasterGate(){
             )}
 
             <div style={{display:"flex",gap:8,marginTop:14}}>
-              <button onClick={()=>setAsk(false)}
+              <button onClick={()=>{setAsk(false);setShowPw(false);}}
                 style={{flex:1,padding:"10px",borderRadius:9,border:`1px solid ${C.border}`,
                   background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
                 {"Abbrechen"}
