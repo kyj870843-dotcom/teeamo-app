@@ -3864,11 +3864,20 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     try { const s=localStorage.getItem(CLOCK_KEY); return s?JSON.parse(s).clockFiliale:""; } catch{return "";}
   });
 
-  const [selFiliale,setSelFiliale]=useState(FILIALEN[0]);
+  // 📍 앱을 열면 지점은 '미선택' 상태로 시작한다.
+  //    (기본값이 있으면 확인 없이 눌러서 엉뚱한 지점으로 출근하는 사고가 난다)
+  const [selFiliale,setSelFiliale]=useState("");
   const [editShift,setEditShift]=useState(false);   // ✏️ 출근 중 지점/타입 변경 패널
   // 🧋 Arbeitstyp: 새로고침 후에도 유지되도록 localStorage에서 복원
+  // 🧋 Arbeitstyp 기본값은 항상 Regulär.
+  //    근무 중이던 세션을 복원할 때만 저장된 값을 되살린다.
   const [clockTyp,setClockTyp]=useState(()=>{
-    try{ const s=localStorage.getItem(CLOCK_KEY); return s?typNorm(JSON.parse(s).clockTyp):"normal"; }
+    try{
+      const s=localStorage.getItem(CLOCK_KEY);
+      if(!s) return "normal";
+      const v=JSON.parse(s);
+      return v && v.clockedIn ? typNorm(v.clockTyp) : "normal";
+    }
     catch{ return "normal"; }
   });
   // interval/effect 클로저에서 낡은 값이 잡히지 않도록 최신값 ref 유지
@@ -3933,6 +3942,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
         if(inDay!==today()){
           // 어제 출근 → 오늘 접속: 자동 강제 퇴근 대상. 로컬 상태 리셋.
           setClockedIn(false); setClockInTime(null); setElapsed(0);
+          // 🔁 자동 퇴근 후에도 동일하게 초기화
+          setClockTyp("normal"); setSelFiliale(""); setClockFiliale("");
           setIsPaused(false); setPauseStart(null); setTotalPauseSec(0);
           try{ localStorage.removeItem(CLOCK_KEY); }catch{}
         }
@@ -4196,7 +4207,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
       window._fbRemove(window._fbRef(window._fbDb,"records/"+tempId)).catch(()=>{});
     }
     setClockedIn(false);setClockInTime(null);setElapsed(0);setGrund("");setModal(null);
-    setClockTyp("normal");setIsPaused(false);setPauseStart(null);setTotalPauseSec(0);
+    // 🔁 다음 출근 때 다시 고르도록 초기화 (지점 미선택 · Arbeitstyp Regulär)
+    setClockTyp("normal");setSelFiliale("");setClockFiliale("");setEditShift(false);
+    setIsPaused(false);setPauseStart(null);setTotalPauseSec(0);
     setFruehData(null);setFruehGrund("");
     try{localStorage.removeItem(CLOCK_KEY);}catch{}
   }
@@ -4353,8 +4366,12 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             </div>
           )}
           <div style={{textAlign:"center",marginBottom:18}}>
-            <button onClick={()=>setModal(clockedIn?"aus":"ein")}
-              style={{width:144,height:144,borderRadius:"50%",border:"none",cursor:"pointer",
+            {/* 📍 지점을 고르기 전에는 출근 버튼을 누를 수 없다 (오입력 방지) */}
+            <button onClick={()=>{ if(!clockedIn && !selFiliale) return; setModal(clockedIn?"aus":"ein"); }}
+              disabled={!clockedIn && !selFiliale}
+              style={{width:144,height:144,borderRadius:"50%",border:"none",
+                cursor:(!clockedIn&&!selFiliale)?"not-allowed":"pointer",
+                opacity:(!clockedIn&&!selFiliale)?0.45:1,
                 background:clockedIn?C.red:`linear-gradient(145deg,${C.mint},${C.mintDark})`,
                 color:"#fff",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
                 gap:4,margin:"0 auto",boxShadow:clockedIn?`0 8px 28px rgba(196,96,74,.4)`:`0 8px 28px rgba(92,127,148,.4)`,transition:"all .2s"}}
@@ -4371,7 +4388,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
                       {typIcon(clockTyp)+" "+typLabel(clockTyp)}
                     </span>
                   </span>
-                : "Filiale wählen & einstempeln"}
+                : (selFiliale
+                    ? <span>{filialIcon(selFiliale)+" "}<span style={{color:C.mintDark,fontWeight:700}}>{selFiliale}</span>{" · "}<span style={{color:C.mintDark,fontWeight:700}}>{typIcon(clockTyp)+" "+typLabel(clockTyp)}</span></span>
+                    : <span style={{color:C.red,fontWeight:700}}>{"📍 Bitte zuerst Filiale wählen"}</span>)}
             </div>
 
             {/* ✏️ 출근 중 지점·Arbeitstyp 변경 (출근 시각은 그대로 유지) */}
