@@ -295,6 +295,10 @@ function filialRank(f){ if(isOnigiriFiliale(f)) return 900; const i=FILIAL_ORDER
 function filialSort(a,b){ return filialRank(a)-filialRank(b) || String(a||"").localeCompare(String(b||"")); }
 // 지점 표시용 아이콘 (ONIGIRI → 🍙)
 function filialIcon(f){ return isOnigiriFiliale(f) ? "🍙" : "📍"; }
+// 지점 짧은 표기 (버튼 등 좁은 자리용)
+const FILIAL_SHORT = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt",
+                       "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI" };
+function filialShort(f){ return FILIAL_SHORT[f] || String(f||"").replace(/^TEEAMO\s+/,""); }
 
 // ═══════════════════════════════════════════════════════════════
 //  🔒 근무 세션 키: [직원 · 날짜 · 지점] 조합으로 유일성 보장
@@ -1994,6 +1998,86 @@ async function ensureEinspringenShift(name, date, filiale, vonTime) {
     await addScheduleShift(name, date, filiale, bis ? (vonTime + "-" + bis) : "", "einspringen", { autoCreated:true });
     return true;
   } catch(e) { console.error("ensureEinspringenShift error:", e); return false; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  📍 완료된 근무의 '지점'만 나중에 변경 (퇴근 후 수정)
+//   실수로 다른 지점을 고르고 출퇴근했을 때, 시간은 그대로 두고
+//   지점만 옮긴다. 통계·정산은 record.filiale 기준이라 즉시 재계산된다.
+//
+//   · ein/aus/pauseSec/typ 등 시간 관련 값은 절대 건드리지 않는다.
+//   · 진행 중 기록은 id가 [직원·날짜·지점] 기반이라 id도 함께 옮긴다.
+//     완료 기록은 타임스탬프 id라 filiale만 바꾸면 된다.
+//   · 자동 생성된 대타 근무표가 있으면 함께 옮긴다.
+// ═══════════════════════════════════════════════════════════════
+async function changeRecordFiliale({ rec, newFiliale, setRecords }){
+  if(!rec || !newFiliale || sameFiliale(rec.filiale, newFiliale)) return false;
+  const isOpen = !rec.aus || rec.aus==="";
+  const oldId = rec.id;
+  const newId = isOpen ? sessionIdFor(rec.user, rec.date, newFiliale) : rec.id;
+
+  console.log("📍 [changeRecordFiliale]", {
+    von:rec.filiale, nach:newFiliale, 진행중:isOpen,
+    시간_유지:{ein:rec.ein, aus:rec.aus}, oldId, newId
+  });
+
+  setRecords(prev=>{
+    const list=(Array.isArray(prev)?prev:[]).filter(r=>r && r.id!==oldId && (newId===oldId || r.id!==newId));
+    return [...list, { ...rec, id:newId, filiale:newFiliale }];   // ⏱ ein/aus 그대로
+  });
+
+  if(isOpen && oldId!==newId && window._fbDb && window._fbRef && window._fbRemove){
+    try{ await window._fbRemove(window._fbRef(window._fbDb,"records/"+oldId)); }
+    catch(e){ console.error("📍 [changeRecordFiliale] 옛 record 제거 실패:", e, { oldId }); }
+  }
+
+  // 자동 생성된 대타 근무표도 새 지점으로 이동 (관리자 계획은 건드리지 않음)
+  try{
+    const moved = await removeAutoShift(rec.user, rec.date, rec.filiale);
+    if(moved && rec.ein) await ensureEinspringenShift(rec.user, rec.date, newFiliale, rec.ein);
+  }catch(e){ console.error("📍 [changeRecordFiliale] 근무표 이동 실패:", e); }
+  return true;
+}
+
+// 🧹 자동 생성된(autoCreated) 대타 근무만 근무표에서 제거
+//   출근 중 지점을 바꿨을 때 옛 지점에 남은 자동 스케줄을 정리하는 용도.
+//   관리자가 직접 짠 계획(autoCreated 없음)은 절대 건드리지 않는다.
+async function removeAutoShift(name, date, filiale){
+  if(!(window._fbDb && window._fbRef && window._fbGet) || !name || !date) return false;
+  try{
+    const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
+    const root = rsnap.val() || {};
+    const key = scheduleKeyOf(root, name);
+    const arr = !root[key] ? [] : (Array.isArray(root[key]) ? root[key] : Object.values(root[key]));
+    const hit = arr.find(s => s && (s.d||s.date)===date && sameFiliale(s.f||s.filiale, filiale));
+    if(!hit || !hit.autoCreated) return false;      // 자동 생성분만 삭제
+    await deleteScheduleShiftAtFiliale(name, date, filiale);
+    return true;
+  }catch(e){ console.error("removeAutoShift error:", e); return false; }
+}
+
+// 특정 [직원·날짜·지점] 근무 1건만 삭제 (같은 날 다른 지점 근무는 보존)
+async function deleteScheduleShiftAtFiliale(name, date, filiale){
+  if(!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !name || !date) return;
+  const keep = s => !((s.date||s.d)===date && sameFiliale(s.filiale||s.f, filiale));
+  try{
+    const mk = "schedule_" + date.slice(0,7).replace("-","_");
+    const snap = await window._fbGet(window._fbRef(window._fbDb, mk));
+    const ex = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
+    const eKey = scheduleKeyOf(ex, name);
+    if(ex[eKey]){
+      const arr = (Array.isArray(ex[eKey]) ? ex[eKey] : Object.values(ex[eKey])).filter(s=>s&&keep(s));
+      ex[eKey] = Object.fromEntries(arr.map((s,i)=>[String(i), s]));
+      await window._fbSet(window._fbRef(window._fbDb, mk), ex);
+    }
+    const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
+    const root = rsnap.val() ? JSON.parse(JSON.stringify(rsnap.val())) : {};
+    const rKey = scheduleKeyOf(root, name);
+    if(root[rKey]){
+      root[rKey] = (Array.isArray(root[rKey]) ? root[rKey] : Object.values(root[rKey])).filter(s=>s&&keep(s));
+      await window._fbSet(window._fbRef(window._fbDb, "schedule"), root);
+    }
+  }catch(e){ console.error("deleteScheduleShiftAtFiliale error:", e); }
 }
 
 // 🔄 대타 자동 스케줄의 예정 퇴근시간을 '실제 퇴근시간'으로 보정
@@ -3781,6 +3865,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   });
 
   const [selFiliale,setSelFiliale]=useState(FILIALEN[0]);
+  const [editShift,setEditShift]=useState(false);   // ✏️ 출근 중 지점/타입 변경 패널
   // 🧋 Arbeitstyp: 새로고침 후에도 유지되도록 localStorage에서 복원
   const [clockTyp,setClockTyp]=useState(()=>{
     try{ const s=localStorage.getItem(CLOCK_KEY); return s?typNorm(JSON.parse(s).clockTyp):"normal"; }
@@ -3981,6 +4066,78 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     if(window._fbDb&&window._fbRef&&window._fbRemove)
       window._fbRemove(window._fbRef(window._fbDb,"notifications/noshow_"+user.vorname+"_"+today())).catch(()=>{});
   }
+  // ═══════════════════════════════════════════════════════════════
+  //  ✏️ 출근 중 지점 / Arbeitstyp 변경
+  //   실수로 잘못 고르고 출근했을 때, 퇴근하지 않고 바로 고칠 수 있다.
+  //
+  //   [핵심 1] 최초 출근 시각(ein)은 절대 건드리지 않는다.
+  //            기존 record의 ein 값을 그대로 옮겨 담는다.
+  //   [핵심 2] 새 출근 기록을 만들지 않는다. 진행 중인 record 하나의
+  //            filiale / typ 필드만 갱신한다(중복 생성 방지).
+  //            단, record id는 [직원·날짜·지점] 기반이라 지점이 바뀌면
+  //            id도 바뀌어야 하므로 '옛 id 제거 + 같은 ein으로 새 id 저장'을
+  //            한 번의 상태 갱신 안에서 원자적으로 처리한다.
+  // ═══════════════════════════════════════════════════════════════
+  async function changeActiveShift(newFiliale, newTyp){
+    const date = today();
+    const oldFil = clockFiliale || selFiliale;
+    const fil = newFiliale || oldFil;
+    const typ = typNorm(newTyp);
+    if(sameFiliale(fil, oldFil) && typ === typNorm(clockTyp)) return;   // 바뀐 게 없음
+
+    // 진행 중인 기록을 찾아 출근 시각을 확보한다 (없으면 화면 상태에서 복원)
+    const cur = recordForShift(records, user.vorname, date, oldFil);
+    const keepEin = (cur && cur.ein)
+      || (clockInTime ? `${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}` : null);
+    if(!keepEin){
+      console.error("✏️ [changeActiveShift] 출근 시각을 찾을 수 없습니다.", { cur, clockInTime });
+      return;
+    }
+    const oldId = cur?.id ?? sessionIdFor(user.vorname, date, oldFil);
+    const newId = sessionIdFor(user.vorname, date, fil);
+
+    console.log("✏️ [changeActiveShift]", {
+      von:{ filiale:oldFil, typ:typNorm(clockTyp), id:oldId },
+      nach:{ filiale:fil, typ, id:newId },
+      출근시각_유지:keepEin
+    });
+
+    // 1) record 갱신 — 옛 세션 제거 + 동일한 ein으로 새 세션 저장 (중복 없음)
+    setRecords(prev=>{
+      const list = (Array.isArray(prev)?prev:[]).filter(r=>r && r.id!==oldId && r.id!==newId);
+      const base = cur ? {...cur} : { user:user.vorname, date, note:"" };
+      return [...list, {
+        ...base,
+        id:newId,
+        user:user.vorname, date,
+        filiale:fil,
+        typ,                       // Arbeitstyp 갱신
+        ein:keepEin,               // ⏱ 출근 시각 그대로 유지
+        aus:null                   // 아직 근무 중
+      }];
+    });
+    // 옛 세션 노드가 남지 않도록 DB에서도 직접 제거 (지점이 바뀐 경우)
+    if(oldId !== newId && window._fbDb && window._fbRef && window._fbRemove){
+      try{ await window._fbRemove(window._fbRef(window._fbDb, "records/"+oldId)); }
+      catch(e){ console.error("✏️ [changeActiveShift] 옛 record 제거 실패:", e, { oldId }); }
+    }
+
+    // 2) 화면 상태 갱신 — 출근 시각(clockInTime)은 건드리지 않는다
+    setClockFiliale(fil);
+    setSelFiliale(fil);
+    setClockTyp(typ);
+
+    // 3) 자동 생성된 대타 근무표 정리
+    //    지점이 바뀌었으면 옛 지점의 자동 스케줄을 지우고 새 지점에 다시 만든다.
+    //    (관리자가 직접 짠 계획은 autoCreated가 아니므로 건드리지 않는다)
+    try{
+      if(!sameFiliale(fil, oldFil)) await removeAutoShift(user.vorname, date, oldFil);
+      await ensureEinspringenShift(user.vorname, date, fil, keepEin);
+    }catch(e){
+      console.error("✏️ [changeActiveShift] 근무표 동기화 실패:", e);
+    }
+  }
+
   // ⚡ 현재 진행 중인 근무가 Einspringen(대타)인지 판별
   //    ① 저장된 record의 typ  ② 근무표가 자동 생성(autoCreated)된 대타인지
   //    ③ 출근 시 선택한 Arbeitstyp — 순서로 확인
@@ -4206,8 +4363,66 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               {clockedIn&&<span style={{fontSize:11,opacity:.85,fontVariantNumeric:"tabular-nums"}}>{elStr}</span>}
             </button>
             <div style={{marginTop:9,fontSize:12,color:C.muted}}>
-              {clockedIn?<span>Eingecheckt: <span style={{color:C.mintDark,fontWeight:700}}>{clockFiliale}</span></span>:"Filiale wählen & einstempeln"}
+              {clockedIn
+                ? <span>Eingecheckt: <span style={{color:C.mintDark,fontWeight:700}}>{clockFiliale}</span>
+                    {" · "}
+                    {/* 🏷 선택한 Arbeitstyp도 함께 표시 (예: TEEAMO Arkaden · ⚡ Einspringen) */}
+                    <span style={{color:C.mintDark,fontWeight:700}}>
+                      {typIcon(clockTyp)+" "+typLabel(clockTyp)}
+                    </span>
+                  </span>
+                : "Filiale wählen & einstempeln"}
             </div>
+
+            {/* ✏️ 출근 중 지점·Arbeitstyp 변경 (출근 시각은 그대로 유지) */}
+            {clockedIn&&(
+              <div style={{marginTop:8}}>
+                <button onClick={()=>setEditShift(v=>!v)}
+                  style={{padding:"5px 11px",borderRadius:99,cursor:"pointer",
+                    border:`1px solid ${C.border}`,background:"#fff",
+                    color:C.muted,fontSize:10,fontWeight:700}}>
+                  {editShift ? "✕ Schließen" : "✏️ Filiale / Typ ändern"}
+                </button>
+
+                {editShift&&(
+                  <div style={{...S.card,marginTop:10,textAlign:"left"}}>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:9,lineHeight:1.5}}>
+                      {"⏱ Die Einstempel-Zeit bleibt unverändert erhalten."}
+                    </div>
+
+                    <div style={{fontSize:9,fontWeight:800,color:C.muted,marginBottom:5}}>{"FILIALE"}</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:11}}>
+                      {FILIALEN.map(f=>{
+                        const on=sameFiliale(f, clockFiliale);
+                        return (
+                          <button key={f} onClick={()=>changeActiveShift(f, clockTyp)}
+                            style={{padding:"9px 6px",borderRadius:9,cursor:"pointer",fontSize:10,fontWeight:800,
+                              border:`1.5px solid ${on?C.mintDark:C.border}`,
+                              background:on?C.mintLight:"#fff",color:on?C.mintDark:C.text}}>
+                            {filialIcon(f)+" "+filialShort(f)}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div style={{fontSize:9,fontWeight:800,color:C.muted,marginBottom:5}}>{"ARBEITSTYP"}</div>
+                    <div style={{display:"flex",gap:6}}>
+                      {ARBEITSTYPEN.map(({typ,icon,lbl})=>{
+                        const on=typNorm(clockTyp)===typ;
+                        return (
+                          <button key={typ} onClick={()=>changeActiveShift(clockFiliale, typ)}
+                            style={{flex:1,padding:"9px 6px",borderRadius:9,cursor:"pointer",fontSize:10,fontWeight:800,
+                              border:`1.5px solid ${on?C.mintDark:C.border}`,
+                              background:on?C.mintLight:"#fff",color:on?C.mintDark:C.text}}>
+                            {icon+" "+lbl}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Pause 버튼 (출근 중에만 표시) */}
             {clockedIn&&(
@@ -5650,6 +5865,8 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
   const [addBis, setAddBis]   = useState("");
   const [addTyp, setAddTyp]   = useState("normal");   // 🧋 Arbeitstyp: normal | einspringen
 
+  const [moveRow,setMoveRow]=useState(null);   // 📍 지점 변경 패널이 열린 행
+
   // 🆔 현재 로그인한 사람의 고유 ID — 모드(관리자/직원)와 무관하게 동일한 값
   const myUid = uidOf(users, highlightName);
 
@@ -5767,7 +5984,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
         </div>
         {actMsg&&(
           <div style={{fontSize:11,fontWeight:700,padding:"8px 11px",borderRadius:9,marginBottom:8,
-            background:actMsg.startsWith("✅")?"#dcfce7":"#fee2e2",color:actMsg.startsWith("✅")?"#15803d":C.red}}>
+            background:/^(✅|📍)/.test(actMsg)?"#dcfce7":"#fee2e2",color:/^(✅|📍)/.test(actMsg)?"#15803d":C.red}}>
             {actMsg}
           </div>
         )}
@@ -5906,14 +6123,57 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                       })()}
                       {(()=>{ if(r.isOffen) return null;
                         const ist=istTimeFor(records,r.rawName,selDate,fil); if(!ist) return null;
+                        // 📍 지점 변경 대상이 되는 실제 기록 (본인 또는 관리자만)
+                        const canMove = (isMine || allowDelete) && !!setRecords && !!rec;
                         return (
-                          <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>
-                            {"Ist: "+ist.ein+" – "+ist.aus}
-                            {ist.isNachtrag&&<span style={{color:C.muted,fontWeight:400}}>{" · korrigiert"}</span>}
-                            {ist.isAuto&&<span style={{color:C.muted,fontWeight:400}}>{" · Auto"}</span>}
+                          <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1,
+                            display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
+                            <span>{"Ist: "+ist.ein+" – "+ist.aus}</span>
+                            {ist.isNachtrag&&<span style={{color:C.muted,fontWeight:400}}>{"· korrigiert"}</span>}
+                            {ist.isAuto&&<span style={{color:C.muted,fontWeight:400}}>{"· Auto"}</span>}
+                            {/* 📍 퇴근 후에도 지점만 바꿀 수 있다 (시간은 그대로 유지) */}
+                            {canMove&&(
+                              <button onClick={()=>setMoveRow(moveRow===rowKey?null:rowKey)}
+                                title="Filiale ändern"
+                                style={{border:`1px solid ${C.border}`,background:"#fff",color:C.muted,
+                                  borderRadius:99,padding:"1px 7px",fontSize:8,fontWeight:800,cursor:"pointer"}}>
+                                {moveRow===rowKey?"✕":"📍 Filiale"}
+                              </button>
+                            )}
                           </div>
                         );
                       })()}
+
+                      {/* 📍 지점 변경 선택지 — 시간(Ist)은 건드리지 않고 지점만 옮긴다 */}
+                      {moveRow===rowKey&&rec&&(
+                        <div style={{marginTop:6,padding:"8px",borderRadius:9,
+                          background:C.mintLight,border:`1px solid ${C.mint}`}}>
+                          <div style={{fontSize:8,color:C.mintDark,fontWeight:800,marginBottom:5}}>
+                            {"📍 Filiale ändern — Zeiten bleiben unverändert"}
+                          </div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+                            {(FILIALEN_LIST||FILIALEN).map(f=>{
+                              const on=sameFiliale(f, rec.filiale);
+                              return (
+                                <button key={f} disabled={on}
+                                  onClick={async()=>{
+                                    await changeRecordFiliale({rec, newFiliale:f, setRecords});
+                                    setMoveRow(null);
+                                    setActMsg("📍 Filiale geändert: "+filialShort(f));
+                                    setTimeout(()=>setActMsg(""),3500);
+                                  }}
+                                  style={{padding:"7px 5px",borderRadius:8,fontSize:9,fontWeight:800,
+                                    cursor:on?"default":"pointer",
+                                    border:`1px solid ${on?C.mintDark:C.border}`,
+                                    background:on?C.mintDark:"#fff",
+                                    color:on?"#fff":C.text,opacity:on?.7:1}}>
+                                  {filialIcon(f)+" "+filialShort(f)}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                       {r.status==="freigegeben"&&<div style={{fontSize:9,fontWeight:700,color:"#b45309",marginTop:1}}>{"🔄 Freigegeben"}</div>}
                       {r.status==="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>{"🔄 Getauscht mit "+(r.getauschtMit||"?")}</div>}
                       {r.getauschtVon&&r.status!=="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>{"✔️ Getauscht mit "+r.getauschtVon}</div>}
