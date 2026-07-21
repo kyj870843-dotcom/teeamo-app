@@ -6130,7 +6130,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                 style={{aspectRatio:"1",borderRadius:9,cursor:"pointer",position:"relative",padding:0,
                   // 우선순위: 선택한 날 > 빈 근무 있는 날 > 오늘 > 기본
                   border: isSel    ? "2px solid "+C.navy
-                        : hasOffen ? "2px solid "+C.offen
+                        : hasOffen ? "1px solid "+C.offen
                         : isToday  ? "1.5px solid "+C.mint
                         :            "1px solid "+C.border,
                   background: isSel ? C.navy
@@ -6140,20 +6140,11 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                   color:isSel?"#fff":C.text,
                   display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}}>
                 <span style={{fontSize:12,fontWeight:mine||isSel?800:600}}>{d}</span>
-                {/* 점 표시 — 일반 근무(회색/민트) + Schichtbörse 빈 근무(노랑) */}
-                <span style={{display:"flex",alignItems:"center",justifyContent:"center",gap:2,height:5}}>
-                  {shifts.some(s=>!s.isOffen)&&(
-                    <span style={{width:5,height:5,borderRadius:"50%",
-                      background:isSel?"#fff":mine?C.mintDark:C.muted}}/>
-                  )}
-                  {/* 🔄 아직 주인이 없는 freigegebene Schicht가 있는 날 */}
-                  {shifts.some(s=>s.isOffen)&&(
-                    <span title="Offene Schicht"
-                      style={{width:5,height:5,borderRadius:"50%",
-                        background:C.offen,
-                        boxShadow:isSel?"0 0 0 1px rgba(255,255,255,.9)":"none"}}/>
-                  )}
-                </span>
+                {/* 점 표시 — 일반 근무만. 빈 근무(Offene Schicht)는 테두리·배경 색으로 구분한다 */}
+                {shifts.some(s=>!s.isOffen)&&(
+                  <span style={{width:5,height:5,borderRadius:"50%",
+                    background:isSel?"#fff":mine?C.mintDark:C.muted}}/>
+                )}
               </button>
             );
           })}
