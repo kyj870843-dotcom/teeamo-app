@@ -2895,6 +2895,8 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   }
   function doRegister(){
     if(!regV.trim()){setRegErr("Vorname ist Pflichtfeld.");return;}
+    // 👤 Nachname도 필수 (관리자에게만 보이며 정산·서류 확인에 쓰인다)
+    if(!regN.trim()){setRegErr("Nachname ist Pflichtfeld.");return;}
     if(!/^\d{4}$/.test(regP)){setRegErr("PIN muss 4 Ziffern sein.");return;}
     if(regP!==regP2){setRegErr("PINs stimmen nicht überein.");return;}
     const vn=regV.trim(),nn=regN.trim();
@@ -2995,8 +2997,14 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
           </div>
           {/* Nachname */}
           <div style={{marginBottom:12}}>
-            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>Nachname <span style={{fontSize:10,fontWeight:400,color:C.muted}}>{"(nur für Admin sichtbar)"}</span></div>
-            <input value={regN} onChange={e=>setRegN(e.target.value)} placeholder="Kim" style={S.input}/>
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:2}}>
+              Nachname <span style={{color:C.red}}>*</span>
+            </div>
+            <div style={{fontSize:9,color:C.muted,marginBottom:5}}>
+              {"Nur für Admin sichtbar — für Lohnabrechnung & Unterlagen."}
+            </div>
+            <input value={regN} onChange={e=>setRegN(e.target.value)}
+              placeholder="z.B. Kim" style={{...S.input,fontSize:15}}/>
           </div>
           {/*    */}
           <div style={{fontSize:10,color:C.muted,marginBottom:12,padding:"7px 10px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`}}>
@@ -3023,7 +3031,19 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
             ))}
           </div>
           {regErr&&<div style={{fontSize:11,color:C.red,fontWeight:600,marginBottom:10}}>{regErr}</div>}
-          <button onClick={doRegister} style={{width:"100%",padding:"13px",borderRadius:11,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer"}}>Konto erstellen</button>
+          {/* 👤 Vorname · Nachname · PIN이 모두 채워져야 생성 가능 */}
+          {(()=>{
+            const ready = !!regV.trim() && !!regN.trim() && /^\d{4}$/.test(regP) && regP===regP2;
+            return (
+              <button onClick={doRegister} disabled={!ready}
+                style={{width:"100%",padding:"13px",borderRadius:11,border:"none",
+                  background:ready?`linear-gradient(135deg,${C.mint},${C.mintDark})`:"#e5e5e5",
+                  color:ready?"#fff":C.muted,fontSize:14,fontWeight:800,
+                  cursor:ready?"pointer":"not-allowed"}}>
+                Konto erstellen
+              </button>
+            );
+          })()}
         </div>
       </div>
     </div>
