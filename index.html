@@ -302,19 +302,44 @@ function filialIcon(f){ return isOnigiriFiliale(f) ? "🍙" : "📍"; }
 //     각 근무가 독립된 record 문서로 생성/정산되어 중복 시급을 차단한다.
 // ═══════════════════════════════════════════════════════════════
 function filialeSlug(f){ return String(f||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"none"; }
-function sessionIdFor(name, date, filiale){ return "clock_"+name+"_"+date+"_"+filialeSlug(filiale); }
+// 🆔 출퇴근 세션 ID — 이름이 아니라 고유 ID(uid)로 만든다.
+//   예전엔 이름을 썼기 때문에 출근~퇴근 사이에 이름을 바꾸면 ID가 달라져
+//   퇴근 시 옛 기록을 못 지우고 'Aktiv'가 계속 남는 버그가 있었다.
+function sessionIdFor(name, date, filiale){
+  const uid = uidOf(typeof window!=="undefined" ? window._teeamoUsers : [], name) || nameKey(name) || name;
+  return "clock_"+uid+"_"+date+"_"+filialeSlug(filiale);
+}
 function sameFiliale(a,b){ return filialeSlug(a)===filialeSlug(b); }
 // 특정 [직원·날짜·지점] 근무의 실제 기록을 찾는다.
 //  · 지점을 지정하면 그 지점 기록만 반환(다른 지점 근무에 간섭 금지)
 //  · 구 데이터(지점 없이 저장된 record)는 지점 지정 시 매칭에서 제외
+// 🧟 '유령 진행중 기록' 판별
+//   출근~퇴근 사이에 이름을 바꾸면 세션 ID가 달라져서, 퇴근 시 옛 기록(aus 없음)이
+//   지워지지 않고 남는다. 그 결과 이미 퇴근했는데도 화면에 계속 'Aktiv'로 보인다.
+//   → 같은 사람·날짜·지점에 '완료된 기록'이 있으면, 그보다 이르거나 같은 시각에
+//     시작된 진행중 기록은 이미 끝난 근무로 간주해 무시한다.
+function isStaleOpenRecord(rec, list){
+  if(!rec || (rec.aus && rec.aus!=="")) return false;
+  return (list||[]).some(r =>
+    r && r!==rec && r.aus && r.aus!=="" &&
+    String(r.ein||"") >= String(rec.ein||"")
+  );
+}
 function recordForShift(records, name, date, filiale){
   const list=(Array.isArray(records)?records:[]).filter(r=>r&&sameName(r.user,name)&&r.date===date);
   if(filiale===undefined||filiale===null) return list[0]||null;
   const exact=list.filter(r=>sameFiliale(r.filiale, filiale));
   if(exact.length===0) return null;
-  // 진행 중(aus 없음) 우선 → 없으면 '가장 최근 출근' 기록을 반환
-  return exact.find(r=>!r.aus||r.aus==="")
-      || exact.slice().sort((a,b)=>String(b.ein||"").localeCompare(String(a.ein||"")))[0];
+  const byLatest=(a,b)=>String(b.ein||"").localeCompare(String(a.ein||""));
+  // 진행 중(aus 없음) 우선 — 단, 유령 기록은 제외
+  const live = exact.filter(r=>(!r.aus||r.aus==="") && !isStaleOpenRecord(r, exact))
+                    .sort(byLatest)[0];
+  if(live) return live;
+  // 진행중 근무가 없으면 완료 기록 중 가장 최근 것을 쓴다.
+  // (유령 기록은 절대 고르지 않는다 — 고르면 화면이 계속 Aktiv로 보인다)
+  const done = exact.filter(r=>r.aus && r.aus!=="").sort(byLatest)[0];
+  if(done) return done;
+  return exact.filter(r=>!isStaleOpenRecord(r, exact)).sort(byLatest)[0] || null;
 }
 // ⚠️ 하드코딩 더미 월 필터 제거됨. Statistik의 "Monat auswählen"은 실제 데이터가
 //    존재하는 달만 동적으로 표시된다 (StatistikTab.availMonths 참고).
@@ -778,7 +803,7 @@ function stunden(ein, aus) {
   const [ah, am] = aus.split(":").map(Number);
   return (ah * 60 + am - eh * 60 - em) / 60;
 }
-function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "–" : h.toFixed(1) + "h"; }
+function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "–" : h.toFixed(2) + "h"; }
 // 근무표(schedule)에서 name·date의 예정 종료시간("HH:MM") 추출 — 자동 강제 퇴근용
 //  · root({d,f,t}) / 월별({date,filiale,time}) 두 스키마 모두 지원
 //  · 같은 날 여러 shift가 있으면 가장 늦은 종료시간을 채택
@@ -970,7 +995,7 @@ const S = {
 // 📊 [직원 → 지점 → 근무타입] 계층 breakdown 렌더러 (관리자/직원 공용)
 function BreakdownView({ recs, compact }){
   const bd = buildBreakdown(recs);
-  const fmt = h => h.toFixed(1).replace(".",",")+" Std";
+  const fmt = h => h.toFixed(2).replace(".",",")+" Std";
   if(bd.byFiliale.length===0){
     return <div style={{fontSize:10,color:C.muted,padding:"6px 0"}}>Keine Arbeitszeiten in diesem Monat.</div>;
   }
@@ -2427,6 +2452,19 @@ function SchichtboerseView({ userName, users, isAdmin }) {
         userName, schicht.date, schicht.filiale, schicht.time || "", "normal",
         { uid: myUid, extra: { getauschtVon: schicht.angeboten_von || null } }
       );
+      // 🐞 진단: 실제로 근무표에 기록됐는지 즉시 되읽어 확인한다
+      try{
+        const chk = await window._fbGet(window._fbRef(window._fbDb,"schedule"));
+        const root = chk.val()||{};
+        const key = scheduleKeyOf(root, userName);
+        const arr = !root[key] ? [] : (Array.isArray(root[key])?root[key]:Object.values(root[key]));
+        const hit = arr.filter(x=>x && (x.d||x.date)===schicht.date &&
+                                     sameFiliale(x.f||x.filiale, schicht.filiale));
+        console.log("✅ [uebernehmen] 근무표 기록 확인:", {
+          저장키:key, 해당날짜지점_건수:hit.length, 내용:hit, 전체키목록:Object.keys(root)
+        });
+        if(hit.length===0) console.error("✅ [uebernehmen] ⚠️ 근무표에 기록되지 않았습니다!", { userName, schicht });
+      }catch(e){ console.error("✅ [uebernehmen] 기록 확인 실패:", e); }
     }catch(e){
       console.error("✅ [uebernehmen] schedule 기록 실패:", e, { schicht, userName, myUid });
       throw e;   // 상위 uebernehmenSafe가 잡아 사용자에게 알린다
@@ -4658,11 +4696,11 @@ function StatistikTab({records,users,schedule}){
                   <div style={{fontSize:9,color:C.muted}}>{emp.role==="Admin"?"Admin":"Staff"}{contract>0?` · Vertrag: ${contract}h`:""}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:18,fontWeight:800,color:C.mintDark}}>{total.toFixed(1)}<span style={{fontSize:10,color:C.muted}}> Std</span></div>
+                  <div style={{fontSize:18,fontWeight:800,color:C.mintDark}}>{total.toFixed(2)}<span style={{fontSize:10,color:C.muted}}> Std</span></div>
                   <div style={{fontSize:9,color:C.muted}}>{er.length} Tage</div>
                   {diff !== null && (
                     <div style={{fontSize:10,fontWeight:700,color:diff>=0?C.mintDark:C.red}}>
-                      {diff>=0?`+${diff.toFixed(1)}h Mehr`:`${diff.toFixed(1)}h Weniger`}
+                      {diff>=0?`+${diff.toFixed(2)}h Mehr`:`${diff.toFixed(2)}h Weniger`}
                     </div>
                   )}
                 </div>
@@ -4916,7 +4954,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
       <BranchAccessPanel emp={emp} setUsers={setUsers}/>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:12,marginBottom:12}}>
-        {[{l:"Std. gesamt",v:total.toFixed(1)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
+        {[{l:"Std. gesamt",v:total.toFixed(2)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
           <div key={l} style={S.card}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</div><div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div></div>
         ))}
       </div>
@@ -4929,7 +4967,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
           <div style={{fontSize:12,color:C.muted}}>Std/Monat</div>
           {totalDiff!==null&&(
             <div style={{marginLeft:"auto",textAlign:"right"}}>
-              <div style={{fontSize:13,fontWeight:800,color:totalDiff>=0?C.mintDark:C.red}}>{(totalDiff>=0?"+":"")+totalDiff.toFixed(1)+"h"}</div>
+              <div style={{fontSize:13,fontWeight:800,color:totalDiff>=0?C.mintDark:C.red}}>{(totalDiff>=0?"+":"")+totalDiff.toFixed(2)+"h"}</div>
               <div style={{fontSize:10,color:C.muted}}>{totalDiff>=0?"Mehrst.":"Fehlst."}</div>
             </div>
           )}
@@ -4950,11 +4988,11 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
               style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:14,fontWeight:800,color:C.text}}>{mn[parseInt(mo)]+" "+y}</span>
-                <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(1)+"h"}</span>
+                <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(2)+"h"}</span>
                 <span style={{fontSize:10,color:C.muted}}>{mDays+" Tage"}</span>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
-                {mDiff!==null&&<span style={{fontSize:11,fontWeight:700,color:mDiff>=0?C.mintDark:C.red}}>{(mDiff>=0?"+":"")+mDiff.toFixed(1)+"h"}</span>}
+                {mDiff!==null&&<span style={{fontSize:11,fontWeight:700,color:mDiff>=0?C.mintDark:C.red}}>{(mDiff>=0?"+":"")+mDiff.toFixed(2)+"h"}</span>}
                 <span style={{fontSize:11,color:C.muted}}>{isOpen?"[-]":"[+]"}</span>
               </div>
             </button>
@@ -4962,7 +5000,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
               <div>
                 {contract>0&&(
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,borderTop:"1px solid "+C.border,borderBottom:"1px solid "+C.border}}>
-                    {[{l:"Geplant",v:contract+"h",bg:"#fff",vc:C.text},{l:"Geleistet",v:mTotal.toFixed(1)+"h",bg:C.mintLight,vc:C.mintDark}].map(({l,v,bg,vc})=>(
+                    {[{l:"Geplant",v:contract+"h",bg:"#fff",vc:C.text},{l:"Geleistet",v:mTotal.toFixed(2)+"h",bg:C.mintLight,vc:C.mintDark}].map(({l,v,bg,vc})=>(
                       <div key={l} style={{padding:"8px 14px",background:bg}}><div style={{fontSize:9,color:C.muted,marginBottom:2}}>{l}</div><div style={{fontSize:15,fontWeight:800,color:vc}}>{v}</div></div>
                     ))}
                   </div>
@@ -6760,8 +6798,10 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
     const recs=todayRecs.filter(x=>sameName(x.user,name)&&x.ein&&
       (filiale===undefined||filiale===null||sameFiliale(x.filiale, filiale)));
     if(recs.length===0) return "Nicht erschienen";
-    // 진행 중(퇴근 전, aus 없음)인 record가 하나라도 있으면 Aktiv
-    if(recs.some(r=>!r.aus||r.aus==="")) return "Aktiv";
+    // 진행 중(퇴근 전)인 record가 있으면 Aktiv — 단 '유령 기록'은 제외
+    // (이름 변경 등으로 지워지지 않고 남은 옛 진행중 기록 때문에 퇴근 후에도
+    //  계속 Aktiv로 보이던 버그 방지)
+    if(recs.some(r=>(!r.aus||r.aus==="") && !isStaleOpenRecord(r, recs))) return "Aktiv";
     // 조기 퇴근으로 확인 대기(prüfen)인 record가 있고 아직 확인 전이면 Prüfen
     if(recs.some(r=>r.aus&&r.prüfen&&!r.geprüft)) return "Prüfen";
     return "Feierabend";
@@ -7407,6 +7447,29 @@ function App(){
   //      찾지 못할 때만 Fallback(출근+8h)이며, 절대 출근시각과 같아지지 않는다.
   //    ⚠️ schedule 로딩 완료(scheduleReady) 전에는 실행하지 않는다.
   //       (예정 종료시간을 못 읽어 퇴근시간이 '출근시간'으로 저장되던 버그 방지)
+  // 🧟 유령 진행중 기록 자동 정리
+  //   출근~퇴근 사이에 이름이 바뀌면 세션 ID가 어긋나 옛 진행중 기록이 남는다.
+  //   → 같은 사람·날짜·지점에 '완료된 기록'이 있으면 그 유령 기록을 DB에서 제거한다.
+  //     (표시 로직에서도 무시하지만, 데이터 자체를 정리해 두면 통계·CSV도 깨끗해진다)
+  useEffect(()=>{
+    if(!recordsReady) return;
+    const arr = Array.isArray(records)?records:[];
+    const ghosts = arr.filter(r=>{
+      if(!r || !r.ein || (r.aus && r.aus!=="")) return false;
+      if(r.typ==="nachtrag") return false;
+      const siblings = arr.filter(x=>x && x!==r &&
+        sameName(x.user, r.user) && x.date===r.date && sameFiliale(x.filiale, r.filiale));
+      return siblings.some(x=>x.aus && x.aus!=="" && String(x.ein||"") >= String(r.ein||""));
+    });
+    if(ghosts.length===0) return;
+    console.log("🧟 [유령 기록 정리] 이미 퇴근 처리된 진행중 기록 제거:", ghosts);
+    setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>!ghosts.some(g=>g.id===r.id)));
+    if(window._fbDb&&window._fbRef&&window._fbRemove){
+      ghosts.forEach(g=>{ if(g.id!=null)
+        window._fbRemove(window._fbRef(window._fbDb,"records/"+g.id)).catch(()=>{}); });
+    }
+  },[records, recordsReady]);
+
   useEffect(()=>{
     if(!recordsReady || !scheduleReady) return;
     const isStale = (r,td)=> r && r.ein && (r.aus===null||r.aus===undefined||r.aus==="") && r.typ!=="nachtrag" && r.date && r.date < td;
