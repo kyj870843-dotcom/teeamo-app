@@ -744,6 +744,19 @@ function lockMaster(){
   try{ localStorage.removeItem(MASTER_FLAG_KEY); }catch{}
   try{ window.dispatchEvent(new Event("teeamo-master")); }catch{}
 }
+// 👑 위험 기능(데이터 삭제·초기화·지점 권한)을 볼 수 있는 유일한 오너.
+//   마스터 잠금은 '기기' 단위라 어느 관리자든 암호만 알면 열 수 있다.
+//   그래서 잠금과 별개로 '지금 로그인한 사람이 오너(Yeaji)인가'를 함께 본다.
+const OWNER_KEY = "yeaji";
+function isOwnerKey(userKey){
+  return sameName(String(userKey||""), OWNER_KEY);
+}
+// 마스터 해제 + 오너 로그인 둘 다 참일 때만 위험 기능을 연다.
+function useOwnerMaster(userKey){
+  const on = useMasterUnlocked();
+  return on && isOwnerKey(userKey);
+}
+
 // 여러 컴포넌트가 잠금 상태를 실시간 공유하기 위한 훅
 function useMasterUnlocked(){
   const [on, setOn] = useState(isMasterUnlocked());
@@ -3655,8 +3668,9 @@ function MasterGate(){
 }
 
 function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdmin }) {
-  // 🔐 마스터(개발자) 해제 여부 — 위험 기능 노출 조건
-  const masterOn = useMasterUnlocked();
+  // 🔐 위험 기능은 '마스터 해제 + 오너(Yeaji) 로그인'일 때만 노출한다.
+  //    다른 관리자(Teddy·Tingting·Huy)는 암호를 넣어도 이 기능이 보이지 않는다.
+  const masterOn = useOwnerMaster(userKey);
   if (!user) return null;
   const [vorname, setVorname] = useState(user.vorname || "");
   const [saveMsg, setSaveMsg] = useState("");
@@ -5290,10 +5304,10 @@ function StatistikTab({records,users,schedule}){
 //   · 저장   : users 문서의 accessibleBranches(배열) / allBranches(불린) 갱신
 //   ▸ 자동 분배가 아니라 최고 관리자가 요청 시 수동 지정하는 방식
 // ═══════════════════════════════════════════════════════════════
-function BranchAccessPanel({ emp, setUsers }){
-  // 🔐 마스터(개발자) 인증자에게만 노출. 일반 관리자 화면에는 렌더링되지 않는다.
-  //    컴포넌트 자체에서 막으므로 어디에 배치하더라도 새어나가지 않는다.
-  const masterOn = useMasterUnlocked();
+function BranchAccessPanel({ emp, setUsers, userKey }){
+  // 🔐 '마스터 해제 + 오너(Yeaji) 로그인'일 때만 노출.
+  //    다른 관리자는 암호를 넣어도 이 패널이 렌더링되지 않는다.
+  const masterOn = useOwnerMaster(userKey);
   const branches = allBranches();
   const [master, setMaster]   = useState(!!emp.allBranches);
   const [picked, setPicked]   = useState(()=>new Set(accessibleBranchIds(emp)));
@@ -5416,7 +5430,7 @@ function BranchAccessPanel({ emp, setUsers }){
   );
 }
 
-function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sColor, sBg, setDetailKey, setUsers, monthAccordion, setMonthAccordion, delRecordConfirm, setDelRecordConfirm }) {
+function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getStatus, sColor, sBg, setDetailKey, setUsers, monthAccordion, setMonthAccordion, delRecordConfirm, setDelRecordConfirm }) {
   const emp = safeUsers.find(u=>u.key===empKey);
   if (!emp) return null;
 
@@ -5463,7 +5477,7 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
         </div>
       </div>
       {/* 🔑 지점 접근 권한 제어판 — 🔐 마스터 인증 시에만 표시 (내부에서 자체 차단) */}
-      <BranchAccessPanel emp={emp} setUsers={setUsers}/>
+      <BranchAccessPanel emp={emp} setUsers={setUsers} userKey={userKey}/>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:12,marginBottom:12}}>
         {[{l:"Std. gesamt",v:total.toFixed(2)+"h",c:C.mintDark},{l:"Arbeitstage",v:empRecs.filter(r=>r.aus).length+"d",c:C.navy}].map(({l,v,c})=>(
@@ -5557,8 +5571,8 @@ function EmpDetailView({ empKey, safeUsers, records, setRecords, getStatus, sCol
 }
 
 function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab, userKey, safeUsers, onConfirmPruefen }) {
-  // 🔐 직원 계정 삭제는 마스터(개발자) 인증 시에만 노출
-  const masterOn = useMasterUnlocked();
+  // 🔐 직원 계정 삭제는 '마스터 해제 + 오너(Yeaji) 로그인'일 때만 노출
+  const masterOn = useOwnerMaster(userKey);
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
   const todayStr = today();
   const todayRecs = (Array.isArray(records)?records:[]).filter(r=>r.date===todayStr);
@@ -7458,6 +7472,35 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   // userKey ,  key prefix fallback (  )
   const manager=safeUsers.find(u=>u.key===userKey)
     || {key:userKey, vorname:userKey?.split("_")[0]||"Manager", emoji:"", kuerzel:"M", role:"Admin"};
+
+  // ⏳ Schichtbörse 시간 겹침 승인 처리 (관리자가 시간을 조정해 승인/거절)
+  const [freieForBoerse] = useFirebase("freieSchichten", []);
+  async function decideBoerse(a, ok, zeitOverride){
+    const zeit = String(zeitOverride==null?(a.zeit||""):zeitOverride).trim();
+    setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>
+      x.id===a.id ? {...x, status:ok?"genehmigt":"abgelehnt", zeit} : x));
+    try{
+      if(ok){
+        await addScheduleShift(a.user, a.date, a.filiale, zeit, "normal",
+          { uid:a.uid||"", extra:{ ausBoerse:true } });
+      }
+      if(window._fbDb&&window._fbRef&&window._fbGet&&window._fbSet&&a.schichtId!=null){
+        const snap=await window._fbGet(window._fbRef(window._fbDb,"freieSchichten/"+a.schichtId));
+        const fs=snap.val();
+        if(fs){
+          const next = ok
+            ? {...fs, besetzt:true, uebernommen_von:a.user, uebernommen_von_uid:a.uid||"",
+               wartetAuf:null, wartetAufUid:null, antragId:null, time:zeit||fs.time}
+            : {...fs, wartetAuf:null, wartetAufUid:null, antragId:null};
+          await window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+a.schichtId), next);
+        }
+      }
+      console.log("⏳ [decideBoerse]", ok?"승인":"거절", { antrag:a, zeit });
+    }catch(e){ console.error("⏳ [decideBoerse] 처리 실패:", e, { a, zeit }); }
+  }
+  // 승인 대기 중인 Schichtbörse 겹침 신청들
+  const boerseAntraege = (Array.isArray(antraege)?antraege:[])
+    .filter(a=>a && a.status==="offen" && a.typ==="boerse_overlap");
   const empList=safeUsers.filter(u=>!MANAGERS.includes(u.key)).sort(byName);
   const todayRecs=records.filter(r=>r.date===today());
   // 🔒 filiale를 주면 해당 지점 근무만 보고 상태를 판정한다.
@@ -7891,6 +7934,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       {tab==="uebersicht"&&detailKey&&(
         <EmpDetailView
           empKey={detailKey}
+          userKey={userKey}
           safeUsers={safeUsers}
           records={records}
           setRecords={setRecords}
@@ -7959,12 +8003,33 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           <div style={{display:"flex",gap:0,margin:"14px 14px 12px",borderRadius:11,overflow:"hidden",border:`1px solid ${C.border}`}}>
             {[{id:"schichtboerse",l:"🔔 Schichtbörse"},{id:"nachtragen",l:"📝 Nachtragen"}].map(({id,l})=>(
               <button key={id} onClick={()=>setAntragTab(id)}
-                style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",fontSize:12,fontWeight:800,
+                style={{flex:1,padding:"10px 4px",border:"none",cursor:"pointer",fontSize:12,fontWeight:800,position:"relative",
                   background:antragTab===id?C.navy:"#fff",color:antragTab===id?"#fff":C.muted}}>
                 {l}
+                {/* ⏳ 승인 대기 건수 배지 */}
+                {id==="schichtboerse"&&boerseAntraege.length>0&&(
+                  <span style={{marginLeft:5,display:"inline-flex",alignItems:"center",justifyContent:"center",
+                    minWidth:16,height:16,borderRadius:99,background:C.offen,color:"#fff",
+                    fontSize:9,fontWeight:800,padding:"0 4px"}}>{boerseAntraege.length}</span>
+                )}
               </button>
             ))}
           </div>
+
+          {/* ⏳ Schichtbörse 시간 겹침 승인 요청 — 관리자가 시간 조정 후 승인/거절 */}
+          {antragTab==="schichtboerse"&&boerseAntraege.length>0&&(
+            <div style={{padding:"0 14px",marginBottom:6}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#92400e",marginBottom:8,
+                textTransform:"uppercase",letterSpacing:".04em"}}>
+                {"⏳ Freigabe erforderlich ("+boerseAntraege.length+")"}
+              </div>
+              {boerseAntraege.map(a=>(
+                <BoerseOverlapCard key={a.id} a={a}
+                  onApprove={(zeit)=>decideBoerse(a,true,zeit)}
+                  onReject={()=>decideBoerse(a,false)}/>
+              ))}
+            </div>
+          )}
 
           {/* 🔔 Schichtbörse 로그 (중복 제거, 최신순, 검은색) */}
           {antragTab==="schichtboerse"&&(()=>{
