@@ -5635,18 +5635,18 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
             <div key={emp.key} style={{...S.card,display:"flex",alignItems:"center",gap:11,padding:"12px 14px",marginBottom:8}}>
               <button onClick={()=>setDetailKey(emp.key)}
                 style={{flex:1,border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:11,padding:0}}>
-                <div style={{width:40,height:40,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff",flexShrink:0}}>
+                <div style={{width:40,height:40,borderRadius:"50%",background:isAdminUser(emp)?C.mintDark:C.navy,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:"#fff",flexShrink:0}}>
                   {emp.kuerzel}
                 </div>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:700,color:C.text}}>
                     {emp.vorname}{emp.nachname&&<span style={{fontSize:11,fontWeight:400,color:C.muted}}> {emp.nachname}</span>}
                   </div>
-                  <div style={{fontSize:10,color:C.muted,marginTop:2}}>{emp.role==="Admin"?"Admin":"Staff"}</div>
+                  <div style={{fontSize:10,color:isAdminUser(emp)?C.mintDark:C.muted,marginTop:2,fontWeight:isAdminUser(emp)?700:400}}>{isAdminUser(emp)?"👑 Admin":"Staff"}</div>
                 </div>
                 <span style={{fontSize:14,color:C.muted}}>{">"}</span>
               </button>
-              {/* 🔐 마스터 전용: 인증 전에는 버튼이 DOM에 존재하지 않는다 */}
+              {/* 🗑 삭제 버튼: 직원 대상은 모든 관리자, 관리자 대상은 오너(Yeaji)만 (canDelete 판정) */}
               {canDelete(emp)&&(
                 <button onClick={()=>setDeleteConfirm(emp.key)}
                   title={isAdminUser(emp)?"Admin-Konto löschen":"Konto löschen"}
@@ -7518,6 +7518,9 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   const boerseAntraege = (Array.isArray(antraege)?antraege:[])
     .filter(a=>a && a.status==="offen" && a.typ==="boerse_overlap");
   const empList=safeUsers.filter(u=>!isManagerName(u.key)).sort(byName);
+  // 👥 All Staffs 목록에는 관리자도 포함해 전부 보여준다 (자기 자신은 제외).
+  //    삭제 권한은 UebersichtAllTab 내부에서 역할에 따라 판정한다.
+  const allStaffList=safeUsers.filter(u=>u.key!==userKey).sort(byName);
   const todayRecs=records.filter(r=>r.date===today());
   // 🔒 filiale를 주면 해당 지점 근무만 보고 상태를 판정한다.
   //    (오전 ONIGIRI 퇴근이 오후 TEEnJOY 카드까지 Feierabend로 만들던 버그 방지)
@@ -7933,7 +7936,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       </div>
       {tab==="uebersicht"&&!detailKey&&(
         <UebersichtAllTab
-          empList={empList}
+          empList={allStaffList}
           schedule={schedule}
           records={records}
           getStatus={getStatus}
