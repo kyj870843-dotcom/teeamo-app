@@ -427,11 +427,18 @@ function monthLabel(ym){
 }
 const TAGE_DE    = ["So","Mo","Di","Mi","Do","Fr","Sa"];
 const MANAGERS   = ["tingting","teddy","yeaji","huy"];
-// 👥 이 사람이 관리자(Admin)인가 — 계정 삭제 권한 판정에 쓴다.
-//    로그인 키(MANAGERS) 또는 계정 role/isAdmin 플래그로 판정.
+// 🔑 계정 키에서 baseKey(타임스탬프 앞부분)를 뽑는다. "teddy_1721..." → "teddy"
+function keyBase(key){ return String(key||"").split("_")[0].toLowerCase(); }
+// 👑 이 키/이름이 '관리자로 지정된 이름'인가 — baseKey 기준으로 판별.
+//    계정 키에 타임스탬프가 붙어도(teddy_1721...) MANAGERS와 매칭된다.
+function isManagerName(keyOrName){
+  return MANAGERS.includes(keyBase(keyOrName));
+}
+// 👥 이 사람이 관리자(Admin)인가 — 계정 삭제 권한 판정 등에 쓴다.
+//    ① 이름이 관리자 목록에 있거나 ② 계정 자체가 Admin 플래그를 가지면 관리자.
 function isAdminUser(u){
   if(!u) return false;
-  if(u.key && MANAGERS.includes(String(u.key).toLowerCase())) return true;
+  if(isManagerName(u.key) || isManagerName(u.vorname)) return true;
   return u.isAdmin===true || u.role==="Admin" || u.role==="Management";
 }
 
@@ -737,7 +744,11 @@ function lockMaster(){
 //   그래서 잠금과 별개로 '지금 로그인한 사람이 오너(Yeaji)인가'를 함께 본다.
 const OWNER_KEY = "yeaji";
 function isOwnerKey(userKey){
-  return sameName(String(userKey||""), OWNER_KEY);
+  // 계정 키는 생성 시 "yeaji_1721834..." 처럼 타임스탬프가 붙는다.
+  //   "_" 앞의 baseKey만 떼어 비교해, 새로 만든 Yeaji 계정도 오너로 인식한다.
+  //   (Admin 생성은 ADMIN_NAMES로, 이름 중복은 별도로 막혀 있어 실질적으로 Yeaji 본인만 해당)
+  const base = String(userKey||"").split("_")[0];
+  return sameName(base, OWNER_KEY);
 }
 // 마스터 해제 + 오너 로그인 둘 다 참일 때만 위험 기능을 연다.
 function useOwnerMaster(userKey){
@@ -1454,7 +1465,7 @@ function SchichttauschModal({ userName, myShifts, users, onClose, preselectedShi
     };
   }, []);
 
-  const empList = (Array.isArray(users)?users:[]).filter(u => !MANAGERS.includes(u.key) && u.vorname !== userName);
+  const empList = (Array.isArray(users)?users:[]).filter(u => !isManagerName(u.key) && u.vorname !== userName);
   const targetShifts = targetUser ? (schedule[targetUser.vorname] || []) : [];
 
   function onDragStart(e) {
@@ -3087,7 +3098,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   const safeUsers=Array.isArray(users)?users:[];
   const isAdminName=regV.trim()!==""&&ADMIN_NAMES.some(n=>regV.trim().toLowerCase().includes(n));
   // 역할이 Admin/Management이거나 isAdmin이면 무조건 MANAGEMENT 그룹으로 분류 (하이브리드 관리자 포함)
-  const isMgmtAcc = u => MANAGERS.includes(u.key) || u.isAdmin===true || u.role==="Admin" || u.role==="Management";
+  const isMgmtAcc = u => isManagerName(u.key) || u.isAdmin===true || u.role==="Admin" || u.role==="Management";
   const empList=[...safeUsers.filter(u=>!isMgmtAcc(u))].sort(byName);
   const mgrList=[...safeUsers.filter(u=>isMgmtAcc(u))].sort(byName);
 
@@ -3159,7 +3170,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   );
 
   if(page==="pin"&&selUser){
-    const isMgr=MANAGERS.includes(selUser.key);
+    const isMgr=isManagerName(selUser.key);
     const dots=Array.from({length:4}).map((_,i)=>i<pin.length);
     return(
       <div style={{background:C.bg,minHeight:"100vh"}}>
@@ -3290,7 +3301,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   );
 
   const UserCard=({u})=>{
-    const isMgr=MANAGERS.includes(u.key);
+    const isMgr=isManagerName(u.key);
     //  :  + vorname  
     const displayLabel = (u.emoji ? u.emoji+" " : "") + u.vorname;
     return(
@@ -3977,8 +3988,8 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         {isAdmin && (()=>{
           const registered = new Set((Array.isArray(users)?users:[]).map(u=>(u.vorname||"").toLowerCase()));
           const tempNames = Object.keys(schedForMatch||{})
-            .filter(n=>n && !registered.has(n.toLowerCase()) && !MANAGERS.includes(n.toLowerCase()));
-          const realEmps = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort(byName);
+            .filter(n=>n && !registered.has(n.toLowerCase()) && !isManagerName(n.toLowerCase()));
+          const realEmps = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key)).sort(byName);
           return(
             <div style={{...S.card,marginBottom:12,border:`1px solid ${C.mint}`}}>
               <div style={{fontSize:12,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"🔗 Temp-Konto zuweisen"}</div>
@@ -5105,7 +5116,7 @@ function StatistikTab({records,users,schedule}){
   // 근무 기록이 있는 계정은 관리자(하이브리드 포함)여도 정산 목록에 포함
   const _workerNames = new Set((Array.isArray(records)?records:[]).map(r=>r.user));
   const empList=(Array.isArray(users)?users:[])
-    .filter(u=>!MANAGERS.includes(u.key) || _workerNames.has(u.vorname))
+    .filter(u=>!isManagerName(u.key) || _workerNames.has(u.vorname))
     .sort(byName);
   const monthRecs=records.filter(r=>r.date&&r.date.startsWith(selMonth)&&r.aus&&!STAT_EXCLUDED_MONTHS.has(r.date.slice(0,7)));
 
@@ -5570,7 +5581,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
   //   · 직원(Staff) 대상  → 모든 관리자가 삭제 가능 (마스터 불필요, 확인 팝업 1회)
   //   · 관리자(Admin) 대상 → 오너(Yeaji)만 삭제 가능
   const iAmOwner = isOwnerKey(userKey);
-  const iAmAdmin = MANAGERS.includes(String(userKey||"").toLowerCase());
+  const iAmAdmin = isManagerName(userKey);
   // 이 대상(emp)을 지금 로그인한 내가 지울 수 있는가
   const canDelete = (emp) => {
     if(!emp || emp.key===userKey) return false;      // 나 자신은 못 지움
@@ -5595,7 +5606,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
           filiale:(s.filiale||s.f||""), time:(s.time||s.t||"") }));
     })
     // 관리자 계정은 로스터에서 제외 (임시 직원은 emp=null 이므로 유지됨)
-    .filter(x => !(x.emp && MANAGERS.includes(x.emp.key)));
+    .filter(x => !(x.emp && isManagerName(x.emp.key)));
 
   const todayEmps = todayRoster;      // 배지 카운트용 (임시 직원 포함)
   const todayShiftEmps = todayRoster; // 그룹 렌더용 (임시 직원 포함)
@@ -6716,7 +6727,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                   <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"2 · MITARBEITER/IN"}</div>
                   <select value={addEmp} onChange={e=>setAddEmp(e.target.value)} style={{...S.input,width:"100%",fontSize:13,padding:"8px 10px",boxSizing:"border-box"}}>
                     <option value="">{"— auswählen —"}</option>
-                    {(Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key)).sort(byName).map(u=>(
+                    {(Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key)).sort(byName).map(u=>(
                       <option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>
                     ))}
                     <option disabled>{"──────────"}</option>
@@ -6799,7 +6810,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
     return d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
   })();
   const [selMonth, setSelMonth] = useState(currentMonth);
-  const empList = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key))
+  const empList = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key))
     .sort(byName);
 
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
@@ -7060,7 +7071,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 //  DIENSTPLAN UPLOAD + AI ANALYSE 
 function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
-  const empOptions = (Array.isArray(users)?users:[]).filter(u=>!MANAGERS.includes(u.key) && u.vorname!==adminName).sort(byName);
+  const empOptions = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key) && u.vorname!==adminName).sort(byName);
   // ⏰ 추천 시간: VON/BIS 독립 배열 (전역 상수 공유)
   const QUICK_VON = QUICK_VON_TIMES, QUICK_BIS = QUICK_BIS_TIMES;
   const DRAFT_KEY = "teeamo_schicht_cart_v1";
@@ -7168,7 +7179,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   // 선택 날짜에 이미 저장된 근무 (실시간)
   const existingForSel = [];
   Object.entries(rootSched||{}).forEach(([name,sh])=>{
-    if(MANAGERS.includes((name||"").toLowerCase())) return;
+    if(isManagerName((name||"").toLowerCase())) return;
     norm(sh).forEach(s=>{
       if(!s) return;
       const dd=s.date||s.d; if(dd!==selDate) return;
@@ -7436,7 +7447,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       window._fbGet(window._fbRef(window._fbDb,"schedule")).then(snap=>{
         const sched=snap.val()||{};
         for(const [name, shifts] of Object.entries(sched)){
-          if(MANAGERS.includes(name.toLowerCase())) continue;
+          if(isManagerName(name.toLowerCase())) continue;
           const todayShifts=(Array.isArray(shifts)?shifts:Object.values(shifts)).filter(s=>(s.d||s.date)===todayStr);
           for(const sh of todayShifts){
             const t=sh.t||sh.time;
@@ -7506,7 +7517,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   // 승인 대기 중인 Schichtbörse 겹침 신청들
   const boerseAntraege = (Array.isArray(antraege)?antraege:[])
     .filter(a=>a && a.status==="offen" && a.typ==="boerse_overlap");
-  const empList=safeUsers.filter(u=>!MANAGERS.includes(u.key)).sort(byName);
+  const empList=safeUsers.filter(u=>!isManagerName(u.key)).sort(byName);
   const todayRecs=records.filter(r=>r.date===today());
   // 🔒 filiale를 주면 해당 지점 근무만 보고 상태를 판정한다.
   //    (오전 ONIGIRI 퇴근이 오후 TEEnJOY 카드까지 Feierabend로 만들던 버그 방지)
@@ -7545,7 +7556,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   //     (Alarm  )
   // Schichtbörse 자동 승인 알림은 확인용으로만 표시 (별도 처리 불필요)
   const boerseMatchNotifs = Object.entries(notifications||{})
-    .filter(([,n])=>n.type==="schichtboerse_match"&&!n.gelesen&&MANAGERS.includes(n.zustaendig))
+    .filter(([,n])=>n.type==="schichtboerse_match"&&!n.gelesen&&isManagerName(n.zustaendig))
     .sort(([,a],[,b])=>b.ts-a.ts);
   // Schichtbörse 탭 진입 시 매칭 알림을 읽음 처리 → 하단 탭바 배지 즉시 0
   useEffect(()=>{
@@ -7573,7 +7584,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
   // Anträge 배지 = 미읽은 Nachtragen 로그 + Schichtbörse 매칭 로그
   const antraegeUnread = Object.entries(notifications||{}).filter(([,n])=>
-    (n.type==="nachtrag_log"||n.type==="schichtboerse_match") && !n.gelesen && MANAGERS.includes(n.zustaendig));
+    (n.type==="nachtrag_log"||n.type==="schichtboerse_match") && !n.gelesen && isManagerName(n.zustaendig));
   const alarmCount = antraegeUnread.length;
   // Anträge 탭 진입 즉시 관련 로그를 읽음 처리 → 배지 0 (로그 자체는 계속 표시됨)
   useEffect(()=>{
@@ -8286,7 +8297,7 @@ function App(){
 
   function handleLogin(key){
     const u=(Array.isArray(users)?users:[]).find(x=>x.key===key);
-    const isAdmin=MANAGERS.includes(key)||(u&&u.isAdmin);
+    const isAdmin=isManagerName(key)||(u&&u.isAdmin);
     // 🏬 진입할 지점 결정: 소속 지점이 접근 가능하면 그대로, 아니면 허용된 첫 지점
     const allowed = accessibleBranchIds(u);
     const branchId = allowed.indexOf(branchIdOf(u))>=0 ? branchIdOf(u) : allowed[0];
@@ -8315,7 +8326,7 @@ function App(){
     if(!canAccessBranch(u, branchId)){ clearSession(); autoLoginDone.current = true; return; }
     autoLoginDone.current = true;
     setActiveBranchId(branchId);
-    const isAdmin = MANAGERS.includes(u.key) || u.isAdmin;
+    const isAdmin = isManagerName(u.key) || u.isAdmin;
     setUserKey(u.key); setStaffView(false); setScreen(isAdmin?"manager":"mitarbeiter");
   },[usersReady, users]);
 
