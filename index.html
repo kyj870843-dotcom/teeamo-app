@@ -450,29 +450,10 @@ const NACHTRAG_ROUTING = {
   "TEEAMO Arkaden":"yeaji","TEEAMO Aegidiimarkt":"yeaji","TEEnJOY":"teddy",
 };
 
-const INIT_USERS = [
-  {key:"anna",    vorname:"Anna",    nachname:"",infektionsschutz:null,emoji:"",kuerzel:"An",role:"Staff",pin:"1001",contractHours:0},
-  {key:"dayoung", vorname:"Dayoung", nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Da",role:"Staff",pin:"1002",contractHours:0},
-  {key:"eunjin",  vorname:"Eunjin",  nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Eu",role:"Staff",pin:"1003",contractHours:0},
-  {key:"gayeon",  vorname:"Gayeon",  nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Ga",role:"Staff",pin:"1004",contractHours:0},
-  {key:"jiwoo",   vorname:"Jiwoo",   nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Ji",role:"Staff",pin:"1005",contractHours:0},
-  {key:"jiye",    vorname:"Jiye",    nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Ji",role:"Staff",pin:"1006",contractHours:0},
-  {key:"mengjun", vorname:"Mengjun", nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Me",role:"Staff",pin:"1007",contractHours:0},
-  {key:"saemee",  vorname:"Saemee",  nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Sa",role:"Staff",pin:"1008",contractHours:0},
-  {key:"sangeun", vorname:"Sangeun", nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Sa",role:"Staff",pin:"1009",contractHours:0},
-  {key:"semi",    vorname:"Semi",    nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Se",role:"Staff",pin:"1010",contractHours:0},
-  {key:"shakira", vorname:"Shakira", nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Sh",role:"Staff",pin:"1011",contractHours:0},
-  {key:"siyi",    vorname:"Siyi",    nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Si",role:"Staff",pin:"1012",contractHours:0},
-  {key:"uuree",   vorname:"Uuree",   nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Uu",role:"Staff",pin:"1013",contractHours:0},
-  {key:"yaya",    vorname:"Yaya",    nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Ya",role:"Staff",pin:"1014",contractHours:0},
-  {key:"yeonjoo", vorname:"Yeonjoo", nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Ye",role:"Staff",pin:"1016",contractHours:0},
-  {key:"yewon",   vorname:"Yewon",   nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Ye",role:"Staff",pin:"1017",contractHours:0},
-  {key:"yujin",   vorname:"Yujin",   nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Yu",role:"Staff",pin:"1018",contractHours:0},
-  {key:"tingting",vorname:"Tingting",nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Ti",role:"Admin",       pin:"9001",contractHours:0},
-  {key:"teddy",   vorname:"Teddy",   nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Te",role:"Admin",      pin:"9002",contractHours:0},
-  {key:"yeaji",   vorname:"Yeaji",   nachname:"",infektionsschutz:null,emoji:"",kuerzel:"Yj",role:"Admin",    pin:"9003",contractHours:0},
-];
-// ⚠️ 6월(Juni 2026) 더미 데이터 완전 제거됨 — fallback도 빈 배열.
+// 🧹 연습용 씨앗 계정 제거 — 이제 모든 계정(직원·관리자)은 앱의 등록 화면에서 만든다.
+//    이 배열이 비어 있으므로, 데이터를 초기화해도 되살아날 계정이 없다.
+//    관리자로 만들 수 있는 이름은 등록 화면의 ADMIN_NAMES(Yeaji·Teddy·Tingting·Huy)로 통제된다.
+const INIT_USERS = [];
 //    실제 Firebase records가 비어있으면 통계도 비어있게 되어, 유효한 달만 노출된다.
 const INIT_RECORDS = [];
 const INIT_ANTRAEGE = [];
