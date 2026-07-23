@@ -7946,6 +7946,8 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           setDeleteConfirm={setDeleteConfirm}
           uTab={uTab}
           setUTab={setUTab}
+          userKey={userKey}
+          safeUsers={safeUsers}
           onConfirmPruefen={confirmPruefen}
         />
       )}
@@ -8163,8 +8165,12 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
                 <button onClick={()=>setDeleteConfirm(null)} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
                 <button onClick={()=>{
                   const toDel=safeUsers.find(u=>u.key===deleteConfirm);
-                  // 🔒 실행 직전 권한 재검증 — 관리자 대상은 오너만 삭제 가능
-                  if(!canDelete(toDel)){ setDeleteConfirm(null); return; }
+                  // 🔒 실행 직전 권한 재검증 (전역 헬퍼로 직접 판정 — 이 스코프에 canDelete 없음)
+                  //    관리자 대상은 오너(Yeaji)만, 직원 대상은 모든 관리자, 나 자신은 불가.
+                  const meAdmin=isManagerName(userKey), meOwner=isOwnerKey(userKey);
+                  const allow = toDel && toDel.key!==userKey && meAdmin
+                    && (isAdminUser(toDel) ? meOwner : true);
+                  if(!allow){ setDeleteConfirm(null); return; }
                   deleteUserData(deleteConfirm, toDel?.vorname);
                   setUsers(prev=>(Array.isArray(prev)?prev:[]).filter(u=>u.key!==deleteConfirm));
                   setDeleteConfirm(null);setDetailKey(null);}}
