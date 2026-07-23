@@ -426,7 +426,14 @@ function monthLabel(ym){
   catch{ return ym; }
 }
 const TAGE_DE    = ["So","Mo","Di","Mi","Do","Fr","Sa"];
-const MANAGERS   = ["tingting","teddy","yeaji"];
+const MANAGERS   = ["tingting","teddy","yeaji","huy"];
+// 👥 이 사람이 관리자(Admin)인가 — 계정 삭제 권한 판정에 쓴다.
+//    로그인 키(MANAGERS) 또는 계정 role/isAdmin 플래그로 판정.
+function isAdminUser(u){
+  if(!u) return false;
+  if(u.key && MANAGERS.includes(String(u.key).toLowerCase())) return true;
+  return u.isAdmin===true || u.role==="Admin" || u.role==="Management";
+}
 
 // 이모지 제거 후 알파벳 정렬
 function sortName(str) {
@@ -3467,8 +3474,11 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
 //   (3초 안에 연타해야 하며, 그 외에는 아무 반응도 없어 눈치채기 어렵다)
 //   해제 상태에서는 작은 자물쇠 표시가 뜨고, 눌러서 다시 잠글 수 있다.
 // ═══════════════════════════════════════════════════════════════
-function MasterGate(){
+function MasterGate({ userKey }){
   const unlocked = useMasterUnlocked();
+  // 👑 마스터 잠금은 '기기' 단위라, 오너(Yeaji)가 연 뒤 다른 관리자로 로그인해도
+  //    잠금 상태가 남는다. 그래서 잠금/해제 배지와 트리거는 오너에게만 노출한다.
+  const owner = isOwnerKey(userKey);
   const [taps, setTaps]   = useState(0);
   const [ask, setAsk]     = useState(false);
   const [pw, setPw]       = useState("");
@@ -3487,6 +3497,8 @@ function MasterGate(){
   //   · 잠긴 상태  → 암호 입력창 열기
   //   · 해제된 상태 → 즉시 다시 잠그기 (암호 불필요)
   function onTap(){
+    // 👑 오너(Yeaji)가 아니면 히든 트리거 자체를 무효화한다.
+    if(!owner) return;
     clearTimeout(timer.current);
     const n = taps + 1;
     if(n >= 3){
@@ -3563,14 +3575,14 @@ function MasterGate(){
             userSelect:"none",WebkitUserSelect:"none",padding:"4px 8px"}}>
           {"teeamo · v1.0"}
         </div>
-        {unlocked&&!locked&&(
+        {owner&&unlocked&&!locked&&(
           <button onClick={lockMaster}
             style={{fontSize:8,fontWeight:800,padding:"3px 8px",borderRadius:99,cursor:"pointer",
               border:`1px solid ${C.yellow}`,background:C.yellowLight,color:"#92400e"}}>
             {"🔓 Master · 3번 탭하면 잠김"}
           </button>
         )}
-        {locked&&(
+        {owner&&locked&&(
           <span style={{fontSize:8,fontWeight:800,padding:"3px 8px",borderRadius:99,
             border:`1px solid ${C.border}`,background:"#f1f1f1",color:C.muted}}>
             {"🔒 잠금 완료"}
@@ -3711,7 +3723,9 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
     accounts: {
       lbl:"직원 계정 및 비밀번호",
       sub:"users · PIN (Anmeldedaten)",
-      paths:()=>["users"],
+      // ⚠️ PIN은 Firebase "pins" 노드에도 저장된다. users만 지우면 임시 PIN이 살아남아
+      //    삭제한 계정이 되살아난 것처럼 보인다 → pins 노드까지 함께 제거한다.
+      paths:()=>["users","pins"],
     },
     records: {
       lbl:"실제 출퇴근 기록",
@@ -3740,8 +3754,8 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
     try{
       // 선택된 그룹의 경로만 수집 (중복 제거)
       const paths=[...new Set(chosen.flatMap(k=>RESET_GROUPS[k].paths()))];
-      // 🛡️ 방어: accounts 미선택 시 users 경로가 섞여 들어가는 것을 원천 차단
-      const safePaths = resetSel.accounts ? paths : paths.filter(pth=>pth!=="users");
+      // 🛡️ 방어: accounts 미선택 시 계정 관련 경로(users·pins)가 섞여 들어가는 것을 원천 차단
+      const safePaths = resetSel.accounts ? paths : paths.filter(pth=>pth!=="users"&&pth!=="pins");
       await Promise.all(safePaths.map(pth=>
         window._fbRemove(window._fbRef(window._fbDb,pth)).catch(()=>{})));
 
@@ -4130,7 +4144,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             {"ℹ️ Aktive Schichten bleiben bis zum Ausstempeln gespeichert."}
           </div>
           {/* 🕵️ 히든 마스터 게이트 — 겉보기엔 버전 표기, 3번 연타 시 암호창 */}
-          <MasterGate/>
+          <MasterGate userKey={userKey}/>
         </div>
 
       </div>
@@ -5571,8 +5585,17 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
 }
 
 function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, setDetailKey, setDeleteConfirm, uTab, setUTab, userKey, safeUsers, onConfirmPruefen }) {
-  // 🔐 직원 계정 삭제는 '마스터 해제 + 오너(Yeaji) 로그인'일 때만 노출
-  const masterOn = useOwnerMaster(userKey);
+  // 🗑 개별 계정 삭제 권한
+  //   · 직원(Staff) 대상  → 모든 관리자가 삭제 가능 (마스터 불필요, 확인 팝업 1회)
+  //   · 관리자(Admin) 대상 → 오너(Yeaji)만 삭제 가능
+  const iAmOwner = isOwnerKey(userKey);
+  const iAmAdmin = MANAGERS.includes(String(userKey||"").toLowerCase());
+  // 이 대상(emp)을 지금 로그인한 내가 지울 수 있는가
+  const canDelete = (emp) => {
+    if(!emp || emp.key===userKey) return false;      // 나 자신은 못 지움
+    if(!iAmAdmin) return false;                       // 관리자만 삭제 가능
+    return isAdminUser(emp) ? iAmOwner : true;        // 관리자 대상은 오너만
+  };
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
   const todayStr = today();
   const todayRecs = (Array.isArray(records)?records:[]).filter(r=>r.date===todayStr);
@@ -5632,8 +5655,9 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                 <span style={{fontSize:14,color:C.muted}}>{">"}</span>
               </button>
               {/* 🔐 마스터 전용: 인증 전에는 버튼이 DOM에 존재하지 않는다 */}
-              {masterOn&&(
+              {canDelete(emp)&&(
                 <button onClick={()=>setDeleteConfirm(emp.key)}
+                  title={isAdminUser(emp)?"Admin-Konto löschen":"Konto löschen"}
                   style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:C.redLight,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:4}}>
                   <span style={{fontSize:13,color:C.red,fontWeight:700}}>del</span>
                 </button>
@@ -8125,11 +8149,18 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
       {deleteConfirm&&(()=>{
         const empToDel=safeUsers.find(u=>u.key===deleteConfirm);
+        const delIsAdmin=isAdminUser(empToDel);
         return(
           <div style={{position:"fixed",inset:0,background:"rgba(20,20,20,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:"24px"}}>
             <div style={{background:C.card,borderRadius:18,padding:"24px 22px",width:"100%",maxWidth:340,boxShadow:"0 8px 32px rgba(0,0,0,.18)"}}>
               <div style={{width:48,height:48,borderRadius:"50%",background:C.redLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 14px"}}>{"🗑"}</div>
-              <div style={{fontSize:16,fontWeight:800,color:C.text,textAlign:"center",marginBottom:6}}>{"Konto löschen?"}</div>
+              <div style={{fontSize:16,fontWeight:800,color:C.text,textAlign:"center",marginBottom:6}}>{delIsAdmin?"Admin-Konto löschen?":"Konto löschen?"}</div>
+              {delIsAdmin&&(
+                <div style={{fontSize:11,fontWeight:800,color:C.red,textAlign:"center",marginBottom:8,
+                  padding:"6px 10px",borderRadius:8,background:C.redLight,border:`1px solid ${C.red}`}}>
+                  {"⚠️ Dies ist ein Administrator-Konto!"}
+                </div>
+              )}
               <div style={{fontSize:12,color:C.muted,textAlign:"center",marginBottom:20}}>
                 Das Konto von <strong style={{color:C.text}}>{empToDel?.vorname}</strong>{" wird dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden."}
               </div>
@@ -8137,6 +8168,8 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
                 <button onClick={()=>setDeleteConfirm(null)} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
                 <button onClick={()=>{
                   const toDel=safeUsers.find(u=>u.key===deleteConfirm);
+                  // 🔒 실행 직전 권한 재검증 — 관리자 대상은 오너만 삭제 가능
+                  if(!canDelete(toDel)){ setDeleteConfirm(null); return; }
                   deleteUserData(deleteConfirm, toDel?.vorname);
                   setUsers(prev=>(Array.isArray(prev)?prev:[]).filter(u=>u.key!==deleteConfirm));
                   setDeleteConfirm(null);setDetailKey(null);}}
