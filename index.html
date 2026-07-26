@@ -969,6 +969,30 @@ function today() {
   return new Date().toLocaleDateString("sv-SE", {timeZone:"Europe/Berlin"});
 }
 
+// 🔒 Nachtragen 마감: 지난달 근무는 '다음 달 며칠'까지만 수정 가능하다.
+//   급여 마감에 여유를 주기 위해 매월 초 GRACE_DAYS일간은 전달 보정을 허용한다.
+//   예) GRACE_DAYS=3 이면, 8월 3일까지는 7월 근무 Nachtragen 가능, 8월 4일부터 잠금.
+const NACHTRAG_GRACE_DAYS = 3;
+function nachtragLocked(datum){
+  const d = String(datum||"").slice(0,10);
+  if(!d) return false;
+  const cur = today();                       // "YYYY-MM-DD" (Berlin)
+  const curMonth = cur.slice(0,7);
+  const dMonth = d.slice(0,7);
+  if(dMonth >= curMonth) return false;        // 이번 달(이후) 근무는 항상 허용
+  // 지난달 이전 근무 → 이번 달 유예일 이내에만 허용
+  const dayOfMonth = parseInt(cur.slice(8,10), 10);
+  // 바로 전달까지만 유예 대상. 그보다 더 과거 달은 유예와 무관하게 잠금.
+  const prevMonth = (()=>{
+    const [y,m] = curMonth.split("-").map(Number);
+    const pm = m===1 ? 12 : m-1;
+    const py = m===1 ? y-1 : y;
+    return String(py)+"-"+String(pm).padStart(2,"0");
+  })();
+  if(dMonth === prevMonth && dayOfMonth <= NACHTRAG_GRACE_DAYS) return false;
+  return true;                                // 그 외 지난달 근무는 잠금
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  📊 3차원 교차 통계: 직원 → 지점(Filiale) → 근무타입(Arbeitstyp)
 //   · records의 typ: "normal"(Regulär) | "einspringen" | "nachtrag"
@@ -1968,10 +1992,30 @@ function freigebenSchicht({ userName, date, filiale, time, grund, users }) {
 // Nachtragen(사후 등록): 자동승인 record 저장 + 관리자 Anträge(Nachtragen) 알림 로그
 function nachtragenSchicht({ userName, date, filiale, ein, aus, setRecords }) {
   const rec = { id:Date.now(), user:userName, date, filiale:filiale||"", ein, aus, note:"", typ:"nachtrag" };
+  // 🔁 같은 근무를 여러 번 고쳐도 최종 1개만 남긴다 (중복 합산 방지).
+  //    직원·날짜·지점이 같고 '시간이 겹치는' 기존 기록(실시간 출퇴근 + 이전 nachtrag)을
+  //    지우고 이번 것만 남긴다. 시간이 안 겹치는 별개 근무(오전/오후)는 보존한다.
+  const newRange = (ein && aus) ? (ein + "-" + aus) : "";
+  const sameSession = (r)=>{
+    if(!(r && sameName(r.user,userName) && r.date===date)) return false;
+    if(filiale && r.filiale && !sameFiliale(r.filiale, filiale)) return false;
+    const rRange = (r.ein && r.aus) ? (r.ein + "-" + r.aus) : "";
+    if(!newRange || !rRange) return true;
+    return timesOverlap(rRange, newRange);
+  };
   if (typeof setRecords === "function") {
-    setRecords(prev => [...(Array.isArray(prev)?prev:[]), rec]);  // 로컬 + Firebase 전체노드 동기화
-  } else if (window._fbDb && window._fbRef && window._fbPush) {
-    window._fbPush(window._fbRef(window._fbDb,"records"), rec).catch(()=>{});
+    setRecords(prev => [
+      ...((Array.isArray(prev)?prev:[]).filter(r=>!sameSession(r))),
+      rec
+    ]);  // 로컬 + Firebase 전체노드 동기화
+  } else if (window._fbDb && window._fbRef && window._fbGet && window._fbRemove && window._fbPush) {
+    window._fbGet(window._fbRef(window._fbDb,"records")).then(snap=>{
+      const data=snap.val()||{};
+      Object.entries(data).forEach(([k,v])=>{
+        if(sameSession(v)) window._fbRemove(window._fbRef(window._fbDb,"records/"+k)).catch(()=>{});
+      });
+      window._fbPush(window._fbRef(window._fbDb,"records"), rec).catch(()=>{});
+    }).catch(()=>{});
   }
   // 관리자 Anträge(Nachtragen) 알림 로그
   if (window._fbDb && window._fbRef && window._fbSet) {
@@ -1993,10 +2037,19 @@ function nachtragenSchicht({ userName, date, filiale, ein, aus, setRecords }) {
 //  이전 Nachtragen 기록을 모두 무효화(삭제)하고, 승인된 Nachtragen 시간만
 //  최종 근무로 남긴다. → 통계/누적 시간에 하루 2번 잡히는 버그 제거.
 function overrideWithNachtrag({ a, setRecords }){
-  // 🔒 같은 [직원·날짜·지점] 세션만 대체한다.
-  //    (같은 날 다른 지점 근무 기록을 지워 정산이 누락되는 것을 방지)
-  const sameSession = (r)=> r && sameName(r.user,a.user) && r.date===a.date &&
-    (!a.filiale || !r.filiale || sameFiliale(r.filiale, a.filiale));
+  // 🔁 같은 근무를 여러 번 고쳐도 '최종 1개'만 남긴다 (중복 합산 방지).
+  //   같은 세션 판정: 직원·날짜·지점이 같고, '시간대가 겹치는' 기록만 대체한다.
+  //   → 16:00-19:00 을 16:00-19:15 로 고치면 겹치므로 덮어쓰고,
+  //     오전/오후처럼 시간이 안 겹치는 별개 근무는 그대로 보존한다.
+  const newRange = (a.ein && a.aus) ? (a.ein + "-" + a.aus) : "";
+  const sameSession = (r)=>{
+    if(!(r && sameName(r.user,a.user) && r.date===a.date)) return false;
+    if(a.filiale && r.filiale && !sameFiliale(r.filiale, a.filiale)) return false;
+    const rRange = (r.ein && r.aus) ? (r.ein + "-" + r.aus) : "";
+    // 어느 한쪽이라도 시간이 없으면(구형/자동기록) 같은 날·지점 = 같은 세션으로 본다
+    if(!newRange || !rRange) return true;
+    return timesOverlap(rRange, newRange);
+  };
   const newRec={ id:Date.now(), user:a.user, date:a.date, filiale:a.filiale,
     ein:a.ein, aus:a.aus, note:a.grund||"Nachtrag genehmigt", typ:"nachtrag",
     isAutoCheckedOut:false, prüfen:false, frühGrund:"" };
@@ -3357,7 +3410,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
 }
 
 //  CLOCK MODAL 
-function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onClose,onEin,onAus}){
+function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilialen,CLOCK_KEY,onClose,onEin,onAus}){
   const isEin = modal==="ein";
   const nowStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
   const [manualMode, setManualMode] = useState(false);
@@ -3369,6 +3422,18 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,CLOCK_KEY,onC
   })();
 
   function doEin(){
+    // 📍 근무표에 오늘 배정된 지점이 있는데, 다른 지점을 골랐다면 한 번 더 확인.
+    //    (실수로 ONIGIRI 등 엉뚱한 지점에 도장 찍는 것을 방지)
+    const assigned = assignedFilialen instanceof Set ? assignedFilialen : new Set();
+    if(assigned.size>0 && selFiliale && !assigned.has(selFiliale)){
+      const geplant = Array.from(assigned).join(", ");
+      const ok = window.confirm(
+        "⚠️ Achtung — Filiale prüfen!\n\n"+
+        "Du stempelst bei \""+selFiliale+"\" ein,\n"+
+        "aber dein heutiger Dienstplan ist: "+geplant+".\n\n"+
+        "Wirklich bei \""+selFiliale+"\" einstempeln?");
+      if(!ok) return;
+    }
     const t = manualMode ? manualTime : nowStr;
     const [h,m] = t.split(":").map(Number);
     const d = new Date(); d.setHours(h,m,0,0);
@@ -3695,6 +3760,9 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
   const [resetSel, setResetSel] = useState({ accounts:false, records:false, schedule:false });
   // 임시 계정 매칭 (Zuweisen)
   const [schedForMatch] = useFirebase("schedule", {});
+  // 🔗 연결 이력 — 연결한 임시 이름을 목록에 계속 남겨, 나중에(이모지 추가 등으로
+  //    데이터가 끊겼을 때) 관리자가 다시 연결할 수 있게 한다.
+  const [tempLinks, setTempLinks] = useFirebase("tempLinks", {});
   const [zuweisenSel, setZuweisenSel] = useState({});
   const [zuweisenMsg, setZuweisenMsg] = useState("");
 
@@ -3717,7 +3785,8 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
       sub:"users · PIN (Anmeldedaten)",
       // ⚠️ PIN은 Firebase "pins" 노드에도 저장된다. users만 지우면 임시 PIN이 살아남아
       //    삭제한 계정이 되살아난 것처럼 보인다 → pins 노드까지 함께 제거한다.
-      paths:()=>["users","pins"],
+      //    tempLinks(임시 계정 연결 이력)도 계정과 함께 정리한다.
+      paths:()=>["users","pins","tempLinks"],
     },
     records: {
       lbl:"실제 출퇴근 기록",
@@ -3987,21 +4056,91 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         {/* 🔗 임시 계정 매칭 (Zuweisen) — 관리자 전용 */}
         {isAdmin && (()=>{
           const registered = new Set((Array.isArray(users)?users:[]).map(u=>(u.vorname||"").toLowerCase()));
-          const tempNames = Object.keys(schedForMatch||{})
-            .filter(n=>n && !registered.has(n.toLowerCase()) && !isManagerName(n.toLowerCase()));
+          // 근무표에 있으나 어떤 계정에도 연결되지 않는 이름 = 미연결(고아) 임시 이름
+          //   · 계정 vorname과 정확히 일치하지 않고
+          //   · uidOf(별칭 포함)로도 계정을 못 찾는 이름
+          //   → 개명으로 끊긴 옛 이름도 여기에 잡혀 재연결 대상이 된다.
+          const openTempNames = Object.keys(schedForMatch||{})
+            .filter(n=> n && !isManagerName(n.toLowerCase())
+              && !registered.has(n.toLowerCase())
+              && !uidOf(users, n));
           const realEmps = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key)).sort(byName);
+          // 이미 연결한 이력 (연결 후에도 목록에 남겨 재연결 가능하게 함)
+          const linkedEntries = Object.entries(tempLinks||{})
+            .map(([k,v])=>({ temp:v?.temp||k, real:v?.real||"", realKey:v?.realKey||"", ts:v?.ts||0 }))
+            .filter(e=>e.temp)
+            .sort((a,b)=>b.ts-a.ts);
+          // 미연결 이름 중 이미 이력에 있는 것은 이력 쪽에서만 보여준다(중복 방지)
+          const linkedTempSet = new Set(linkedEntries.map(e=>e.temp.toLowerCase()));
+          const openOnly = openTempNames.filter(n=>!linkedTempSet.has(n.toLowerCase()));
+
+          async function doLink(tn){
+            const real=zuweisenSel[tn];
+            if(!real) return;
+            const target=safeList(users).find(u=>sameName(u.vorname,real));
+            await reassignTempName(tn, real, target?.key);
+            // 🏷 임시 이름을 별칭으로 등록 (이후 이름 변경돼도 옛 데이터 따라옴)
+            if(target){
+              setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>
+                u.key===target.key ? withAlias(u, tn) : u));
+            }
+            // 🔗 연결 이력 저장 — 목록에 계속 남겨 나중에 재연결 가능
+            const id = tn.toLowerCase().replace(/[^a-z0-9]/g,"_") || ("t_"+Date.now());
+            setTempLinks(prev=>({ ...(prev||{}),
+              [id]: { temp:tn, real, realKey:target?.key||"", ts:Date.now() } }));
+            setZuweisenMsg("✅ „"+tn+"“ → „"+real+"“ zugewiesen.");
+            setZuweisenSel(prev=>{ const n={...prev}; delete n[tn]; return n; });
+            setTimeout(()=>setZuweisenMsg(""),3000);
+          }
+
+          // ↻ 재연결 — 근무표 데이터는 첫 연결 때 이미 옮겨졌으므로 다시 옮기지 않는다.
+          //   '그 이름'을 선택한 계정의 별칭에 추가하면, uidOf가 별칭을 뒤져
+          //   그 이름으로 저장된 옛 근무·기록을 자동으로 그 계정에 연결하고,
+          //   근무표 리스트도 personLabel로 최신 이름으로 다시 표시된다.
+          //   (직원이 이모지를 붙여 이름이 바뀌어 데이터가 끊긴 경우의 복구용)
+          function doRelink(tempName){
+            const real=zuweisenSel[tempName];
+            if(!real) return;
+            const target=safeList(users).find(u=>sameName(u.vorname,real));
+            if(!target){ setZuweisenMsg("❌ Konto nicht gefunden."); setTimeout(()=>setZuweisenMsg(""),3000); return; }
+            // 🏷 엄격 기준으로 별칭 추가 — "Lisa"와 "Lisa 🍓"는 다른 이름이므로
+            //    느슨한 withAlias(이모지 무시)로는 안 들어간다. 정확 문자열로 넣는다.
+            const addAliasStrict=(u,nm)=>{
+              const v=String(nm||"").trim();
+              if(!v || sameNameStrict(v,u.vorname)) return u;
+              const l=aliasesOf(u);
+              if(l.some(a=>sameNameStrict(a,v))) return u;
+              return {...u, aliases:[...l, v]};
+            };
+            setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>{
+              if(u.key===target.key) return addAliasStrict(u, tempName);
+              // 다른 계정이 이 이름을 별칭으로 갖고 있으면 떼어낸다(중복 방지)
+              const al=aliasesOf(u);
+              return al.some(a=>sameNameStrict(a,tempName)) ? {...u, aliases:al.filter(a=>!sameNameStrict(a,tempName))} : u;
+            }));
+            setTempLinks(prev=>{ const n={...(prev||{})};
+              Object.keys(n).forEach(k=>{ if((n[k]?.temp||k).toLowerCase()===tempName.toLowerCase())
+                n[k]={...n[k], real, realKey:target.key, ts:Date.now()}; });
+              return n; });
+            setZuweisenMsg("↻ „"+tempName+"“ → „"+real+"“ neu verknüpft.");
+            setZuweisenSel(prev=>{ const n={...prev}; delete n[tempName]; return n; });
+            setTimeout(()=>setZuweisenMsg(""),3000);
+          }
+
           return(
             <div style={{...S.card,marginBottom:12,border:`1px solid ${C.mint}`}}>
               <div style={{fontSize:12,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"🔗 Temp-Konto zuweisen"}</div>
               <div style={{fontSize:10,color:C.muted,marginBottom:10,lineHeight:1.5}}>
-                {"Im Dienstplan angelegte Temp-Namen (ohne echtes Konto) einem registrierten Konto zuordnen. Alle Schichten & Stempelzeiten werden übertragen."}
+                {"Im Dienstplan angelegte Temp-Namen einem Konto zuordnen. Zugeordnete Namen bleiben unten sichtbar — falls später (z. B. durch Emoji-Änderung) Daten fehlen, einfach erneut zuordnen."}
               </div>
               {zuweisenMsg&&<div style={{fontSize:11,fontWeight:700,color:C.mintDark,marginBottom:8}}>{zuweisenMsg}</div>}
-              {tempNames.length===0 ? (
+
+              {/* ── 미연결 임시 이름 ── */}
+              {openOnly.length===0 && linkedEntries.length===0 ? (
                 <div style={{fontSize:11,color:C.muted,textAlign:"center",padding:"10px 0"}}>Keine offenen Temp-Namen.</div>
-              ) : tempNames.map(tn=>(
+              ) : openOnly.map(tn=>(
                 <div key={tn} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <div style={{flex:"0 0 auto",fontSize:12,fontWeight:800,color:C.text,minWidth:70,
+                  <div style={{flex:"0 0 auto",fontSize:12,fontWeight:800,minWidth:70,
                     background:C.yellowLight,color:"#92400e",padding:"6px 8px",borderRadius:8}}>{tn}</div>
                   <span style={{color:C.muted,flexShrink:0}}>{"→"}</span>
                   <select value={zuweisenSel[tn]||""} onChange={e=>setZuweisenSel(prev=>({...prev,[tn]:e.target.value}))}
@@ -4009,25 +4148,40 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
                     <option value="">{"— Konto —"}</option>
                     {realEmps.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
                   </select>
-                  <button onClick={async()=>{
-                    const real=zuweisenSel[tn];
-                    if(!real) return;
-                    const target=safeList(users).find(u=>sameName(u.vorname,real));
-                    await reassignTempName(tn, real, target?.key);
-                    // 🏷 임시 이름을 별칭으로 등록 → 이후 이 직원이 이름을 바꿔도
-                    //    옛 임시 이름으로 저장된 데이터가 계속 따라온다.
-                    if(target){
-                      setUsers(prev=>(Array.isArray(prev)?prev:[]).map(u=>
-                        u.key===target.key ? withAlias(u, tn) : u));
-                    }
-                    setZuweisenMsg("✅ „"+tn+"“ → „"+real+"“ zugewiesen.");
-                    setZuweisenSel(prev=>{ const n={...prev}; delete n[tn]; return n; });
-                    setTimeout(()=>setZuweisenMsg(""),3000);
-                  }} disabled={!zuweisenSel[tn]}
+                  <button onClick={()=>doLink(tn)} disabled={!zuweisenSel[tn]}
                     style={{flexShrink:0,padding:"7px 10px",borderRadius:8,border:"none",fontSize:11,fontWeight:800,cursor:zuweisenSel[tn]?"pointer":"not-allowed",
                       background:zuweisenSel[tn]?C.mintDark:C.border,color:"#fff"}}>{"Zuweisen"}</button>
                 </div>
               ))}
+
+              {/* ── 연결 이력 (재연결 가능) ── */}
+              {linkedEntries.length>0 && (
+                <div style={{marginTop:openOnly.length>0?12:0,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+                  <div style={{fontSize:9,fontWeight:800,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".04em"}}>
+                    {"✅ Zugeordnet (erneut zuordnen möglich)"}
+                  </div>
+                  {linkedEntries.map(e=>(
+                    <div key={e.temp} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                      <div style={{flex:"0 0 auto",fontSize:12,fontWeight:800,minWidth:70,
+                        background:C.mintLight,color:C.mintDark,padding:"6px 8px",borderRadius:8}}>{e.temp}</div>
+                      <span style={{color:C.muted,flexShrink:0}}>{"→"}</span>
+                      <select value={zuweisenSel[e.temp]??e.real} onChange={ev=>setZuweisenSel(prev=>({...prev,[e.temp]:ev.target.value}))}
+                        style={{...S.input,flex:1,minWidth:0,fontSize:12,padding:"7px 8px",boxSizing:"border-box"}}>
+                        {realEmps.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
+                      </select>
+                      <button onClick={()=>doRelink(e.temp)}
+                        title="Erneut zuordnen (Alias)"
+                        style={{flexShrink:0,padding:"7px 9px",borderRadius:8,border:"none",fontSize:11,fontWeight:800,cursor:"pointer",
+                          background:C.mintDark,color:"#fff"}}>{"↻"}</button>
+                      <button onClick={()=>setTempLinks(prev=>{ const n={...(prev||{})};
+                        Object.keys(n).forEach(k=>{ if((n[k]?.temp||k).toLowerCase()===e.temp.toLowerCase()) delete n[k]; });
+                        return n; })}
+                        title="Aus Liste entfernen"
+                        style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:14,cursor:"pointer"}}>{"×"}</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })()}
@@ -4208,6 +4362,24 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const [nMsg,setNMsg]=useState("");
   // 조기 퇴근(Vorzeitiges Ausstempeln) 관련
   const [scheduleData]=useFirebase("schedule",{});
+  // 📍 오늘 이 직원에게 근무표상 배정된 지점 목록 (출근 도장 실수 방지용).
+  //    출근 시 여기 없는 지점을 고르면 한 번 더 확인한다.
+  const myTodayFilialen = React.useMemo(()=>{
+    const set = new Set();
+    const meUid = uidOf(users, user?.vorname||userKey);
+    const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
+    Object.entries(scheduleData||{}).forEach(([nm,sh])=>{
+      norm(sh).forEach(s=>{
+        if(!s) return;
+        if((s.date||s.d) !== today()) return;
+        // 이 근무가 나(uid)이거나 내 이름과 매칭되면 배정 지점으로 인정
+        const sUid = s.uid || uidOf(users, nm) || "";
+        const mine = (meUid && sUid && sameName(sUid, meUid)) || sameName(nm, user?.vorname||userKey);
+        if(mine){ const f=s.filiale||s.f||""; if(f) set.add(f); }
+      });
+    });
+    return set;
+  }, [scheduleData, users, user, userKey]);
   const [fruehData,setFruehData]=useState(null);  // {inStr,outStr} — 사유 입력 대기중인 퇴근 데이터
   const [fruehGrund,setFruehGrund]=useState("");
 
@@ -4512,8 +4684,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     try{localStorage.removeItem(CLOCK_KEY);}catch{}
   }
   function submitNachtrag(){
-    // 🔒 방어: 과거 달 근무에 대한 Nachtragen 신청은 서버 저장 전에 차단
-    if(String(nDatum||"").slice(0,7) < today().slice(0,7)){
+    // 🔒 지난달 근무 Nachtragen은 유예 기간(다음 달 초 며칠) 이후 차단
+    if(nachtragLocked(nDatum)){
       setNMsg("Für abgeschlossene Monate ist kein Nachtragen möglich.");
       return;
     }
@@ -4974,6 +5146,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           clockFiliale={clockFiliale}
           clockInTime={clockInTime}
           grund={grund}
+          assignedFilialen={myTodayFilialen}
           CLOCK_KEY={CLOCK_KEY}
           onClose={()=>setModal(null)}
           onEin={(d)=>{
@@ -6499,6 +6672,8 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                         <button onClick={()=>setNachRow(null)} style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
                         <button onClick={()=>{
                           if(!nachRow.von||!nachRow.bis){ setActMsg("Bitte VON und BIS angeben."); return; }
+                          // 🔒 지난달 근무는 유예 기간 이후 수정 불가
+                          if(nachtragLocked(selDate)){ setActMsg("Für abgeschlossene Monate ist kein Nachtragen möglich."); return; }
                           nachtragenSchicht({userName:r.rawName, date:selDate, filiale:fil, ein:nachRow.von, aus:nachRow.bis, setRecords});
                           setNachRow(null); setActMsg("✅ Nachgetragen & genehmigt.");
                           setTimeout(()=>setActMsg(""),2500);
