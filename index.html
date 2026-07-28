@@ -2164,8 +2164,8 @@ async function ensureEinspringenShift(name, date, filiale, vonTime) {
     //    자동 대타는 '이 사람이 이 지점에서 일했다'는 표시라 지점당 하나면 충분하다.
     //    → 출근/퇴근 흐름에서 함수가 여러 번 불려도 중복 근무표가 안 생긴다.
     //    (관리자가 직접 짠 계획 근무는 autoCreated가 아니므로, 그것과 시간이 겹칠 때만 스킵)
-    const bis = isOnigiriFiliale(filiale) ? "" : SHOP_CLOSING_TIME;
-    const newRange = bis ? (vonTime + "-" + bis) : "";
+    const bisChk = isOnigiriFiliale(filiale) ? "" : SHOP_CLOSING_TIME;
+    const newRange = bisChk ? (vonTime + "-" + bisChk) : "";
     const exists = arr.some(s => {
       if(!s || (s.d||s.date) !== date) return false;
       if(!sameFiliale(s.f||s.filiale, filiale)) return false;
@@ -2177,11 +2177,12 @@ async function ensureEinspringenShift(name, date, filiale, vonTime) {
       return timesOverlap(tm, newRange);
     });
     if (exists) return false;
-    // ⛔ 출근하자마자 바로 퇴근해 vonTime이 마감시간 이후이면 0분/음수 근무표가 된다 → 만들지 않음.
-    if (bis) {
-      const vs = parseMinutes(vonTime), be = parseMinutes(bis);
-      if (vs != null && be != null && vs >= be) return false;   // 시작이 마감 이후 → 스킵
-    }
+    // ⏰ 종료 시각은 임시로 마감(20:00). 마감 이후 출근이면 시작을 그대로 종료로 둔다.
+    //    실제 퇴근 시각은 퇴근 때 syncAutoShiftEnd가 이 근무표에 채워 넣는다.
+    //    (그래서 여기선 0분이어도 일단 만들어야 퇴근 보정 대상이 생긴다)
+    const vs = parseMinutes(vonTime), close = parseMinutes(SHOP_CLOSING_TIME);
+    const bis = isOnigiriFiliale(filiale) ? ""
+      : ((vs!=null && close!=null && vs > close) ? vonTime : SHOP_CLOSING_TIME);
     await addScheduleShift(name, date, filiale, bis ? (vonTime + "-" + bis) : "", "einspringen", { autoCreated:true });
     return true;
   } catch(e) { console.error("ensureEinspringenShift error:", e); return false; }
@@ -3489,6 +3490,16 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilia
       if(!ok) return;
     }
     const t = manualMode ? manualTime : nowStr;
+    // 🧋 Regulär로 찍는데, 오늘 이 사람에게 계획된 근무가 하나도 없으면 확인.
+    //    (당일 Regulär는 새로 안 생기므로, 계획이 없는데 Regulär면 보통 Einspringen이어야 한다)
+    if(typNorm(clockTyp)!=="einspringen" && Array.isArray(regularShifts) && regularShifts.length===0){
+      const ok = window.confirm(
+        "⚠️ Kein regulärer Dienst geplant!\n\n"+
+        "Für heute ist für dich kein regulärer Dienst eingetragen.\n\n"+
+        "Solltest du nicht als \"Einspringen\" einstempeln?\n"+
+        "Trotzdem als \"Regulär\" fortfahren?");
+      if(!ok) return;
+    }
     // 🧋 Einspringen으로 찍는데, 이 지점·시간에 원래 Regulär 근무가 예정돼 있으면 확인.
     //    (당일 Regulär는 새로 안 생기므로, 그 시간 근무가 있다는 건 계획된 정규 근무라는 뜻.
     //     실수로 Einspringen을 눌러 유령 근무표가 생기는 것을 입구에서 막는다.)
