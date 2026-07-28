@@ -891,6 +891,15 @@ function stunden(ein, aus) {
   return (ah * 60 + am - eh * 60 - em) / 60;
 }
 function stdLabel(ein, aus) { const h = stunden(ein, aus); return h === null ? "–" : h.toFixed(2) + "h"; }
+// 📋 record 기반 시간 라벨 — Pause를 뺀 순 근무시간, Pause가 있으면 함께 표시.
+//    예) Pause 없음 → "6.00h" / Pause 30분 → "6.00h (−30 Min Pause)"
+//    세무·노동 감독 대비: 실근로시간과 휴식을 한눈에 보이게 한다.
+function recStdLabel(r){
+  if(!r || !r.ein || !r.aus) return "–";
+  const netto = recHours(r);
+  const pMin = recPauseMin(r);
+  return netto.toFixed(2) + "h" + (pMin>0 ? " (−"+pMin+" Min Pause)" : "");
+}
 // 근무표(schedule)에서 name·date의 예정 종료시간("HH:MM") 추출 — 자동 강제 퇴근용
 //  · root({d,f,t}) / 월별({date,filiale,time}) 두 스키마 모두 지원
 //  · 같은 날 여러 shift가 있으면 가장 늦은 종료시간을 채택
@@ -1001,7 +1010,16 @@ function nachtragLocked(datum){
 //     집계상 "normal"(Regulär)로 귀속시키되, 원장부에는 Nachtrag 여부를 남긴다.
 // ═══════════════════════════════════════════════════════════════
 function statTyp(r){ const t=String(r&&r.typ||"normal").toLowerCase(); return t==="nachtrag" ? "normal" : typNorm(t); }
-function recHours(r){ const h=stunden(r&&r.ein, r&&r.aus); return h==null?0:h; }
+// 순 근무시간 = (aus - ein) - Pause. Pause(pauseSec)를 항상 뺀다.
+//   실시간 출퇴근의 Pause 버튼 누적분도, Nachtragen에서 입력한 분도 여기서 함께 차감된다.
+function recHours(r){
+  const h=stunden(r&&r.ein, r&&r.aus);
+  if(h==null) return 0;
+  const pauseH=(r&&r.pauseSec ? r.pauseSec : 0)/3600;
+  return Math.max(0, h - pauseH);
+}
+// Pause를 뺀 시간을 "HH:MM" 라벨 계산에 쓰기 위한 분 단위 헬퍼
+function recPauseMin(r){ return Math.round((r&&r.pauseSec ? r.pauseSec : 0)/60); }
 // 한 직원의 월간 기록 → {total, byFiliale:[{filiale,total,byTyp:[{typ,icon,lbl,std}]}]}
 function buildBreakdown(recs){
   const list=(Array.isArray(recs)?recs:[]).filter(r=>r&&r.ein&&r.aus);
@@ -1868,7 +1886,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
                 background:C.mintLight,border:`1px solid ${C.mint}`,
                 display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{fontSize:11,fontWeight:600,color:C.text}}>{rec.filiale} · {rec.ein} – {rec.aus||"läuft"}</div>
-                <span style={{fontSize:11,fontWeight:700,color:C.mintDark}}>{stdLabel(rec.ein,rec.aus)}</span>
+                <span style={{fontSize:11,fontWeight:700,color:C.mintDark}}>{recStdLabel(rec)}</span>
               </div>
             )}
 
@@ -1990,8 +2008,8 @@ function freigebenSchicht({ userName, date, filiale, time, grund, users }) {
 }
 
 // Nachtragen(사후 등록): 자동승인 record 저장 + 관리자 Anträge(Nachtragen) 알림 로그
-function nachtragenSchicht({ userName, date, filiale, ein, aus, setRecords }) {
-  const rec = { id:Date.now(), user:userName, date, filiale:filiale||"", ein, aus, note:"", typ:"nachtrag" };
+function nachtragenSchicht({ userName, date, filiale, ein, aus, pauseSec, setRecords }) {
+  const rec = { id:Date.now(), user:userName, date, filiale:filiale||"", ein, aus, note:"", typ:"nachtrag", pauseSec:Math.max(0, pauseSec||0) };
   // 🔁 같은 근무를 여러 번 고쳐도 최종 1개만 남긴다 (중복 합산 방지).
   //    직원·날짜·지점이 같고 '시간이 겹치는' 기존 기록(실시간 출퇴근 + 이전 nachtrag)을
   //    지우고 이번 것만 남긴다. 시간이 안 겹치는 별개 근무(오전/오후)는 보존한다.
@@ -2052,6 +2070,7 @@ function overrideWithNachtrag({ a, setRecords }){
   };
   const newRec={ id:Date.now(), user:a.user, date:a.date, filiale:a.filiale,
     ein:a.ein, aus:a.aus, note:a.grund||"Nachtrag genehmigt", typ:"nachtrag",
+    pauseSec:Math.max(0, a.pauseSec||0),
     isAutoCheckedOut:false, prüfen:false, frühGrund:"" };
   // ⚠️ records는 setRecords가 노드 전체를 다시 기록하므로, 개별 _fbRemove를 병행하면
   //    비동기 삭제가 '새로 승인된 기록'까지 지워버리는 경합이 발생한다(근무표 미반영 원인).
@@ -2488,7 +2507,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
               {actualRec.ein}{"–"}{actualRec.aus||"läuft"}
             </div>
             <span style={{fontSize:11,fontWeight:700,color:status==="gearbeitet"?C.mintDark:C.yellow}}>
-              {actualRec.aus ? stdLabel(actualRec.ein, actualRec.aus) : "🟡"}
+              {actualRec.aus ? recStdLabel(actualRec) : "🟡"}
             </span>
           </div>
         )}
@@ -4358,6 +4377,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const [nFiliale,setNFiliale]=useState(FILIALEN[0]);
   const [nEin,setNEin]=useState("09:00");
   const [nAus,setNAus]=useState("17:00");
+  const [nPause,setNPause]=useState("");   // Nachtragen Pause (분 단위 입력)
   const [nGrund,setNGrund]=useState("");
   const [nMsg,setNMsg]=useState("");
   // 조기 퇴근(Vorzeitiges Ausstempeln) 관련
@@ -4372,6 +4392,11 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
       norm(sh).forEach(s=>{
         if(!s) return;
         if((s.date||s.d) !== today()) return;
+        // 🆘 출근하면서 자동 생성된 대타 근무(autoCreated)는 '원래 배정'이 아니다.
+        //    이걸 배정으로 치면, 첫 대타 후 다른 지점에 두 번째 대타를 갈 때
+        //    엉뚱하게 "근무표와 다른 지점" 경고가 떠서 정상 출근을 방해한다.
+        //    → 관리자가 계획한 근무만 배정 지점으로 인정한다.
+        if(s.autoCreated) return;
         // 이 근무가 나(uid)이거나 내 이름과 매칭되면 배정 지점으로 인정
         const sUid = s.uid || uidOf(users, nm) || "";
         const mine = (meUid && sUid && sameName(sUid, meUid)) || sameName(nm, user?.vorname||userKey);
@@ -4511,7 +4536,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   // 총 근무 = 지점별 합계의 총합 (관리자 통계와 동일 정의)
   const totalH=myBreakdown.total;
   function fmtH(h){const hh=Math.floor(h);const mm=Math.round((h-hh)*60);return hh+"h"+String(mm).padStart(2,"0")+"m";}
-  const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0)})).filter(x=>x.h>0);
+  const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+recHours(r),0)})).filter(x=>x.h>0);
 
   // 알림 카운트 (Schichtbörse 새 근무 + Tausch 요청)
   const [_notifications] = useFirebase("notifications", {});
@@ -4692,19 +4717,20 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     if(!nGrund.trim()){setNMsg("Bitte einen Grund angeben.");return;}
     const id = Date.now();
     const ts = id;
+    const pauseSec=Math.max(0,parseInt(nPause,10)||0)*60;   // 분 → 초
     // Firebase   (antraege +   notifications)
-    setAntraege(prev=>[...prev,{id,user:user.vorname,date:nDatum,filiale:nFiliale,ein:nEin,aus:nAus,grund:nGrund,status:"offen",zustaendig:"all"}]);
+    setAntraege(prev=>[...prev,{id,user:user.vorname,date:nDatum,filiale:nFiliale,ein:nEin,aus:nAus,pauseSec,grund:nGrund,status:"offen",zustaendig:"all"}]);
     if (window._fbDb && window._fbRef && window._fbSet) {
       ["teddy","yeaji"].forEach(mgr => {
         window._fbSet(window._fbRef(window._fbDb, `notifications/nachtrag_${id}_${mgr}`), {
           type: "nachtrag", kategorie: "Nachtrag",
           user: user.vorname, date: nDatum, filiale: nFiliale, ein: nEin, aus: nAus,
-          grund: nGrund, antragId: id,
+          pauseSec, grund: nGrund, antragId: id,
           zustaendig: mgr, bearbeitetVon: null, status: "offen", gelesen: false, ts
         }).catch(e => console.error(e));
       });
     }
-    setNMsg("Antrag eingereicht! Wird von Yeaji oder Teddy geprüft.");setNGrund("");
+    setNMsg("Antrag eingereicht! Wird von Yeaji oder Teddy geprüft.");setNGrund("");setNPause("");
   }
 
   const elStr=`${pad(Math.floor(elapsed/3600))}:${pad(Math.floor((elapsed%3600)/60))}:${pad(elapsed%60)}`;
@@ -5235,6 +5261,12 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
                   <TimeInput value={val} onChange={set} style={{...S.input,width:"100%",textAlign:"center",fontSize:14,boxSizing:"border-box"}}/>
                 </div>
               ))}
+              <div style={{flex:1}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:4,fontWeight:700}}>{"Pause (Min)"}</div>
+                <input type="number" inputMode="numeric" min="0" placeholder="0"
+                  value={nPause} onChange={e=>setNPause(e.target.value)}
+                  style={{...S.input,width:"100%",textAlign:"center",fontSize:14,boxSizing:"border-box"}}/>
+              </div>
             </div>
             <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>{"Grund "}<span style={{color:C.red}}>*</span></div>
             <textarea value={nGrund} onChange={e=>setNGrund(e.target.value)}
@@ -5316,10 +5348,14 @@ function StatistikTab({records,users,schedule}){
     }
   }
   function exportDetail(fmt="xlsx"){
-    const hdr=["Name","Datum","Wochentag","Filiale","Einstempeln","Ausstempeln","Arbeitsstunden","Typ","Anmerkung"];
+    const hdr=["Name","Datum","Wochentag","Filiale","Einstempeln","Ausstempeln","Pause (Min)","Arbeitsstunden (netto)","Typ","Anmerkung"];
     const rows=[hdr,...[...monthRecs].sort((a,b)=>a.date.localeCompare(b.date)).map(r=>{
-      const h=stunden(r.ein,r.aus);
-      return[r.user,r.date,TAGE_DE[new Date(r.date).getDay()],r.filiale,r.ein,r.aus,h!=null?h.toFixed(2):"",r.typ==="nachtrag"?"Nachtrag":"Regulär",r.note||""];
+      const netto=recHours(r);          // Pause를 뺀 순 근무시간
+      const pauseMin=recPauseMin(r);
+      return[r.user,r.date,TAGE_DE[new Date(r.date).getDay()],r.filiale,r.ein,r.aus,
+        pauseMin>0?String(pauseMin):"0",
+        (r.ein&&r.aus)?netto.toFixed(2):"",
+        r.typ==="nachtrag"?"Nachtrag":"Regulär",r.note||""];
     })];
     if(fmt==="xlsx") downloadXLSX(rows,`Stundennachweis_Detail_${selMonth}.xlsx`,"Stundennachweis");
     else downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
@@ -5328,8 +5364,8 @@ function StatistikTab({records,users,schedule}){
     const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","TEEnJOY (Std)","Ø Std/Tag"];
     const rows=[hdr,...empList.map(emp=>{
       const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
-      const total=er.reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-      const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
+      const total=er.reduce((a,r)=>a+recHours(r),0);
+      const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+recHours(r),0);});
       return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["TEEnJOY"].toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
     })];
     if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monatsübersicht");
@@ -5386,8 +5422,8 @@ function StatistikTab({records,users,schedule}){
       <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:14}}>
         {empList.map(emp=>{
           const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
-          const total=er.reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
-          const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);});
+          const total=er.reduce((a,r)=>a+recHours(r),0);
+          const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+recHours(r),0);});
           const fColors=[C.mintLight,C.yellowLight,C.redLight];
           const fTColors=[C.mintDark,"#b37400",C.red];
           const contract = emp.contractHours || 0;
@@ -5614,7 +5650,7 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
   if (!emp) return null;
 
   const empRecs = records.filter(r=>sameName(r.user,emp.vorname));
-  const total = empRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+  const total = empRecs.filter(r=>r.aus).reduce((a,r)=>a+recHours(r),0);
   const byMonth={};
   empRecs.forEach(r=>{const m=r.date.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(r);});
   const monthKeys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
@@ -5682,7 +5718,7 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
         <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:13,padding:"24px"}}>Keine Eintraege.</div>
       ):monthKeys.map(m=>{
         const mRecs=byMonth[m];
-        const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+(stunden(r.ein,r.aus)||0),0);
+        const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+recHours(r),0);
         const mDays=mRecs.filter(r=>r.aus).length;
         const mDiff=contract>0?mTotal-contract:null;
         const isOpen=monthAccordion[m]!==false;
@@ -5907,7 +5943,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
                               <div style={{fontSize:10,fontWeight:600,color:st==="Feierabend"?C.mintDark:C.yellow,marginTop:2}}>
                                 {rec.ein}{rec.aus?` – ${rec.aus}`:" (läuft)"}
                                 {typNorm(rec.typ)!=="normal"&&<span style={{color:C.muted,fontWeight:700}}>{" · "+typIcon(rec.typ)+" "+typLabel(rec.typ)}</span>}
-                                {rec.aus&&<span style={{color:C.muted,fontWeight:400}}>{" · "}{stdLabel(rec.ein,rec.aus)}</span>}
+                                {rec.aus&&<span style={{color:C.muted,fontWeight:400}}>{" · "}{recStdLabel(rec)}</span>}
                                 {rec.isAutoCheckedOut&&<span style={{color:C.muted,fontWeight:400}}>{" · ⏱ Auto"}</span>}
                               </div>
                             )}
@@ -6667,6 +6703,12 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                           <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>BIS</div>
                           <TimeInput value={nachRow.bis} onChange={v=>setNachRow({...nachRow,bis:v})} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
                         </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"PAUSE (Min)"}</div>
+                          <input type="number" inputMode="numeric" min="0" placeholder="0"
+                            value={nachRow.pause??""} onChange={e=>setNachRow({...nachRow,pause:e.target.value})}
+                            style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                        </div>
                       </div>
                       <div style={{display:"flex",gap:8}}>
                         <button onClick={()=>setNachRow(null)} style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
@@ -6674,7 +6716,8 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                           if(!nachRow.von||!nachRow.bis){ setActMsg("Bitte VON und BIS angeben."); return; }
                           // 🔒 지난달 근무는 유예 기간 이후 수정 불가
                           if(nachtragLocked(selDate)){ setActMsg("Für abgeschlossene Monate ist kein Nachtragen möglich."); return; }
-                          nachtragenSchicht({userName:r.rawName, date:selDate, filiale:fil, ein:nachRow.von, aus:nachRow.bis, setRecords});
+                          const pauseSec=Math.max(0,parseInt(nachRow.pause,10)||0)*60;  // 분 → 초
+                          nachtragenSchicht({userName:r.rawName, date:selDate, filiale:fil, ein:nachRow.von, aus:nachRow.bis, pauseSec, setRecords});
                           setNachRow(null); setActMsg("✅ Nachgetragen & genehmigt.");
                           setTimeout(()=>setActMsg(""),2500);
                         }} style={{flex:2,padding:"10px",borderRadius:9,border:"none",background:C.yellow,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"✅ Nachtragen"}</button>
