@@ -1986,6 +1986,12 @@ async function deleteScheduleShift(name, date) {
 // 근무 양도(Schicht freigeben): freieSchichten 게시 + 동료 알림 + schedule 상태 'freigegeben'
 // ⚠️ 이 로직은 데이터 초기화(Reset)와 무관하게 항상 코드에 존재한다(격리/보호).
 function freigebenSchicht({ userName, date, filiale, time, grund, users }) {
+  // ⛔ 당일·과거 근무는 Schichtbörse에 내놓을 수 없다.
+  //    받을 사람이 준비할 시간이 없기 때문. 당일 결원은 Einspringen으로 메꾼다.
+  //    (내일 이후 근무만 미리 넘길 수 있다)
+  if(String(date||"").slice(0,10) <= today()){
+    return false;
+  }
   const schichtId = Date.now();
   // 🆔 제공자의 고유 ID를 함께 저장 (이름이 바뀌어도 추적 가능)
   const newFrei = { id:schichtId, date, filiale, time:time||null, note:grund||"", besetzt:false,
@@ -2729,6 +2735,28 @@ function SchichtboerseView({ userName, users, isAdmin }) {
       setTimeout(()=>setMsg(null),4000);
       return;
     }
+    // ⏰ 받기(übernehmen)는 근무 시작 전까지만 가능하다.
+    //    · 지난 날짜 근무: 불가
+    //    · 오늘 근무: 시작 시각 전까지 가능 (시간 없는 근무는 당일 자정 전까지)
+    //    (freigeben은 당일 불가지만, 이미 어제 내놓은 근무를 자정 넘겨 받는 건 허용)
+    {
+      const d = String(schicht.date||"").slice(0,10);
+      const heute = today();
+      if(d < heute){
+        setMsg("⏰ Diese Schicht liegt in der Vergangenheit und kann nicht mehr übernommen werden.");
+        setTimeout(()=>setMsg(null),5000);
+        return;
+      }
+      if(d === heute && schicht.time && schicht.time.includes("-")){
+        const startMin = parseMinutes(schicht.time.split("-")[0]);
+        const nowMin = (()=>{ const n=new Date(); return n.getHours()*60+n.getMinutes(); })();
+        if(startMin!=null && nowMin >= startMin){
+          setMsg("⏰ Der Dienst hat bereits begonnen — Übernahme nicht mehr möglich.");
+          setTimeout(()=>setMsg(null),5000);
+          return;
+        }
+      }
+    }
     // ⛔ 중복 근무 방지: 같은 날 본인 기존 근무와 시간이 1분이라도 겹치면 차단
     try{
       if(window._fbDb&&window._fbRef&&window._fbGet&&schicht.time&&schicht.time.includes("-")){
@@ -3429,7 +3457,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
 }
 
 //  CLOCK MODAL 
-function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilialen,CLOCK_KEY,onClose,onEin,onAus}){
+function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilialen,regularShifts,clockTyp,CLOCK_KEY,onClose,onEin,onAus}){
   const isEin = modal==="ein";
   const nowStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
   const [manualMode, setManualMode] = useState(false);
@@ -3454,6 +3482,27 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilia
       if(!ok) return;
     }
     const t = manualMode ? manualTime : nowStr;
+    // 🧋 Einspringen으로 찍는데, 이 지점·시간에 원래 Regulär 근무가 예정돼 있으면 확인.
+    //    (당일 Regulär는 새로 안 생기므로, 그 시간 근무가 있다는 건 계획된 정규 근무라는 뜻.
+    //     실수로 Einspringen을 눌러 유령 근무표가 생기는 것을 입구에서 막는다.)
+    if(typNorm(clockTyp)==="einspringen" && Array.isArray(regularShifts)){
+      const hasRegular = regularShifts.some(sh=>{
+        if(!sameFiliale(sh.filiale, selFiliale)) return false;
+        if(!sh.time || !sh.time.includes("-") || !t) return true;   // 시간 없으면 지점만으로 인정
+        // 출근 시각이 그 근무 시간대 안에 드는지 (또는 시작 30분 전부터)
+        const [vs,ve]=sh.time.split("-").map(x=>parseMinutes(x));
+        const tm=parseMinutes(t);
+        if(vs==null||ve==null||tm==null) return true;
+        return tm >= vs-30 && tm < ve;   // 근무 시작 30분 전 ~ 종료 전
+      });
+      if(hasRegular){
+        const ok = window.confirm(
+          "⚠️ Regulär-Dienst geplant!\n\n"+
+          "Für diese Zeit ist bei \""+selFiliale+"\" bereits ein regulärer Dienst geplant.\n\n"+
+          "Trotzdem als \"Einspringen\" einstempeln?");
+        if(!ok) return;
+      }
+    }
     const [h,m] = t.split(":").map(Number);
     const d = new Date(); d.setHours(h,m,0,0);
     onEin(d);
@@ -4384,8 +4433,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const [scheduleData]=useFirebase("schedule",{});
   // 📍 오늘 이 직원에게 근무표상 배정된 지점 목록 (출근 도장 실수 방지용).
   //    출근 시 여기 없는 지점을 고르면 한 번 더 확인한다.
-  const myTodayFilialen = React.useMemo(()=>{
+  const [myTodayFilialen, myTodayRegularShifts] = React.useMemo(()=>{
     const set = new Set();
+    const shifts = [];   // 오늘 내 '계획된' 근무 (지점+시간) — einspringen 오출근 확인용
     const meUid = uidOf(users, user?.vorname||userKey);
     const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
     Object.entries(scheduleData||{}).forEach(([nm,sh])=>{
@@ -4400,10 +4450,15 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
         // 이 근무가 나(uid)이거나 내 이름과 매칭되면 배정 지점으로 인정
         const sUid = s.uid || uidOf(users, nm) || "";
         const mine = (meUid && sUid && sameName(sUid, meUid)) || sameName(nm, user?.vorname||userKey);
-        if(mine){ const f=s.filiale||s.f||""; if(f) set.add(f); }
+        if(mine){
+          const f=s.filiale||s.f||"";
+          if(f) set.add(f);
+          const t=s.time||s.t||"";
+          shifts.push({ filiale:f, time:t });   // 시간 겹침 판정용
+        }
       });
     });
-    return set;
+    return [set, shifts];
   }, [scheduleData, users, user, userKey]);
   const [fruehData,setFruehData]=useState(null);  // {inStr,outStr} — 사유 입력 대기중인 퇴근 데이터
   const [fruehGrund,setFruehGrund]=useState("");
@@ -5173,6 +5228,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           clockInTime={clockInTime}
           grund={grund}
           assignedFilialen={myTodayFilialen}
+          regularShifts={myTodayRegularShifts}
+          clockTyp={clockTyp}
           CLOCK_KEY={CLOCK_KEY}
           onClose={()=>setModal(null)}
           onEin={(d)=>{
