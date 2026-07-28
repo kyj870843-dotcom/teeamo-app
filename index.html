@@ -2160,21 +2160,28 @@ async function ensureEinspringenShift(name, date, filiale, vonTime) {
     const root = rsnap.val() || {};
     const sh = root[name];
     const arr = !sh ? [] : (Array.isArray(sh) ? sh : Object.values(sh));
-    // 이미 '시간이 겹치는' 그 날·그 지점 스케줄이 있으면 만들지 않는다(기존 계획 보존).
-    //   예전엔 지점만 봐서, 오전 근무가 있으면 저녁에 또 출근해도 자동 근무가 안 생겼다.
-    //   시간이 안 겹치면 별개 근무이므로 새로 만든다.
-    const bisCheck = isOnigiriFiliale(filiale) ? "" : SHOP_CLOSING_TIME;
-    const newRange = bisCheck ? (vonTime + "-" + bisCheck) : "";
+    // 🎯 같은 날·같은 지점에 이미 '자동 대타(autoCreated)' 근무가 있으면 새로 만들지 않는다.
+    //    자동 대타는 '이 사람이 이 지점에서 일했다'는 표시라 지점당 하나면 충분하다.
+    //    → 출근/퇴근 흐름에서 함수가 여러 번 불려도 중복 근무표가 안 생긴다.
+    //    (관리자가 직접 짠 계획 근무는 autoCreated가 아니므로, 그것과 시간이 겹칠 때만 스킵)
+    const bis = isOnigiriFiliale(filiale) ? "" : SHOP_CLOSING_TIME;
+    const newRange = bis ? (vonTime + "-" + bis) : "";
     const exists = arr.some(s => {
       if(!s || (s.d||s.date) !== date) return false;
       if(!sameFiliale(s.f||s.filiale, filiale)) return false;
+      // 자동 대타가 이미 있으면 무조건 스킵(중복 방지)
+      if(s.autoCreated) return true;
+      // 계획 근무는 시간이 겹칠 때만 스킵(안 겹치면 별개 근무이므로 대타 생성 허용)
       const tm = s.t || s.time;
-      // 어느 한쪽이라도 시간이 없으면(ONIGIRI 등) 같은 지점 = 같은 근무로 본다
       if(!tm || !tm.includes("-") || !newRange) return true;
       return timesOverlap(tm, newRange);
     });
     if (exists) return false;
-    const bis = isOnigiriFiliale(filiale) ? "" : SHOP_CLOSING_TIME;
+    // ⛔ 출근하자마자 바로 퇴근해 vonTime이 마감시간 이후이면 0분/음수 근무표가 된다 → 만들지 않음.
+    if (bis) {
+      const vs = parseMinutes(vonTime), be = parseMinutes(bis);
+      if (vs != null && be != null && vs >= be) return false;   // 시작이 마감 이후 → 스킵
+    }
     await addScheduleShift(name, date, filiale, bis ? (vonTime + "-" + bis) : "", "einspringen", { autoCreated:true });
     return true;
   } catch(e) { console.error("ensureEinspringenShift error:", e); return false; }
