@@ -4235,21 +4235,29 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         {/* 🔗 임시 계정 매칭 (Zuweisen) — 관리자 전용 */}
         {isAdmin && (()=>{
           const registered = new Set((Array.isArray(users)?users:[]).map(u=>(u.vorname||"").toLowerCase()));
-          // 근무표에 있으나 '계정 이름과 정확히 일치하지 않는' 이름 = 매칭 대상 Temp 이름.
-          //   · 관리자(이모지 포함)는 제외 — 관리자는 이미 계정이 있고 uid로 연결됨.
-          //   · 자동 매칭에 기대지 않는다. 관리자가 직접 연결해야 '이미 연결됨'이 된다.
+          // 근무표에 있으나 '계정 이름과 정확히 일치하지 않는' 이름 = 미연결 Temp 이름.
+          //   · 관리자(이모지 포함)는 제외 — 이미 계정이 있고 uid로 연결됨.
           const openTempNames = Object.keys(schedForMatch||{})
             .filter(n=> n && !isManagerName(n)
               && !registered.has(n.toLowerCase()));
           const realEmps = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key)).sort(byName);
-          // ✅ '이미 연결됨'은 관리자가 직접 연결한 이력(tempLinks)만 표시한다.
-          //    (uidOf 자동 매칭은 근무표 표시엔 계속 작동하지만, 여기 목록엔 안 넣는다 →
-          //     관리자가 명시적으로 연결하도록 유도)
-          const linkedEntries = Object.entries(tempLinks||{})
+          // ✅ '이미 연결됨'에 표시할 항목 = (a) 관리자가 직접 연결한 이력(tempLinks)
+          //    + (b) 근무표 이름이 계정 vorname과 '정확히 일치'하는 정상 계정.
+          //    (b)는 이름이 그대로 맞는 것이라 자동 매칭(이모지 무시)이 아니다 → 안전하게 표시.
+          //    이렇게 해야 정상 연결된 계정도 목록에서 사라지지 않고, 문제 시 ↻로 재연결 가능.
+          const linkedFromHistory = Object.entries(tempLinks||{})
             .map(([k,v])=>({ temp:v?.temp||k, real:v?.real||"", realKey:v?.realKey||"", ts:v?.ts||0 }))
-            .filter(e=>e.temp && !isManagerName(e.temp))
-            .sort((a,b)=>b.ts-a.ts);
-          // 미연결 이름 중 이미 이력에 있는 것은 이력 쪽에서만 보여준다(중복 방지)
+            .filter(e=>e.temp && !isManagerName(e.temp));
+          const histSet = new Set(linkedFromHistory.map(e=>e.temp.toLowerCase()));
+          // 근무표 이름 중 계정 vorname과 정확히 같은 것 (이력에 없는 것만 추가)
+          const exactLinked = Object.keys(schedForMatch||{})
+            .filter(n=> n && !isManagerName(n) && registered.has(n.toLowerCase()) && !histSet.has(n.toLowerCase()))
+            .map(n=>{ const u=(Array.isArray(users)?users:[]).find(x=>sameNameStrict(x.vorname,n))
+                       || (Array.isArray(users)?users:[]).find(x=>(x.vorname||"").toLowerCase()===n.toLowerCase());
+              return u ? {temp:n, real:u.vorname, realKey:u.key, ts:0} : null; })
+            .filter(Boolean);
+          const linkedEntries = [...linkedFromHistory, ...exactLinked].sort((a,b)=>b.ts-a.ts);
+          // 미연결 이름 중 이미 이력/정상연결에 있는 것은 이력 쪽에서만 보여준다(중복 방지)
           const linkedTempSet = new Set(linkedEntries.map(e=>e.temp.toLowerCase()));
           const openOnly = openTempNames.filter(n=>!linkedTempSet.has(n.toLowerCase()));
 
@@ -5475,10 +5483,15 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 //  STATISTIK 
 // 📊 통계에서 완전히 제외할 더미/과거 월 (예: Juni 2026)
 const STAT_EXCLUDED_MONTHS = new Set(["2026-06"]);
-function StatistikTab({records,users,schedule,userKey}){
-  // 💻 Online 근무는 오너(Yeaji)만 볼 수 있다. 다른 관리자에겐 Online 기록을 숨긴다.
+function StatistikTab({records,setRecords,users,schedule,userKey}){
+  // 💻 방식 C: 매장 통계와 Online 근무를 분리한다.
+  //   · 매장 통계(기존 화면) = Online 제외한 record만 집계
+  //   · Online 근무 = 오너(Yeaji)만 보는 별도 섹션에서 관리 (리스트/수정/사후추가)
   const _viewerOwner = isOwnerKey(userKey);
-  records = (Array.isArray(records)?records:[]).filter(r=> _viewerOwner || !isOnlineFiliale(r&&r.filiale));
+  const _allRecords = Array.isArray(records)?records:[];
+  const onlineRecords = _viewerOwner ? _allRecords.filter(r=>isOnlineFiliale(r&&r.filiale)) : [];
+  // 아래 기존 통계 계산은 전부 '매장 근무만'(Online 제외)을 쓴다.
+  records = _allRecords.filter(r=> !isOnlineFiliale(r&&r.filiale));
   // records + Dienstplan(schedule)에서 달 추출 + 현재 달 포함, 최신순 정렬
   const availMonths = React.useMemo(()=>{
     const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
@@ -5500,6 +5513,35 @@ function StatistikTab({records,users,schedule,userKey}){
     return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
   });
   const [exported,setExported]=useState(null);
+  // 💻 Online 근무 추가/수정 폼 상태 (오너 전용)
+  const [onlineForm,setOnlineForm]=useState(null);   // {id?, date, von, bis, pause} — null이면 닫힘
+  const [onlineMsg,setOnlineMsg]=useState("");
+  const myName = (()=>{ const u=(Array.isArray(users)?users:[]).find(x=>x.key===userKey); return u?u.vorname:userKey; })();
+  function saveOnline(){
+    if(!onlineForm) return;
+    const { id, date, von, bis, pause } = onlineForm;
+    if(!date){ setOnlineMsg("⏰ Bitte Datum wählen."); return; }
+    if(!isValidTimeStr(von)||!isValidTimeStr(bis)){ setOnlineMsg("⏰ Vollständige Uhrzeit (HH:MM), z. B. 09:00."); return; }
+    const pauseSec = Math.max(0, parseInt(pause,10)||0)*60;
+    const rec = { id: id||Date.now(), user:myName, uid:userKey, date, filiale:ONLINE_FILIALE,
+      ein:von, aus:bis, note:"", typ:"online", pauseSec };
+    setRecords(prev=>{
+      const list = Array.isArray(prev)?prev:[];
+      const without = id ? list.filter(r=>String(r.id)!==String(id)) : list;
+      return [...without, rec];
+    });
+    setOnlineForm(null);
+    setOnlineMsg("✅ Online-Arbeit gespeichert.");
+    setTimeout(()=>setOnlineMsg(""),2500);
+  }
+  function deleteOnline(id){
+    if(!window.confirm("Online-Eintrag löschen?")) return;
+    setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>String(r.id)!==String(id)));
+  }
+  const onlineMonthRecs = onlineRecords
+    .filter(r=>r.date && r.date.startsWith(selMonth))
+    .sort((a,b)=>(a.date+a.ein).localeCompare(b.date+b.ein));
+  const onlineTotal = onlineMonthRecs.reduce((a,r)=>a+recHours(r),0);
   // 근무 기록이 있는 계정은 관리자(하이브리드 포함)여도 정산 목록에 포함
   const _workerNames = new Set((Array.isArray(records)?records:[]).map(r=>r.user));
   const empList=(Array.isArray(users)?users:[])
@@ -5590,6 +5632,67 @@ function StatistikTab({records,users,schedule,userKey}){
 
   return(
     <div style={{padding:"14px"}}>
+      {/* 💻 Online 근무 — 오너(Yeaji)만. 매장 통계와 분리된 별도 섹션. */}
+      {_viewerOwner && (
+        <div style={{...S.card,marginBottom:14,border:`1px solid #6366f1`}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+            <div style={{fontSize:12,fontWeight:800,color:"#4338ca"}}>{"💻 Online-Arbeit"}</div>
+            <div style={{fontSize:12,fontWeight:800,color:"#4338ca"}}>{onlineTotal.toFixed(2)}{" h"}</div>
+          </div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:10,lineHeight:1.5}}>
+            {"Nur für dich sichtbar. Wird nicht im Dienstplan angezeigt, zählt aber zu deiner Arbeitszeit."}
+          </div>
+          {onlineMsg && <div style={{fontSize:11,fontWeight:700,color:"#4338ca",marginBottom:8}}>{onlineMsg}</div>}
+
+          {/* 이번 달 Online 근무 리스트 */}
+          {onlineMonthRecs.length===0 ? (
+            <div style={{fontSize:11,color:C.muted,textAlign:"center",padding:"8px 0"}}>{"Keine Online-Arbeit in diesem Monat."}</div>
+          ) : onlineMonthRecs.map(r=>(
+            <div key={r.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",borderRadius:9,background:"#eef2ff",marginBottom:6}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:700,color:C.text}}>{new Date(r.date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"})}</div>
+                <div style={{fontSize:11,color:C.muted}}>{r.ein}{"–"}{r.aus}{" · "}{recStdLabel(r)}</div>
+              </div>
+              <button onClick={()=>setOnlineForm({id:r.id,date:r.date,von:r.ein,bis:r.aus,pause:r.pauseSec?String(Math.round(r.pauseSec/60)):""})}
+                style={{padding:"6px 9px",borderRadius:8,border:"1px solid #6366f1",background:"#fff",color:"#4338ca",fontSize:10,fontWeight:800,cursor:"pointer"}}>{"✏️"}</button>
+              <button onClick={()=>deleteOnline(r.id)}
+                style={{width:28,height:28,borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.red,fontSize:13,cursor:"pointer"}}>{"×"}</button>
+            </div>
+          ))}
+
+          {/* 추가/수정 폼 */}
+          {onlineForm ? (
+            <div style={{marginTop:10,padding:"11px",borderRadius:10,background:"#f5f3ff",border:`1px solid #c7d2fe`}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#4338ca",marginBottom:8}}>{onlineForm.id?"Online-Arbeit bearbeiten":"Neue Online-Arbeit"}</div>
+              <input type="date" value={onlineForm.date||""} onChange={e=>setOnlineForm({...onlineForm,date:e.target.value})}
+                style={{...S.input,width:"100%",fontSize:13,padding:"8px",boxSizing:"border-box",marginBottom:8}}/>
+              <div style={{display:"flex",gap:8,marginBottom:8}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"VON"}</div>
+                  <TimeInput value={onlineForm.von} onChange={v=>setOnlineForm({...onlineForm,von:v})} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"BIS"}</div>
+                  <TimeInput value={onlineForm.bis} onChange={v=>setOnlineForm({...onlineForm,bis:v})} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"PAUSE (Min)"}</div>
+                  <input type="number" inputMode="numeric" min="0" placeholder="0" value={onlineForm.pause||""}
+                    onChange={e=>setOnlineForm({...onlineForm,pause:e.target.value})}
+                    style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={saveOnline} style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:"#6366f1",color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"Speichern"}</button>
+                <button onClick={()=>{setOnlineForm(null);setOnlineMsg("");}} style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>{"Abbrechen"}</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={()=>setOnlineForm({date:today(),von:"",bis:"",pause:""})}
+              style={{width:"100%",marginTop:8,padding:"10px",borderRadius:9,border:`1.5px dashed #6366f1`,background:"#eef2ff",color:"#4338ca",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"+ Online-Arbeit hinzufügen"}</button>
+          )}
+        </div>
+      )}
       <div style={{marginBottom:12}}>
         <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:7,letterSpacing:".06em",textTransform:"uppercase"}}>{"Monat auswählen"}</div>
         <div style={{display:"flex",gap:7}}>
@@ -8580,7 +8683,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       )}
 
       {/*  STATISTIK  */}
-      {tab==="statistik"&&<StatistikTab records={records} users={users} schedule={schedule} userKey={userKey}/>}
+      {tab==="statistik"&&<StatistikTab records={records} setRecords={setRecords} users={users} schedule={schedule} userKey={userKey}/>}
 
       {/*  SCHICHTBRSE (Admin)  */}
       {tab==="schichtboerse_mgr"&&(
