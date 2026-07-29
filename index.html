@@ -2485,8 +2485,11 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
             {f}{t ? ` · ${t}` : ""}
             {isReleased && <div style={{fontSize:10,color:"#b45309",marginTop:3,fontWeight:700}}>{"🔄 Freigegeben · wartet auf Tausch"}</div>}
             {isSwapped && <div style={{fontSize:10,color:C.mintDark,marginTop:3,fontWeight:700}}>{"🔄 Getauscht mit "+(getauschtMit||"?")}</div>}
-            {getauschtVon && !isSwapped && <div style={{fontSize:10,color:C.mintDark,marginTop:3,fontWeight:700}}>{"✔️ Getauscht mit "+getauschtVon}</div>}
-            {s.ausBoerse && <div style={{fontSize:10,color:"#92400e",marginTop:3,fontWeight:700}}>{"⚡ Aus der Schichtbörse"}</div>}
+            {getauschtVon && !isSwapped && !s.vonFreigegeben && <div style={{fontSize:10,color:C.mintDark,marginTop:3,fontWeight:700}}>{"✔️ Getauscht mit "+getauschtVon}</div>}
+            {/* 🏷 관리자가 새로 올린 근무를 받음 → 마켓 배지만 */}
+            {s.ausBoerse && !s.vonFreigegeben && <div style={{fontSize:10,color:"#92400e",marginTop:3,fontWeight:700}}>{"⚡ Aus der Schichtbörse"}</div>}
+            {/* 🏷 다른 직원이 넘긴 근무를 받음 → 원 제공자 이름 */}
+            {s.vonFreigegeben && <div style={{fontSize:9,color:C.muted,marginTop:2,fontWeight:600}}>{"von "+s.vonFreigegeben}</div>}
             {tauschLabel && <div style={{fontSize:9,color:C.mintDark,marginTop:3,fontWeight:600}}>{tauschLabel}</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -2797,6 +2800,9 @@ function SchichtboerseView({ userName, users, isAdmin }) {
             zeit: schicht.time || "",           // 관리자가 수정할 수 있는 시간
             konflikt: conflictTime || "",       // 겹치는 기존 근무 시간(참고용)
             schichtId: schicht.id,
+            angeboten_von: schicht.angeboten_von || "",       // 🏷 원 제공자(넘긴 사람) 이름
+            angeboten_von_uid: schicht.angeboten_von_uid || "",
+            quelle: schicht.quelle || "eigene",               // 🏷 eigene=직원 넘김 / neu=관리자 신규
             grund: "Überschneidung — Freigabe durch Admin erforderlich",
             status: "offen",
             ts: Date.now()
@@ -4142,14 +4148,13 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         {/* 🔗 임시 계정 매칭 (Zuweisen) — 관리자 전용 */}
         {isAdmin && (()=>{
           const registered = new Set((Array.isArray(users)?users:[]).map(u=>(u.vorname||"").toLowerCase()));
-          // 근무표에 있으나 어떤 계정에도 연결되지 않는 이름 = 미연결(고아) 임시 이름
-          //   · 계정 vorname과 정확히 일치하지 않고
-          //   · uidOf(별칭 포함)로도 계정을 못 찾는 이름
-          //   → 개명으로 끊긴 옛 이름도 여기에 잡혀 재연결 대상이 된다.
+          // 근무표에 있으나 '계정 이름과 정확히 일치하지 않는' 이름 = 매칭 대상 Temp 이름.
+          //   · 자동(느슨) 매칭에 기대지 않는다. 관리자가 명시적으로 연결해야 근무표 이름이 옮겨진다.
+          //   · 예) 근무표 "Eunjin" vs 계정 "Eunjin 🐵🤓" → 정확히 다르므로 목록에 떠서 연결 가능.
+          //   · 계정 vorname과 '완전히 똑같은' 근무표 이름만 이미 연결된 것으로 보고 제외한다.
           const openTempNames = Object.keys(schedForMatch||{})
             .filter(n=> n && !isManagerName(n.toLowerCase())
-              && !registered.has(n.toLowerCase())
-              && !uidOf(users, n));
+              && !registered.has(n.toLowerCase()));
           const realEmps = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key)).sort(byName);
           // 이미 연결한 이력 (연결 후에도 목록에 남겨 재연결 가능하게 함)
           const linkedEntries = Object.entries(tempLinks||{})
@@ -6303,9 +6308,18 @@ function AdminAntraegeView({ antraege, setAntraege, myArchiv, renderErledigtCard
       x.id===a.id ? {...x, status:ok?"genehmigt":"abgelehnt", zeit} : x));
     try{
       if(ok){
-        // 근무표에 등록 (관리자가 수정한 시간 사용)
+        // 🏷 출처 구분:
+        //   · eigene = 직원이 자기 근무를 넘김 → 받은 카드에 "von 이름", 원 제공자 근무 삭제
+        //   · neu    = 관리자가 새로 올린 근무 → 받은 카드에 "⚡ Aus der Schichtbörse", 삭제할 원 근무 없음
+        const istEigene = (a.quelle || "eigene") === "eigene";
         await addScheduleShift(a.user, a.date, a.filiale, zeit, "normal",
-          { uid:a.uid||"", extra:{ ausBoerse:true } });
+          { uid:a.uid||"", extra: istEigene
+              ? { getauschtVon: a.angeboten_von || "", vonFreigegeben: a.angeboten_von || "" }
+              : { ausBoerse: true } });
+        // 직원 넘김일 때만 원 제공자의 근무를 근무표에서 제거
+        if(istEigene && a.angeboten_von){
+          await deleteScheduleShiftAtFiliale(a.angeboten_von, a.date, a.filiale);
+        }
       }
       // 마켓 항목 정리 — 승인이면 수락 확정, 거절이면 다시 공개 상태로
       if(window._fbDb&&window._fbRef&&window._fbGet&&window._fbSet&&a.schichtId!=null){
@@ -7790,8 +7804,14 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       x.id===a.id ? {...x, status:ok?"genehmigt":"abgelehnt", zeit} : x));
     try{
       if(ok){
+        const istEigene = (a.quelle || "eigene") === "eigene";
         await addScheduleShift(a.user, a.date, a.filiale, zeit, "normal",
-          { uid:a.uid||"", extra:{ ausBoerse:true } });
+          { uid:a.uid||"", extra: istEigene
+              ? { getauschtVon: a.angeboten_von || "", vonFreigegeben: a.angeboten_von || "" }
+              : { ausBoerse: true } });
+        if(istEigene && a.angeboten_von){
+          await deleteScheduleShiftAtFiliale(a.angeboten_von, a.date, a.filiale);
+        }
       }
       if(window._fbDb&&window._fbRef&&window._fbGet&&window._fbSet&&a.schichtId!=null){
         const snap=await window._fbGet(window._fbRef(window._fbDb,"freieSchichten/"+a.schichtId));
