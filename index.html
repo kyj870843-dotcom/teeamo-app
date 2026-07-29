@@ -269,12 +269,14 @@ function safeList(v){
 //   Dienstplan 리스트는 schedule + freieSchichten을 합쳐 보여주므로,
 //   schedule만 지우면 Schichtbörse 항목이 다시 살아나 '삭제가 안 된 것처럼' 보인다.
 //   → 두 곳을 함께 정리해야 실제로 사라진다.
-async function deleteShiftEverywhere({ rawName, uid, date, filiale, freieSchichten, users }){
+async function deleteShiftEverywhere({ rawName, uid, date, filiale, time, freieSchichten, users }){
   const result = { schedule:false, boerse:0, errors:[] };
   // 1) 근무표(schedule / schedule_YYYY_MM)에서 제거
+  //    🔒 같은 날 여러 지점 근무가 있어도, 지정한 지점(+시간) 근무 1건만 삭제한다.
+  //       (예: 같은 날 ONIGIRI + TEEnJOY → 하나만 지우려는데 둘 다 지워지던 버그 수정)
   if(rawName && rawName !== OFFENE_SCHICHT){
     try{
-      await deleteScheduleShift(rawName, date);
+      await deleteScheduleShiftAtFiliale(rawName, date, filiale, time);
       result.schedule = true;
     }catch(e){
       console.error("🗑 [deleteShiftEverywhere] schedule 삭제 실패:", e, { rawName, date, filiale });
@@ -2025,8 +2027,12 @@ function freigebenSchicht({ userName, date, filiale, time, grund, users }) {
 }
 
 // Nachtragen(사후 등록): 자동승인 record 저장 + 관리자 Anträge(Nachtragen) 알림 로그
-function nachtragenSchicht({ userName, date, filiale, ein, aus, pauseSec, setRecords }) {
-  const rec = { id:Date.now(), user:userName, date, filiale:filiale||"", ein, aus, note:"", typ:"nachtrag", pauseSec:Math.max(0, pauseSec||0) };
+function nachtragenSchicht({ userName, date, filiale, ein, aus, pauseSec, origTyp, setRecords }) {
+  // 🏷 원래 근무 타입(einspringen 등)을 유지한다. Nachtragen은 '시간 수정'이지 타입 변경이 아니다.
+  //    origTyp이 넘어오면 그걸 쓰고, 없으면 nachtrag로 둔다. (통계에서 Einspringen이 Regulär로
+  //    잘못 분류되지 않게 함)
+  const finalTyp = (origTyp && typNorm(origTyp)==="einspringen") ? "einspringen" : "nachtrag";
+  const rec = { id:Date.now(), user:userName, date, filiale:filiale||"", ein, aus, note:"", typ:finalTyp, pauseSec:Math.max(0, pauseSec||0), korrigiert:true };
   // 🔁 같은 근무를 여러 번 고쳐도 최종 1개만 남긴다 (중복 합산 방지).
   //    직원·날짜·지점이 같고 '시간이 겹치는' 기존 기록(실시간 출퇴근 + 이전 nachtrag)을
   //    지우고 이번 것만 남긴다. 시간이 안 겹치는 별개 근무(오전/오후)는 보존한다.
@@ -2301,9 +2307,16 @@ async function removeAutoShift(name, date, filiale){
 }
 
 // 특정 [직원·날짜·지점] 근무 1건만 삭제 (같은 날 다른 지점 근무는 보존)
-async function deleteScheduleShiftAtFiliale(name, date, filiale){
+async function deleteScheduleShiftAtFiliale(name, date, filiale, time){
   if(!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !name || !date) return;
-  const keep = s => !((s.date||s.d)===date && sameFiliale(s.filiale||s.f, filiale));
+  // time이 지정되면 그 시간 근무만, 없으면 그 지점의 해당 날짜 근무 전체를 삭제한다.
+  //   (같은 지점 오전/오후 분할 근무를 구분해 하나만 지울 수 있게 함)
+  const want = String(time==null?"":time).trim();
+  const keep = s => {
+    if(!((s.date||s.d)===date && sameFiliale(s.filiale||s.f, filiale))) return true;  // 다른 날/지점 → 보존
+    if(!want) return false;                                        // 시간 미지정 → 이 지점 근무 삭제
+    return String(s.time||s.t||"").trim() !== want;                // 시간 지정 → 그 시간만 삭제
+  };
   try{
     const mk = "schedule_" + date.slice(0,7).replace("-","_");
     const snap = await window._fbGet(window._fbRef(window._fbDb, mk));
@@ -6852,7 +6865,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                           // 🔒 지난달 근무는 유예 기간 이후 수정 불가
                           if(nachtragLocked(selDate)){ setActMsg("Für abgeschlossene Monate ist kein Nachtragen möglich."); return; }
                           const pauseSec=Math.max(0,parseInt(nachRow.pause,10)||0)*60;  // 분 → 초
-                          nachtragenSchicht({userName:r.rawName, date:selDate, filiale:fil, ein:nachRow.von, aus:nachRow.bis, pauseSec, setRecords});
+                          nachtragenSchicht({userName:r.rawName, date:selDate, filiale:fil, ein:nachRow.von, aus:nachRow.bis, pauseSec, origTyp:(rec&&rec.typ)||r.typ||"", setRecords});
                           setNachRow(null); setActMsg("✅ Nachgetragen & genehmigt.");
                           setTimeout(()=>setActMsg(""),2500);
                         }} style={{flex:2,padding:"10px",borderRadius:9,border:"none",background:C.yellow,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"✅ Nachtragen"}</button>
@@ -6983,7 +6996,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                           setActMsg("");
                           try{
                             const res = await deleteShiftEverywhere({
-                              rawName:r.rawName, uid:r.uid, date:selDate, filiale:fil,
+                              rawName:r.rawName, uid:r.uid, date:selDate, filiale:fil, time:r.time,
                               freieSchichten, users
                             });
                             if(res?.errors?.length){
@@ -7038,14 +7051,19 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                             );
                           }
                           const realClock = rec && rec.ein && rec.typ!=="nachtrag" && !rec.isAutoCheckedOut;
-                          const showNach = isPastOrToday && (
-                            selDate===todayStr
-                              ? !realClock
-                              : (!(rec&&rec.aus) || rec.isAutoCheckedOut)
-                          );
+                          // 📝 Nachtragen 표시 규칙:
+                          //   · 과거·오늘 근무면 항상 시간 수정(Nachtragen)을 허용한다.
+                          //   · einspringen 등으로 이미 퇴근한 근무도 시간을 고칠 수 있어야 한다.
+                          //     (완료된 기록이면 그 시각을 초기값으로 불러와 수정)
+                          //   · 단, 아직 근무 중(출근했는데 아직 미퇴근)이면 숨긴다 — 퇴근 먼저.
+                          const clockedInNotOut = rec && rec.ein && !rec.aus && rec.typ!=="nachtrag";
+                          const showNach = isPastOrToday && !clockedInNotOut;
                           if(!showNach) return null;
+                          // 완료된 실시간 기록이 있으면 그 시각을, 없으면 계획 근무 시간을 초기값으로
+                          const initVon = (rec && rec.ein && rec.aus) ? rec.ein : ((r.time||"").split("-")[0]||"");
+                          const initBis = (rec && rec.ein && rec.aus) ? rec.aus : ((r.time||"").split("-")[1]||"");
                           return (
-                            <button onClick={()=>{ const p=(r.time||"").split("-"); setNachRow({key:rowKey,von:p[0]||"",bis:p[1]||""}); }}
+                            <button onClick={()=>{ setNachRow({key:rowKey,von:initVon,bis:initBis,pause:rec&&rec.pauseSec?String(Math.round(rec.pauseSec/60)):""}); }}
                               style={{padding:"6px 9px",borderRadius:8,border:"1px solid "+C.yellow,background:C.yellowLight,color:C.yellow,fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{"📝 Nachtragen"}</button>
                           );
                         })()}
