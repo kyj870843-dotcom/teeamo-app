@@ -2316,16 +2316,30 @@ async function deleteScheduleShiftAtFiliale(name, date, filiale){
 // 🔄 대타 자동 스케줄의 예정 퇴근시간을 '실제 퇴근시간'으로 보정
 //   · autoCreated 플래그가 있는 근무에만 적용 (관리자가 짠 계획은 건드리지 않음)
 async function syncAutoShiftEnd(name, date, filiale, vonTime, bisTime) {
-  if (!(window._fbDb && window._fbRef && window._fbGet) || !name || !date) return;
+  if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !name || !date) return;
+  if (isOnigiriFiliale(filiale)) return;         // ONIGIRI는 시간 미사용
+  const newTime = vonTime + "-" + bisTime;
+  // 🔧 기존 autoCreated 슬롯의 '시간만' 실제 근무시간으로 갱신한다.
+  //    (addScheduleShift로 새로 만들면 시간이 달라 새 슬롯이 추가돼 중복됐다 → 직접 수정)
+  const patchNode = (mk) => window._fbGet(window._fbRef(window._fbDb, mk)).then(snap=>{
+    const data = snap.val() ? JSON.parse(JSON.stringify(snap.val())) : {};
+    const key = scheduleKeyOf(data, name);
+    if(!data[key]) return;
+    const list = Array.isArray(data[key]) ? data[key] : Object.values(data[key]);
+    let changed = false;
+    const next = list.map(s=>{
+      if(s && (s.d||s.date)===date && sameFiliale(s.f||s.filiale, filiale) && s.autoCreated){
+        changed = true;
+        return { ...s, time:newTime, t:newTime };   // 시간 필드 둘 다 갱신
+      }
+      return s;
+    });
+    if(changed) return window._fbSet(window._fbRef(window._fbDb, mk),
+      Array.isArray(data[key]) ? {...data, [key]:next} : {...data, [key]:Object.fromEntries(next.map((s,i)=>[String(i),s]))});
+  }).catch(e=>console.error("syncAutoShiftEnd patch error:", e));
   try {
-    const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
-    const root = rsnap.val() || {};
-    const sh = root[name];
-    const arr = !sh ? [] : (Array.isArray(sh) ? sh : Object.values(sh));
-    const hit = arr.find(s => s && (s.d||s.date) === date && sameFiliale(s.f||s.filiale, filiale));
-    if (!hit || !hit.autoCreated) return;          // 자동 생성분만 보정
-    if (isOnigiriFiliale(filiale)) return;         // ONIGIRI는 시간 미사용
-    await addScheduleShift(name, date, filiale, vonTime + "-" + bisTime, "einspringen", { autoCreated:true });
+    await patchNode("schedule");                                  // root
+    await patchNode("schedule_" + date.slice(0,7).replace("-","_")); // 월별
   } catch(e) { console.error("syncAutoShiftEnd error:", e); }
 }
 
@@ -4157,11 +4171,18 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
               && !registered.has(n.toLowerCase()));
           const realEmps = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key)).sort(byName);
           // 이미 연결한 이력 (연결 후에도 목록에 남겨 재연결 가능하게 함)
-          const linkedEntries = Object.entries(tempLinks||{})
+          const linkedFromHistory = Object.entries(tempLinks||{})
             .map(([k,v])=>({ temp:v?.temp||k, real:v?.real||"", realKey:v?.realKey||"", ts:v?.ts||0 }))
-            .filter(e=>e.temp)
-            .sort((a,b)=>b.ts-a.ts);
-          // 미연결 이름 중 이미 이력에 있는 것은 이력 쪽에서만 보여준다(중복 방지)
+            .filter(e=>e.temp);
+          // 🔗 tempLinks엔 없지만 uidOf로 이미 계정에 연결되는 근무표 이름도 '이미 연결됨'으로 보여준다.
+          //    (앱 업데이트 전에 자동 매칭돼 있던 기존 이름들 — 관리자가 재매칭·확인할 수 있게 목록에 노출)
+          const histTempSet = new Set(linkedFromHistory.map(e=>e.temp.toLowerCase()));
+          const autoLinked = openTempNames
+            .filter(n=>!histTempSet.has(n.toLowerCase()))
+            .map(n=>{ const uid=uidOf(users,n); const u=uid?userByUid(users,uid):null; return u?{temp:n, real:u.vorname, realKey:u.key, ts:0}:null; })
+            .filter(Boolean);
+          const linkedEntries = [...linkedFromHistory, ...autoLinked].sort((a,b)=>b.ts-a.ts);
+          // 미연결 이름 중 이미 이력/자동연결에 있는 것은 이력 쪽에서만 보여준다(중복 방지)
           const linkedTempSet = new Set(linkedEntries.map(e=>e.temp.toLowerCase()));
           const openOnly = openTempNames.filter(n=>!linkedTempSet.has(n.toLowerCase()));
 
@@ -7274,7 +7295,11 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
       {viewMode==="by_emp"&&(
         <div style={{padding:"14px"}}>
           {allNames.map(name=>{
-            const emp = empList.find(e=>sameName(e.vorname,name));
+            // 계정 매칭은 관리자 포함 전체 users에서 찾는다 (Yeaji처럼 관리자 겸 직원도 계정 인정).
+            //   정확 일치가 없으면 uidOf(별칭/느슨 매칭)로 한 번 더 찾아 "Kein Konto" 오표시를 막는다.
+            const allUsers = Array.isArray(users)?users:[];
+            const emp = allUsers.find(e=>sameName(e.vorname,name))
+              || (()=>{ const uid=uidOf(users,name); return uid?userByUid(users,uid):null; })();
             const accountExists = !!emp;
             const shifts = norm(activeSchedule[name]||[])
               .filter(s=>s.date||s.d)
