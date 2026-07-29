@@ -348,6 +348,9 @@ const QUICK_BIS_TIMES = ["14:00","15:00","15:30","16:00","16:30","17:00","18:00"
 // 📍 Filiale = 독립된 지점. ONIGIRI는 정식 지점으로 격상되어 다른 매장과
 //    DB상 완전히 분리된 스케줄/근무 문서를 가진다.
 const ONIGIRI_FILIALE = "ONIGIRI";
+// 💻 Online 근무 — Yeaji(오너) 전용 재택근무. 근무표엔 안 뜨고, 통계는 오너만 열람.
+const ONLINE_FILIALE = "Online";
+function isOnlineFiliale(f){ return String(f||"").trim().toLowerCase()==="online"; }
 const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY", ONIGIRI_FILIALE];
 function isOnigiriFiliale(f){ return String(f||"").trim().toUpperCase()==="ONIGIRI"; }
 // 🧋 Arbeitstyp(근무 형태): Onigiri는 지점으로 이동했으므로 여기서 제거.
@@ -366,11 +369,11 @@ function typIcon(t){ return (TYP_META[typNorm(t)]||TYP_META.normal).icon; }
 const FILIAL_ORDER = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY", ONIGIRI_FILIALE];
 function filialRank(f){ if(isOnigiriFiliale(f)) return 900; const i=FILIAL_ORDER.indexOf(f); return i<0?500:i; }
 function filialSort(a,b){ return filialRank(a)-filialRank(b) || String(a||"").localeCompare(String(b||"")); }
-// 지점 표시용 아이콘 (ONIGIRI → 🍙)
-function filialIcon(f){ return isOnigiriFiliale(f) ? "🍙" : "📍"; }
+// 지점 표시용 아이콘 (ONIGIRI → 🍙, Online → 💻)
+function filialIcon(f){ return isOnigiriFiliale(f) ? "🍙" : (isOnlineFiliale(f) ? "💻" : "📍"); }
 // 지점 짧은 표기 (버튼 등 좁은 자리용)
 const FILIAL_SHORT = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt",
-                       "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI" };
+                       "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI", "Online":"Online" };
 function filialShort(f){ return FILIAL_SHORT[f] || String(f||"").replace(/^TEEAMO\s+/,""); }
 
 // ═══════════════════════════════════════════════════════════════
@@ -428,9 +431,9 @@ function monthLabel(ym){
   catch{ return ym; }
 }
 const TAGE_DE    = ["So","Mo","Di","Mi","Do","Fr","Sa"];
-const MANAGERS   = ["tingting","teddy","yeaji","huy"];
+const MANAGERS   = ["tingting","yeaji","huy"];
 // 🔑 계정 키에서 baseKey(타임스탬프 앞부분)를 뽑는다. "teddy_1721..." → "teddy"
-function keyBase(key){ return String(key||"").split("_")[0].toLowerCase(); }
+function keyBase(key){ return stripEmoji(String(key||"").split("_")[0]).replace(/\s+/g," ").trim().toLowerCase(); }
 // 👑 이 키/이름이 '관리자로 지정된 이름'인가 — baseKey 기준으로 판별.
 //    계정 키에 타임스탬프가 붙어도(teddy_1721...) MANAGERS와 매칭된다.
 function isManagerName(keyOrName){
@@ -442,6 +445,25 @@ function isAdminUser(u){
   if(!u) return false;
   if(isManagerName(u.key) || isManagerName(u.vorname)) return true;
   return u.isAdmin===true || u.role==="Admin" || u.role==="Management";
+}
+// 👷 '근무하는 관리자'(하이브리드) 판정 — 근무표나 출퇴근 기록에 이 관리자의 근무가 있으면 true.
+//    이런 관리자는 직원 목록(Nach Mitarbeiter/Übersicht)에도 👑 배지로 포함해 보여준다.
+//    (예: Yeaji는 오너지만 달에 몇 번 근무 → 직원 통계에도 잡혀야 정산 누락이 없다)
+function adminWorks(u, schedule, records){
+  if(!u) return false;
+  const nm = u.vorname || u.key;
+  const uid = u.key;
+  const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
+  // 근무표에 있나
+  const sched = schedule || {};
+  for(const [k,sh] of Object.entries(sched)){
+    if(sameName(k, nm) || (uid && norm(sh).some(s=>s&&s.uid&&sameName(s.uid,uid)))){
+      if(norm(sh).length>0) return true;
+    }
+  }
+  // 출퇴근 기록에 있나
+  if((Array.isArray(records)?records:[]).some(r=>r&&(sameName(r.user,nm)||(uid&&r.uid&&sameName(r.uid,uid))))) return true;
+  return false;
 }
 
 // 이모지 제거 후 알파벳 정렬
@@ -456,7 +478,7 @@ function sortName(str) {
 }
 function byName(a,b){ return sortName(a.vorname).localeCompare(sortName(b.vorname)); }
 const NACHTRAG_ROUTING = {
-  "TEEAMO Arkaden":"yeaji","TEEAMO Aegidiimarkt":"yeaji","TEEnJOY":"teddy",
+  "TEEAMO Arkaden":"yeaji","TEEAMO Aegidiimarkt":"yeaji","TEEnJOY":"yeaji",
 };
 
 // 🧹 연습용 씨앗 계정 제거 — 이제 모든 계정(직원·관리자)은 앱의 등록 화면에서 만든다.
@@ -1804,7 +1826,7 @@ function MeineSchichtenSection({ userName, myShifts, records, users }) {
     //  2    (teddy + yeaji)
     if (window._fbDb && window._fbRef && window._fbSet) {
       const ts = Date.now();
-      ["teddy","yeaji"].forEach(mgr => {
+      ["yeaji"].forEach(mgr => {
         window._fbSet(window._fbRef(window._fbDb, `notifications/tausch_manager_${antragId}_${mgr}`), {
           type: "tausch_manager", status: "partner_ok",
           kategorie: "Schichttausch",
@@ -2077,7 +2099,7 @@ function nachtragenSchicht({ userName, date, filiale, ein, aus, pauseSec, origTy
   // 관리자 Anträge(Nachtragen) 알림 로그
   if (window._fbDb && window._fbRef && window._fbSet) {
     const ts = Date.now();
-    ["teddy","yeaji","tingting"].forEach(mgr=>{
+    ["yeaji"].forEach(mgr=>{
       window._fbSet(window._fbRef(window._fbDb,"notifications/nachtrag_log_"+ts+"_"+mgr),{
         type:"nachtrag_log", kategorie:"Nachtragen", zustaendig:mgr,
         user:userName, date, filiale:filiale||"", ein, aus,
@@ -2188,6 +2210,8 @@ const SHOP_CLOSING_TIME = "20:00";
 //   · 근무표(schedule)에 기록되므로 직원/공용/관리자 화면 모두 실시간 반영된다.
 async function ensureEinspringenShift(name, date, filiale, vonTime) {
   if (!(window._fbDb && window._fbRef && window._fbGet) || !name || !date) return false;
+  // 💻 Online 근무는 근무표에 표시하지 않는다 (오너 개인 재택). 자동 스케줄 생성 스킵.
+  if (isOnlineFiliale(filiale)) return false;
   try {
     const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
     const root = rsnap.val() || {};
@@ -2358,6 +2382,7 @@ async function deleteScheduleShiftAtFiliale(name, date, filiale, time){
 async function syncAutoShiftEnd(name, date, filiale, vonTime, bisTime) {
   if (!(window._fbDb && window._fbRef && window._fbGet && window._fbSet) || !name || !date) return;
   if (isOnigiriFiliale(filiale)) return;         // ONIGIRI는 시간 미사용
+  if (isOnlineFiliale(filiale)) return;          // 💻 Online은 근무표에 없으므로 보정 대상 아님
   const newTime = vonTime + "-" + bisTime;
   // 🔧 기존 autoCreated 슬롯의 '시간만' 실제 근무시간으로 갱신한다.
   //    (addScheduleShift로 새로 만들면 시간이 달라 새 슬롯이 추가돼 중복됐다 → 직접 수정)
@@ -2475,7 +2500,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
 
   useEffect(() => {
     if (status === "prüfen" && actualRec) {
-      const zustaendig = f === "TEEnJOY" ? "teddy" : "yeaji";
+      const zustaendig = "yeaji";
       const notifKey = `prüfen_${userName}_${d}`;
       setNotifications(prev => {
         if (prev && prev[notifKey]) return prev;
@@ -3262,7 +3287,7 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
   const [regRole,setRegRole]=useState("Staff");
   const [preSchedule]=useFirebase("schedule",{});   // 로그인 전 Dienstplan 실시간 구독
   const [preRecords]=useFirebase("records",[]);
-  const ADMIN_NAMES=["yeaji","tingting","teddy","huy"];
+  const ADMIN_NAMES=["yeaji","tingting","huy"];
   const safeUsers=Array.isArray(users)?users:[];
   const isAdminName=regV.trim()!==""&&ADMIN_NAMES.some(n=>regV.trim().toLowerCase().includes(n));
   // 역할이 Admin/Management이거나 isAdmin이면 무조건 MANAGEMENT 그룹으로 분류 (하이브리드 관리자 포함)
@@ -3540,7 +3565,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilia
     // 📍 근무표에 오늘 배정된 지점이 있는데, 다른 지점을 골랐다면 한 번 더 확인.
     //    (실수로 ONIGIRI 등 엉뚱한 지점에 도장 찍는 것을 방지)
     const assigned = assignedFilialen instanceof Set ? assignedFilialen : new Set();
-    if(assigned.size>0 && selFiliale && !assigned.has(selFiliale)){
+    if(assigned.size>0 && selFiliale && !isOnlineFiliale(selFiliale) && !assigned.has(selFiliale)){
       const geplant = Array.from(assigned).join(", ");
       const ok = window.confirm(
         "⚠️ Achtung — Filiale prüfen!\n\n"+
@@ -3555,7 +3580,7 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilia
       window.alert("⏰ Bitte eine vollständige Uhrzeit eingeben.\n\nStunden UND Minuten, z. B. 11:00 (nicht nur 11).");
       return;
     }
-    if(typNorm(clockTyp)!=="einspringen" && Array.isArray(regularShifts) && regularShifts.length===0){
+    if(typNorm(clockTyp)!=="einspringen" && !isOnlineFiliale(selFiliale) && Array.isArray(regularShifts) && regularShifts.length===0){
       const ok = window.confirm(
         "⚠️ Kein regulärer Dienst geplant!\n\n"+
         "Für heute ist für dich kein regulärer Dienst eingetragen.\n\n"+
@@ -4211,30 +4236,20 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         {isAdmin && (()=>{
           const registered = new Set((Array.isArray(users)?users:[]).map(u=>(u.vorname||"").toLowerCase()));
           // 근무표에 있으나 '계정 이름과 정확히 일치하지 않는' 이름 = 매칭 대상 Temp 이름.
-          //   · 자동(느슨) 매칭에 기대지 않는다. 관리자가 명시적으로 연결해야 근무표 이름이 옮겨진다.
-          //   · 예) 근무표 "Eunjin" vs 계정 "Eunjin 🐵🤓" → 정확히 다르므로 목록에 떠서 연결 가능.
-          //   · 계정 vorname과 '완전히 똑같은' 근무표 이름만 이미 연결된 것으로 보고 제외한다.
+          //   · 관리자(이모지 포함)는 제외 — 관리자는 이미 계정이 있고 uid로 연결됨.
+          //   · 자동 매칭에 기대지 않는다. 관리자가 직접 연결해야 '이미 연결됨'이 된다.
           const openTempNames = Object.keys(schedForMatch||{})
-            .filter(n=> n && !isManagerName(n.toLowerCase())
+            .filter(n=> n && !isManagerName(n)
               && !registered.has(n.toLowerCase()));
           const realEmps = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key)).sort(byName);
-          // 이미 연결한 이력 (연결 후에도 목록에 남겨 재연결 가능하게 함)
-          const linkedFromHistory = Object.entries(tempLinks||{})
+          // ✅ '이미 연결됨'은 관리자가 직접 연결한 이력(tempLinks)만 표시한다.
+          //    (uidOf 자동 매칭은 근무표 표시엔 계속 작동하지만, 여기 목록엔 안 넣는다 →
+          //     관리자가 명시적으로 연결하도록 유도)
+          const linkedEntries = Object.entries(tempLinks||{})
             .map(([k,v])=>({ temp:v?.temp||k, real:v?.real||"", realKey:v?.realKey||"", ts:v?.ts||0 }))
-            .filter(e=>e.temp);
-          // 🔗 tempLinks 이력에 없지만 '근무표에 있는 이름 중 계정에 연결되는' 이름을 모두
-          //    '이미 연결됨'으로 보여준다. (근무표 이름=계정 이름인 정상 케이스 포함 — 관리자가
-          //     한눈에 보고 필요하면 재매칭할 수 있게.) 자기 자신(관리자 본인 계정)은 제외.
-          const histTempSet = new Set(linkedFromHistory.map(e=>e.temp.toLowerCase()));
-          const allSchedNames = Object.keys(schedForMatch||{})
-            .filter(n=> n && !isManagerName(n.toLowerCase()));
-          const autoLinked = allSchedNames
-            .filter(n=>!histTempSet.has(n.toLowerCase()))
-            .map(n=>{ const uid=uidOf(users,n); const u=uid?userByUid(users,uid):null;
-              return u ? {temp:n, real:u.vorname, realKey:u.key, ts:0} : null; })
-            .filter(Boolean);
-          const linkedEntries = [...linkedFromHistory, ...autoLinked].sort((a,b)=>b.ts-a.ts);
-          // 미연결 이름 중 이미 이력/자동연결에 있는 것은 이력 쪽에서만 보여준다(중복 방지)
+            .filter(e=>e.temp && !isManagerName(e.temp))
+            .sort((a,b)=>b.ts-a.ts);
+          // 미연결 이름 중 이미 이력에 있는 것은 이력 쪽에서만 보여준다(중복 방지)
           const linkedTempSet = new Set(linkedEntries.map(e=>e.temp.toLowerCase()));
           const openOnly = openTempNames.filter(n=>!linkedTempSet.has(n.toLowerCase()));
 
@@ -4873,7 +4888,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     // Firebase   (antraege +   notifications)
     setAntraege(prev=>[...prev,{id,user:user.vorname,date:nDatum,filiale:nFiliale,ein:nEin,aus:nAus,pauseSec,grund:nGrund,status:"offen",zustaendig:"all"}]);
     if (window._fbDb && window._fbRef && window._fbSet) {
-      ["teddy","yeaji"].forEach(mgr => {
+      ["yeaji"].forEach(mgr => {
         window._fbSet(window._fbRef(window._fbDb, `notifications/nachtrag_${id}_${mgr}`), {
           type: "nachtrag", kategorie: "Nachtrag",
           user: user.vorname, date: nDatum, filiale: nFiliale, ein: nEin, aus: nAus,
@@ -5146,6 +5161,16 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
                     {(isOnigiriFiliale(f)?"🍙 ":"")+f.replace("TEEAMO ","")}
                   </button>
                 ))}
+                {/* 💻 Online — 오너(Yeaji)에게만 보이는 재택근무 지점 */}
+                {isOwnerKey(userKey) && (
+                  <button key="online" onClick={()=>setSelFiliale(ONLINE_FILIALE)}
+                    style={{padding:"9px 4px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",
+                      border:`2px solid ${selFiliale===ONLINE_FILIALE?"#6366f1":C.border}`,
+                      background:selFiliale===ONLINE_FILIALE?"#e0e7ff":"#fff",
+                      color:selFiliale===ONLINE_FILIALE?"#4338ca":C.muted}}>
+                    {"💻 Online"}
+                  </button>
+                )}
               </div>
               {/* 근무 유형 선택 */}
               <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6}}>Arbeitstyp</div>
@@ -5450,7 +5475,10 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 //  STATISTIK 
 // 📊 통계에서 완전히 제외할 더미/과거 월 (예: Juni 2026)
 const STAT_EXCLUDED_MONTHS = new Set(["2026-06"]);
-function StatistikTab({records,users,schedule}){
+function StatistikTab({records,users,schedule,userKey}){
+  // 💻 Online 근무는 오너(Yeaji)만 볼 수 있다. 다른 관리자에겐 Online 기록을 숨긴다.
+  const _viewerOwner = isOwnerKey(userKey);
+  records = (Array.isArray(records)?records:[]).filter(r=> _viewerOwner || !isOnlineFiliale(r&&r.filiale));
   // records + Dienstplan(schedule)에서 달 추출 + 현재 달 포함, 최신순 정렬
   const availMonths = React.useMemo(()=>{
     const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
@@ -7232,7 +7260,9 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
     return d.getFullYear()+"_"+String(d.getMonth()+1).padStart(2,"0");
   })();
   const [selMonth, setSelMonth] = useState(currentMonth);
-  const empList = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key))
+  // 직원 + '근무하는 관리자'(하이브리드)를 목록에 포함. 순수 관리자(근무 없음)는 제외.
+  const empList = (Array.isArray(users)?users:[])
+    .filter(u=> !isManagerName(u.key) || adminWorks(u, schedule, records))
     .sort(byName);
 
   const norm = v => !v?[]:Array.isArray(v)?v:Object.values(v);
@@ -7412,7 +7442,10 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                       {emp?emp.kuerzel:name.slice(0,2)}
                     </div>
                     <div>
-                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{name}</div>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>
+                        {name}
+                        {emp && isAdminUser(emp) && <span style={{marginLeft:6,fontSize:9,fontWeight:800,color:C.mintDark,background:C.mintLight,padding:"1px 6px",borderRadius:99}}>{"👑 Admin"}</span>}
+                      </div>
                       {!accountExists&&<div style={{fontSize:9,color:C.muted}}>Kein Konto</div>}
                     </div>
                   </div>
@@ -7849,7 +7882,13 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
 }
 
 function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,users,setUsers,csvCtx,onSwitchToStaff,hybrid}){
+  // 💻 Online 근무는 오너(Yeaji)만 열람. 다른 관리자 화면에선 Online 기록을 숨긴다.
+  //    (setRecords는 원본을 그대로 쓰고, 표시·집계용 records만 필터)
+  const _viewerOwner = isOwnerKey(userKey);
+  const _allRecords = records;
+  records = (Array.isArray(records)?records:[]).filter(r=> _viewerOwner || !isOnlineFiliale(r&&r.filiale));
   const [tab,setTab]=useState("uebersicht");
+  const [scheduleForList] = useFirebase("schedule", {});   // 근무하는 관리자 판정용
   const [antragTab,setAntragTab]=useState("schichtboerse"); // Anträge 서브탭
   const [detailKey,setDetailKey]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
@@ -7952,7 +7991,11 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   const empList=safeUsers.filter(u=>!isManagerName(u.key)).sort(byName);
   // 👥 All Staffs 목록에는 관리자도 포함해 전부 보여준다 (자기 자신은 제외).
   //    삭제 권한은 UebersichtAllTab 내부에서 역할에 따라 판정한다.
-  const allStaffList=safeUsers.filter(u=>u.key!==userKey).sort(byName);
+  // All Staffs: 직원 전원 + '근무하는 관리자'(본인 포함). 근무 안 하는 순수 관리자는 제외.
+  //   · 본인(Yeaji)도 자기 근무 현황을 보도록 포함한다. (삭제 버튼은 자기 자신엔 안 뜸)
+  const allStaffList=safeUsers
+    .filter(u=> !isManagerName(u.key) || adminWorks(u, scheduleForList, records))
+    .sort(byName);
   const todayRecs=records.filter(r=>r.date===today());
   // 🔒 filiale를 주면 해당 지점 근무만 보고 상태를 판정한다.
   //    (오전 ONIGIRI 퇴근이 오후 TEEnJOY 카드까지 Feierabend로 만들던 버그 방지)
@@ -8083,8 +8126,8 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
     const entscheidung = ok ? "genehmigt" : "abgelehnt";
     //     bearbeitetVon 
-    ["teddy","yeaji"].forEach(mgr => {
-      const k = `${notifKey.replace(/_teddy$|_yeaji$/,"")}_${mgr}`;
+    ["yeaji"].forEach(mgr => {
+      const k = `${notifKey.replace(/_yeaji$/,"")}_${mgr}`;
       if (window._fbDb && window._fbRef && window._fbSet) {
         window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/bearbeitetVon`), userKey).catch(()=>{});
         window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/gelesen`), true).catch(()=>{});
@@ -8111,7 +8154,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       overrideWithNachtrag({ a:{user:n.user, date:n.date, filiale:n.filiale, ein:n.ein, aus:n.aus, grund:n.grund||""}, setRecords });
     }
     const entscheidung = ok ? "genehmigt" : "abgelehnt";
-    ["teddy","yeaji"].forEach(mgr => {
+    ["yeaji"].forEach(mgr => {
       const k = `nachtrag_${n.antragId}_${mgr}`;
       if (window._fbDb && window._fbRef && window._fbSet) {
         window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/bearbeitetVon`), userKey).catch(()=>{});
@@ -8141,7 +8184,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
   function handleEinspringen(notifKey, n) {
     markRead(notifKey);
-    ["teddy","yeaji"].forEach(mgr => {
+    ["yeaji"].forEach(mgr => {
       const k = `einspringen_${n.id||notifKey.split("_")[1]}_${mgr}`;
       if (window._fbDb && window._fbRef && window._fbSet) {
         window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/bearbeitetVon`), userKey).catch(()=>{});
@@ -8162,7 +8205,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
     // ✅ 승인 시 records를 승인된 Nachtragen 시간으로 덮어써 근무표를 즉시 동기화
     if (ok && target) overrideWithNachtrag({ a:target, setRecords });
     // notifications  nachtrag  bearbeitetVon 
-    ["teddy","yeaji"].forEach(mgr => {
+    ["yeaji"].forEach(mgr => {
       const k = `nachtrag_${id}_${mgr}`;
       if (window._fbDb && window._fbRef && window._fbSet) {
         window._fbSet(window._fbRef(window._fbDb, `notifications/${k}/bearbeitetVon`), userKey).catch(()=>{});
@@ -8537,7 +8580,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
       )}
 
       {/*  STATISTIK  */}
-      {tab==="statistik"&&<StatistikTab records={records} users={users} schedule={schedule}/>}
+      {tab==="statistik"&&<StatistikTab records={records} users={users} schedule={schedule} userKey={userKey}/>}
 
       {/*  SCHICHTBRSE (Admin)  */}
       {tab==="schichtboerse_mgr"&&(
