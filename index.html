@@ -1080,7 +1080,7 @@ function plannedTimesFor(schedule, name, date){
 }
 // 정산 원장 행 생성 (통합본/개별 공용)
 const ABRECHNUNG_HEADER = ["Datum","Wochentag","Mitarbeiter/in","Filiale","Arbeitstyp",
-  "Plan Von","Plan Bis","Ist Einstempeln","Ist Ausstempeln","Stunden","Nachtragen","Auto-Ausstempeln","Anmerkung"];
+  "Plan Von","Plan Bis","Ist Einstempeln","Ist Ausstempeln","Pause (Min)","Stunden (netto)","Nachtragen","Auto-Ausstempeln","Anmerkung"];
 function abrechnungRows(recs, schedule){
   return (Array.isArray(recs)?recs:[])
     .filter(r=>r&&r.ein&&r.aus)
@@ -1089,9 +1089,11 @@ function abrechnungRows(recs, schedule){
     .map(r=>{
       const pl=plannedTimesFor(schedule, r.user, r.date);
       const h=recHours(r);
+      const pMin=recPauseMin(r);
       return [
         r.date||"", TAGE_DE[new Date(r.date).getDay()]||"", r.user||"", r.filiale||"",
         typLabel(statTyp(r)), pl.von, pl.bis, r.ein||"", r.aus||"",
+        pMin>0?String(pMin):"0",
         h.toFixed(2).replace(".",","), r.typ==="nachtrag"?"Ja":"Nein",
         r.isAutoCheckedOut?"Ja":"Nein", r.note||"",
       ];
@@ -2000,7 +2002,13 @@ function freigebenSchicht({ userName, date, filiale, time, grund, users }) {
   // ⛔ 당일·과거 근무는 Schichtbörse에 내놓을 수 없다.
   //    받을 사람이 준비할 시간이 없기 때문. 당일 결원은 Einspringen으로 메꾼다.
   //    (내일 이후 근무만 미리 넘길 수 있다)
-  if(String(date||"").slice(0,10) <= today()){
+  const dOnly = String(date||"").slice(0,10);
+  if(dOnly <= today()){
+    console.warn("🔁 [freigeben] 차단: 당일·과거 근무", { date:dOnly, today:today() });
+    return false;
+  }
+  if(!(window._fbDb && window._fbRef && window._fbSet)){
+    console.error("🔁 [freigeben] Firebase 미연결");
     return false;
   }
   const schichtId = Date.now();
@@ -2009,8 +2017,15 @@ function freigebenSchicht({ userName, date, filiale, time, grund, users }) {
     angeboten_von:userName, angeboten_von_uid:uidOf(users,userName)||"",
     quelle:"eigene",            // 🏷 내가 원래 하던 근무를 넘기는 것 → 진짜 교환(Tausch)
     ts:schichtId };
-  if (window._fbDb && window._fbRef && window._fbSet) {
-    window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+schichtId), newFrei).catch(()=>{});
+  try{
+    window._fbSet(window._fbRef(window._fbDb,"freieSchichten/"+schichtId), newFrei)
+      .then(()=>{
+        console.log("🔁 [freigeben] Schichtbörse 등록 완료", newFrei);
+        // ✅ 마켓 등록이 확정된 뒤에 근무표에 freigegeben 표시 → 둘이 어긋나지 않게 한다.
+        //    (예전엔 patch만 되고 마켓엔 안 올라가, 버튼도 사라지고 취소도 못 하는 상태가 됐다)
+        patchScheduleShiftAtFiliale(userName, date, filiale, {status:"freigegeben", freigabeGrund:grund||"", schichtId}, time);
+      })
+      .catch(e=>console.error("🔁 [freigeben] freieSchichten 저장 실패:", e));
     const dateStr = new Date(date).toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"numeric"});
     const msgTxt = "📢 [Schichtbörse] "+userName+" gibt Schicht frei! "+dateStr+" · "+filiale+(time?" · "+time:"")+" — Jetzt übernehmen!";
     (Array.isArray(users)?users:[]).filter(u=>!u.isAdmin&&u.vorname!==userName).forEach(u=>{
@@ -2020,10 +2035,11 @@ function freigebenSchicht({ userName, date, filiale, time, grund, users }) {
         date,filiale,time:time||null,text:msgTxt,gelesen:false,ts:schichtId
       }).catch(()=>{});
     });
+  }catch(e){
+    console.error("🔁 [freigeben] 예외:", e);
+    return false;
   }
-  // 🔒 같은 날 여러 지점 근무가 있어도, 넘긴 그 지점·시간 근무 1건에만 freigegeben 표시.
-  //    (예: Eunjin이 TEEnJOY+ONIGIRI 같은 날 → 하나만 눌렀는데 둘 다 freigegeben 되던 버그 수정)
-  patchScheduleShiftAtFiliale(userName, date, filiale, {status:"freigegeben", freigabeGrund:grund||""}, time);
+  return true;
 }
 
 // Nachtragen(사후 등록): 자동승인 record 저장 + 관리자 Anträge(Nachtragen) 알림 로그
@@ -6720,6 +6736,26 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
   const recFor=(name, filiale)=> selDate!==todayStr ? null
     : recordForShift(records, name, selDate, filiale);
 
+  // 🔁 freigeben 취소/복구 — freieSchichten에서 제거 + 근무표 status 초기화.
+  //    (마켓엔 없는데 근무표만 freigegeben으로 남은 '끊긴' 상태도 이걸로 되돌린다)
+  async function ruecknahmeFreigabe(name, date, filiale, time){
+    try{
+      if(window._fbDb && window._fbRef && window._fbGet && window._fbRemove){
+        const snap = await window._fbGet(window._fbRef(window._fbDb,"freieSchichten"));
+        const data = snap.val() || {};
+        for(const [k,v] of Object.entries(data)){
+          if(!v || v.besetzt) continue;                                   // 이미 받은 건 취소 불가
+          if((v.date||v.d)!==date) continue;
+          if(!sameFiliale(v.filiale||v.f, filiale)) continue;
+          if(!sameName(v.angeboten_von||"", name)) continue;
+          await window._fbRemove(window._fbRef(window._fbDb,"freieSchichten/"+k)).catch(()=>{});
+        }
+      }
+      await patchScheduleShiftAtFiliale(name, date, filiale, {status:null, freigabeGrund:"", schichtId:null}, time);
+      return true;
+    }catch(e){ console.error("🔁 [ruecknahme] 실패:", e); return false; }
+  }
+
   return (
     <div>
       {/* 달력 */}
@@ -7015,12 +7051,27 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                           style={{...iBtn,background:C.redLight,color:C.red}}>{"×"}</button>
                       </div>
                     )}
+                    {/* 🔁 freigegeben 상태 되돌리기 (마켓에 안 뜨거나 취소하고 싶을 때) */}
+                    {isMine&&transl&&r.status==="freigegeben"&&!allowDelete&&(
+                      <div style={{flexShrink:0}}>
+                        <button onClick={async()=>{
+                          if(!window.confirm("Freigabe zurücknehmen?\n"+r.name+" · "+selDate)) return;
+                          const ok=await ruecknahmeFreigabe(r.rawName, selDate, fil, r.time);
+                          setActMsg(ok ? "✅ Freigabe zurückgenommen." : "❌ Fehler beim Zurücknehmen.");
+                          setTimeout(()=>setActMsg(""),3500);
+                        }} style={{padding:"6px 9px",borderRadius:8,border:"1px solid "+C.yellow,background:C.yellowLight,color:"#b45309",fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{"↩︎ Zurücknehmen"}</button>
+                      </div>
+                    )}
                     {/* 직원 본인: 양도 / Nachtragen */}
                     {isMine&&!transl&&!allowDelete&&(
                       <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
                         {/* Freigeben: 내일(미래) 근무만 — 과거/당일은 차단 */}
                         {selDate>todayStr&&(
-                          <button onClick={()=>{ if(window.confirm("Schicht freigeben?\n"+r.name+" · "+selDate)) freigebenSchicht({userName:r.rawName,date:selDate,filiale:fil,time:r.time,users}); }}
+                          <button onClick={()=>{ if(window.confirm("Schicht freigeben?\n"+r.name+" · "+selDate)){
+                            const ok=freigebenSchicht({userName:r.rawName,date:selDate,filiale:fil,time:r.time,users});
+                            setActMsg(ok ? "✅ In der Schichtbörse veröffentlicht." : "⛔ Vergangene/heutige Schichten können nicht freigegeben werden.");
+                            setTimeout(()=>setActMsg(""),3500);
+                          } }}
                             style={{padding:"6px 9px",borderRadius:8,border:"none",background:C.navy,color:"#fff",fontSize:10,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{"🔁 Freigeben"}</button>
                         )}
                         {/* Nachtragen 노출 규칙:
