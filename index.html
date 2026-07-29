@@ -538,6 +538,15 @@ function formatTimeStr(raw){
   const digits=(raw||"").replace(/\D/g,"").slice(0,4);
   return digits.length<=2 ? digits : digits.slice(0,2)+":"+digits.slice(2);
 }
+// ⏰ 완전하고 유효한 "HH:MM" 인지 검사 (예: "11"만 입력 → false, "11:00" → true)
+//   직원이 시·분을 다 채우지 않으면 근무시간 계산이 NaN이 되므로 확정 전에 막는다.
+function isValidTimeStr(t){
+  const s=String(t||"").trim();
+  const m=s.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return false;
+  const h=parseInt(m[1],10), mi=parseInt(m[2],10);
+  return h>=0 && h<=23 && mi>=0 && mi<=59;
+}
 function TimeInput({ value, onChange, placeholder, style }) {
   return (
     <input
@@ -2010,7 +2019,9 @@ function freigebenSchicht({ userName, date, filiale, time, grund, users }) {
       }).catch(()=>{});
     });
   }
-  patchScheduleShift(userName, date, {status:"freigegeben", freigabeGrund:grund||""});
+  // 🔒 같은 날 여러 지점 근무가 있어도, 넘긴 그 지점·시간 근무 1건에만 freigegeben 표시.
+  //    (예: Eunjin이 TEEnJOY+ONIGIRI 같은 날 → 하나만 눌렀는데 둘 다 freigegeben 되던 버그 수정)
+  patchScheduleShiftAtFiliale(userName, date, filiale, {status:"freigegeben", freigabeGrund:grund||""}, time);
 }
 
 // Nachtragen(사후 등록): 자동승인 record 저장 + 관리자 Anträge(Nachtragen) 알림 로그
@@ -3510,8 +3521,11 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilia
       if(!ok) return;
     }
     const t = manualMode ? manualTime : nowStr;
-    // 🧋 Regulär로 찍는데, 오늘 이 사람에게 계획된 근무가 하나도 없으면 확인.
-    //    (당일 Regulär는 새로 안 생기므로, 계획이 없는데 Regulär면 보통 Einspringen이어야 한다)
+    // ⏰ 수동 입력 시간이 완전한 HH:MM인지 확인 (예: "11"만 입력 → 막고 안내)
+    if(manualMode && !isValidTimeStr(t)){
+      window.alert("⏰ Bitte eine vollständige Uhrzeit eingeben.\n\nStunden UND Minuten, z. B. 11:00 (nicht nur 11).");
+      return;
+    }
     if(typNorm(clockTyp)!=="einspringen" && Array.isArray(regularShifts) && regularShifts.length===0){
       const ok = window.confirm(
         "⚠️ Kein regulärer Dienst geplant!\n\n"+
@@ -3548,6 +3562,11 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilia
   function doAus(){
     if(ausInvalid) return;
     const t = manualMode ? manualTime : nowStr;
+    // ⏰ 수동 입력 시간이 완전한 HH:MM인지 확인
+    if(manualMode && !isValidTimeStr(t)){
+      window.alert("⏰ Bitte eine vollständige Uhrzeit eingeben.\n\nStunden UND Minuten, z. B. 18:30 (nicht nur 18).");
+      return;
+    }
     const inStr = `${pad(clockInTime.getHours())}:${pad(clockInTime.getMinutes())}`;
     onAus(inStr, t);
   }
@@ -4174,12 +4193,16 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           const linkedFromHistory = Object.entries(tempLinks||{})
             .map(([k,v])=>({ temp:v?.temp||k, real:v?.real||"", realKey:v?.realKey||"", ts:v?.ts||0 }))
             .filter(e=>e.temp);
-          // 🔗 tempLinks엔 없지만 uidOf로 이미 계정에 연결되는 근무표 이름도 '이미 연결됨'으로 보여준다.
-          //    (앱 업데이트 전에 자동 매칭돼 있던 기존 이름들 — 관리자가 재매칭·확인할 수 있게 목록에 노출)
+          // 🔗 tempLinks 이력에 없지만 '근무표에 있는 이름 중 계정에 연결되는' 이름을 모두
+          //    '이미 연결됨'으로 보여준다. (근무표 이름=계정 이름인 정상 케이스 포함 — 관리자가
+          //     한눈에 보고 필요하면 재매칭할 수 있게.) 자기 자신(관리자 본인 계정)은 제외.
           const histTempSet = new Set(linkedFromHistory.map(e=>e.temp.toLowerCase()));
-          const autoLinked = openTempNames
+          const allSchedNames = Object.keys(schedForMatch||{})
+            .filter(n=> n && !isManagerName(n.toLowerCase()));
+          const autoLinked = allSchedNames
             .filter(n=>!histTempSet.has(n.toLowerCase()))
-            .map(n=>{ const uid=uidOf(users,n); const u=uid?userByUid(users,uid):null; return u?{temp:n, real:u.vorname, realKey:u.key, ts:0}:null; })
+            .map(n=>{ const uid=uidOf(users,n); const u=uid?userByUid(users,uid):null;
+              return u ? {temp:n, real:u.vorname, realKey:u.key, ts:0} : null; })
             .filter(Boolean);
           const linkedEntries = [...linkedFromHistory, ...autoLinked].sort((a,b)=>b.ts-a.ts);
           // 미연결 이름 중 이미 이력/자동연결에 있는 것은 이력 쪽에서만 보여준다(중복 방지)
@@ -4814,6 +4837,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
       return;
     }
     if(!nGrund.trim()){setNMsg("Bitte einen Grund angeben.");return;}
+    if(!isValidTimeStr(nEin)||!isValidTimeStr(nAus)){setNMsg("⏰ Vollständige Uhrzeit (HH:MM) eingeben, z. B. 11:00.");return;}
     const id = Date.now();
     const ts = id;
     const pauseSec=Math.max(0,parseInt(nPause,10)||0)*60;   // 분 → 초
@@ -6824,6 +6848,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                         <button onClick={()=>setNachRow(null)} style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
                         <button onClick={()=>{
                           if(!nachRow.von||!nachRow.bis){ setActMsg("Bitte VON und BIS angeben."); return; }
+                          if(!isValidTimeStr(nachRow.von)||!isValidTimeStr(nachRow.bis)){ setActMsg("⏰ Vollständige Uhrzeit (HH:MM) eingeben, z. B. 11:00."); return; }
                           // 🔒 지난달 근무는 유예 기간 이후 수정 불가
                           if(nachtragLocked(selDate)){ setActMsg("Für abgeschlossene Monate ist kein Nachtragen möglich."); return; }
                           const pauseSec=Math.max(0,parseInt(nachRow.pause,10)||0)*60;  // 분 → 초
