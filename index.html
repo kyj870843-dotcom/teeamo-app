@@ -828,7 +828,15 @@ function useFirebase(path, fallback) {
           setData(fallback);
         } else if (Array.isArray(fallback)) {
           // Firebase stores arrays as objects with numeric/string keys
-          setData(Object.values(val));
+          // 🔒 [FIX] records: Firebase 키를 __key로 고정 보관한다.
+          //    → 저장 시 이름/uid에서 id를 다시 계산하지 않고 이 __key로만 쓴다.
+          //      연결·개명이 일어나도 기록은 자리를 옮기지 않는다.
+          if (path === "records" && val && typeof val === "object") {
+            setData(Object.entries(val).map(([k,v]) =>
+              (v && typeof v === "object") ? { ...v, __key: k } : v));
+          } else {
+            setData(Object.values(val));
+          }
         } else {
           setData(val);
         }
@@ -891,11 +899,46 @@ function useFirebase(path, fallback) {
       .catch(e => console.error("FB write error ["+path+"]:", e));
   }
 
+  // 🔒 [FIX] records 전용 저장: 이전/다음 목록을 비교해 '달라진 기록만' 개별 반영한다.
+  //    · 추가/변경된 기록 → 그 키만 set
+  //    · 사라진 기록      → 그 키만 remove (명시적으로 없어진 것만)
+  //    · 메모리에 없던 기록은 건드리지 않음 → 대량 소실 원천 차단
+  //    · 목록이 비어도 노드 전체를 null로 지우지 않음
+  function fbWriteRecordsDiff(prevArr, nextArr) {
+    const db = window._fbDb, R = window._fbRef, SET = window._fbSet, REMOVE = window._fbRemove;
+    if (!db || !R || !SET) return;
+    const strip = v => { if (!v || typeof v !== "object") return v; const { __key, ...rest } = v; return rest; };
+    const keyOf = (v, i) => {
+      const k = v && (v.__key != null ? v.__key : (v.id != null ? v.id : v.key));
+      return String(k != null ? k : ("auto_" + i));
+    };
+    const prev = Array.isArray(prevArr) ? prevArr : [];
+    const next = Array.isArray(nextArr) ? nextArr : [];
+    const prevMap = {}; prev.forEach((v, i) => { prevMap[keyOf(v, i)] = v; });
+    const nextMap = {}; next.forEach((v, i) => { nextMap[keyOf(v, i)] = v; });
+    // 추가/변경: next에 있고 prev와 '같은 객체 참조'가 아니면(=바뀌었으면) 그 키만 기록
+    Object.keys(nextMap).forEach(k => {
+      const nv = nextMap[k], pv = prevMap[k];
+      if (pv === nv) return; // 참조 동일 = 안 바뀜 → skip
+      SET(R(db, "records/" + k), strip(tagBranch(nv)))
+        .catch(e => console.error("FB records write error [" + k + "]:", e));
+    });
+    // 삭제: prev엔 있었는데 next엔 없는 키만 제거
+    if (REMOVE) {
+      Object.keys(prevMap).forEach(k => {
+        if (!(k in nextMap))
+          REMOVE(R(db, "records/" + k)).catch(e => console.error("FB records remove error [" + k + "]:", e));
+      });
+    }
+  }
+
   function setter(updater) {
     //  :    + Firebase 
     setData(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      fbWrite(next);
+      // 🔒 [FIX] records는 노드 전체 덮어쓰기 대신 '바뀐 기록만' 개별 반영
+      if (path === "records") fbWriteRecordsDiff(prev, next);
+      else fbWrite(next);
       return next;
     });
   }
@@ -8807,12 +8850,9 @@ function App(){
       return siblings.some(x=>x.aus && x.aus!=="" && String(x.ein||"") >= String(r.ein||""));
     });
     if(ghosts.length===0) return;
-    console.log("🧟 [유령 기록 정리] 이미 퇴근 처리된 진행중 기록 제거:", ghosts);
-    setRecords(prev=>(Array.isArray(prev)?prev:[]).filter(r=>!ghosts.some(g=>g.id===r.id)));
-    if(window._fbDb&&window._fbRef&&window._fbRemove){
-      ghosts.forEach(g=>{ if(g.id!=null)
-        window._fbRemove(window._fbRef(window._fbDb,"records/"+g.id)).catch(()=>{}); });
-    }
+    // 🔒 [FIX] 열린(진행중) 기록을 자동으로 삭제하지 않는다. (데이터 소실 방지)
+    //    유령 기록은 표시 로직에서 이미 무시되므로 DB에서 지우지 않고 로그만 남긴다.
+    console.log("🧟 [유령 기록] 표시상 무시됨 — 자동 삭제는 비활성화됨:", ghosts);
   },[records, recordsReady]);
 
   useEffect(()=>{
