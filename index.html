@@ -6085,7 +6085,7 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
   const total = empRecs.filter(r=>r.aus).reduce((a,r)=>a+recHours(r),0);
   const byMonth={};
   empRecs.forEach(r=>{const m=r.date.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(r);});
-  const monthKeys=Object.keys(byMonth).sort((a,b)=>b.localeCompare(a));
+  const monthKeys=Object.keys(byMonth).sort((a,b)=>a.localeCompare(b));
   const mn=["","Jan","Feb","Mar","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"];
   const DAY=["So","Mo","Di","Mi","Do","Fr","Sa"];
   const contract=emp.contractHours||0;
@@ -6184,7 +6184,7 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
                     textTransform:"uppercase",letterSpacing:".05em"}}>{"Filiale · Arbeitstyp"}</div>
                   <BreakdownView recs={mRecs} compact={true}/>
                 </div>
-                {[...mRecs].sort((a,b)=>b.date.localeCompare(a.date)).map((r,i)=>(
+                {[...mRecs].sort((a,b)=>a.date.localeCompare(b.date)).map((r,i)=>(
                   <div key={r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 14px",borderBottom:i<mRecs.length-1?"1px solid "+C.border:"none"}}>
                     <div style={{display:"flex",gap:10,alignItems:"center"}}>
                       <div style={{width:36,height:36,borderRadius:9,background:r.aus?C.mintLight:C.yellowLight,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
@@ -6196,7 +6196,7 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
                           {new Date(r.date).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
                           <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{filialeMitTyp(r.filiale, r.typ)}</span>
                         </div>
-                        <div style={{fontSize:12,color:C.muted,marginTop:1}}>{r.ein+" - "+(r.aus||"aktiv")}</div>
+                        <div style={{fontSize:12,color:C.muted,marginTop:1}}>{"Ist: "+r.ein+" - "+(r.aus||"aktiv")}</div>
                       </div>
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -7717,7 +7717,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                       const d=s.date||s.d, f=s.filiale||s.f, t=s.time||s.t;
                       const sSt=s.status||null, gMit=s.getauschtMit||null, gVon=s.getauschtVon||null;
                       const transl=sSt==="freigegeben"||sSt==="getauscht";
-                      const rec=accountExists?records.find(r=>sameName(r.user,name)&&r.date===d):null;
+                      const rec=accountExists?records.find(r=>sameName(r.user,name)&&r.date===d&&sameFiliale(r.filiale,f)):null;
                       return(
                         <React.Fragment key={i}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
@@ -7738,7 +7738,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                               {accountExists&&(()=>{ const ist=istTimeFor(records,name,d,f); if(!ist) return null;
                                 return (
                                   <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>
-                                    {"Ist: "+ist.ein+" – "+ist.aus}
+                                    {"Ist: "+ist.ein+" – "+ist.aus+" ("+stdLabel(ist.ein,ist.aus)+")"}
                                     {ist.isNachtrag&&<span style={{color:C.muted,fontWeight:400}}>{" · korrigiert"}</span>}
                                     {ist.isAuto&&<span style={{color:C.muted,fontWeight:400}}>{" · Auto"}</span>}
                                   </div>
@@ -7753,7 +7753,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
                             {!accountExists?(
                               <span style={{fontSize:9,padding:"3px 7px",borderRadius:99,background:C.bg,color:C.muted,fontWeight:600}}>Ausstehend</span>
                             ):rec?(
-                              <RecStatusBadge rec={rec} t={t}/>
+                              null
                             ):(
                               <span style={{fontSize:9,padding:"3px 7px",borderRadius:99,
                                 background:d<todayStr?C.redLight:C.bg,
