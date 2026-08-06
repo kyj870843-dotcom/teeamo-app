@@ -6878,8 +6878,11 @@ function NachDatumFilRow({name, d, t, schedule, users, records, todayStr, C, S})
 
 function NachMitarbeiterAntrag({name, d, nList, approveNachtrag, rejectNachtrag}) {
   const [exp, setExp] = useState(false);
-  const pN = nList.find(a=>sameName(a.user,name)&&a.date===d&&a.status==="offen");
-  const dN = nList.find(a=>sameName(a.user,name)&&a.date===d&&a.status!=="offen");
+  // 🛡 boerse_overlap(Schichtbörse 겹침)은 ein/aus가 없어 Nachtrag이 아니다.
+  //    이 뷰에서 승인하면 overrideWithNachtrag가 터지므로 제외하고, Anträge 탭에서만 처리한다.
+  const isNachtragAntrag = a => a && a.typ!=="boerse_overlap" && a.ein && a.aus;
+  const pN = nList.find(a=>isNachtragAntrag(a)&&sameName(a.user,name)&&a.date===d&&a.status==="offen");
+  const dN = nList.find(a=>isNachtragAntrag(a)&&sameName(a.user,name)&&a.date===d&&a.status!=="offen");
   if(!pN&&!dN) return null;
   return(
     <div style={{borderTop:`1px solid ${pN?C.yellow:C.border}`,marginTop:0}}>
@@ -7600,7 +7603,8 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
   function approveNachtrag(a) {
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"genehmigt"}:x));
     // ✅ 중복 근무 방지: 같은 날 실시간 출퇴근 기록을 무효화하고 승인된 Nachtragen만 반영
-    overrideWithNachtrag({ a, setRecords });
+    // 🛡 boerse_overlap 등 ein/aus 없는 요청은 덮어쓰기 대상이 아니다 (크래시 방지)
+    if(a && a.typ!=="boerse_overlap" && a.ein && a.aus) overrideWithNachtrag({ a, setRecords });
   }
   function rejectNachtrag(a) {
     setAntraege(prev=>(Array.isArray(prev)?prev:[]).map(x=>x.id===a.id?{...x,status:"abgelehnt"}:x));
