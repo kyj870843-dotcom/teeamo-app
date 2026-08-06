@@ -4703,9 +4703,16 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
         //    엉뚱하게 "근무표와 다른 지점" 경고가 떠서 정상 출근을 방해한다.
         //    → 관리자가 계획한 근무만 배정 지점으로 인정한다.
         if(s.autoCreated) return;
-        // 이 근무가 나(uid)이거나 내 이름과 매칭되면 배정 지점으로 인정
-        const sUid = s.uid || uidOf(users, nm) || "";
-        const mine = (meUid && sUid && sameName(sUid, meUid)) || sameName(nm, user?.vorname||userKey);
+        // 🔄 [스왑] 넘긴 근무(status:"getauscht")는 내 것이 아니다.
+        //    대신 getauschtMit이 나면 '받은 근무'로 인정해 Einspringen 오판을 막는다.
+        const _myName = user?.vorname||userKey;
+        let mine;
+        if(s.status==="getauscht"){
+          mine = !!(s.getauschtMit && sameName(s.getauschtMit, _myName));   // 받은 사람만 소유
+        } else {
+          const sUid = s.uid || uidOf(users, nm) || "";
+          mine = (meUid && sUid && sameName(sUid, meUid)) || sameName(nm, _myName);
+        }
         if(mine){
           const f=s.filiale||s.f||"";
           if(f) set.add(f);
@@ -6231,14 +6238,19 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
   const _rosterUsers = Array.isArray(safeUsers)?safeUsers:(Array.isArray(empList)?empList:[]);
   //  ⚠️ 하루에 여러 지점 근무가 있으면 각 근무를 독립 항목으로 펼친다
   //     (오전 ONIGIRI / 오후 TEEnJOY 가 각각 별도 카드·별도 상태로 표시)
-  const todayRoster = Object.keys(schedule||{})
-    .flatMap(nm => {
-      const emp = _rosterUsers.find(u=>sameName(u.vorname,nm)) || null;
-      return norm(schedule[nm]||[])
-        .filter(s => (s.date||s.d)===todayStr)
-        .map(s => ({ name:nm, emp, isTemp:!emp,
-          filiale:(s.filiale||s.f||""), time:(s.time||s.t||"") }));
-    })
+  // 🔄 [스왑] 넘긴 근무(status:"getauscht")는 원주인 대신 받은 사람(getauschtMit)에게 귀속시킨다.
+  //    받은 사람의 실제 엔트리가 삭제됐어도 이 역산으로 근무가 되살아난다. (Dienstplan과 동일 해석)
+  const _rosterRaw = Object.keys(schedule||{})
+    .flatMap(nm => norm(schedule[nm]||[])
+      .filter(s => (s.date||s.d)===todayStr)
+      .map(s => ({
+        name: (s.status==="getauscht" && s.getauschtMit) ? s.getauschtMit : nm,
+        filiale:(s.filiale||s.f||""), time:(s.time||s.t||"") })));
+  // 같은 (사람·지점·시간) 중복 제거 — 넘긴쪽 파생 + 받은쪽 실제 엔트리가 겹치는 것 방지
+  const _rosterSeen = new Set();
+  const todayRoster = _rosterRaw
+    .filter(x => { const k=x.name+"|"+x.filiale+"|"+x.time; if(_rosterSeen.has(k)) return false; _rosterSeen.add(k); return true; })
+    .map(x => { const emp=_rosterUsers.find(u=>sameName(u.vorname,x.name))||null; return { ...x, emp, isTemp:!emp }; })
     // 관리자 계정은 로스터에서 제외 (임시 직원은 emp=null 이므로 유지됨)
     .filter(x => !(x.emp && isManagerName(x.emp.key)));
 
