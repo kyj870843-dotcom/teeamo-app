@@ -1132,10 +1132,13 @@ function downloadCsvRows(rows, filename){
   setTimeout(()=>URL.revokeObjectURL(url),1500);
 }
 // 근무표에서 계획 시작/종료 시간 추출 → {von,bis}
-function plannedTimesFor(schedule, name, date){
+function plannedTimesFor(schedule, name, date, filiale){
   const sh=schedule&&schedule[name];
   const arr=!sh?[]:(Array.isArray(sh)?sh:Object.values(sh));
-  const hit=arr.find(s=>(s&&(s.date||s.d))===date);
+  const hits=arr.filter(s=>(s&&(s.date||s.d))===date);
+  // 🔧 지점이 주어지면 그 지점 근무의 예정시간만 (다른 지점 시간이 붙는 것 방지).
+  //    인자 없으면 기존처럼 첫 매칭 → 다른 호출부 동작 불변.
+  const hit=filiale ? (hits.find(s=>sameFiliale(s&&(s.filiale||s.f), filiale)) || null) : (hits[0]||null);
   const tm=hit&&(hit.time||hit.t);
   if(tm&&String(tm).includes("-")){
     const p=String(tm).split("-");
@@ -1152,7 +1155,7 @@ function abrechnungRows(recs, schedule){
     .slice()
     .sort((a,b)=>(a.date||"").localeCompare(b.date||"")||String(a.user||"").localeCompare(String(b.user||"")))
     .map(r=>{
-      const pl=plannedTimesFor(schedule, r.user, r.date);
+      const pl=plannedTimesFor(schedule, r.user, r.date, r.filiale);
       const h=recHours(r);
       const pMin=recPauseMin(r);
       return [
@@ -5732,12 +5735,13 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
     else downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
   }
   function exportSummary(fmt="xlsx"){
-    const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","TEEnJOY (Std)","Ø Std/Tag"];
+    const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","TEEAMO Arkaden (Std)","TEEAMO Aegidiimarkt (Std)","TEEnJOY (Std)","Online (Std)","Ø Std/Tag"];
     const rows=[hdr,...empList.map(emp=>{
       const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
       const total=er.reduce((a,r)=>a+recHours(r),0);
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+recHours(r),0);});
-      return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["TEEnJOY"].toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
+      const onlineH=er.filter(r=>isOnlineFiliale(r.filiale)).reduce((a,r)=>a+recHours(r),0);
+      return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number(byFil["TEEAMO Arkaden"].toFixed(2)),Number(byFil["TEEAMO Aegidiimarkt"].toFixed(2)),Number(byFil["TEEnJOY"].toFixed(2)),Number(onlineH.toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
     })];
     if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monatsübersicht");
     else downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
@@ -5877,11 +5881,11 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
                     </div>
                   )}
                 </div>
-                {/* 📥 직원별 개별 정산 CSV */}
-                <button onClick={()=>exportAbrechnungMitarbeiter(emp)} title={"Abrechnung CSV – "+emp.vorname}
+                {/* 📥 직원별 개별 정산 CSV — 🔒 오너 전용 */}
+                {_viewerOwner && (<button onClick={()=>exportAbrechnungMitarbeiter(emp)} title={"Abrechnung CSV – "+emp.vorname}
                   style={{flexShrink:0,width:32,height:32,borderRadius:9,border:"1px solid "+C.border,
                     background:C.mintLight,color:C.mintDark,fontSize:14,fontWeight:800,cursor:"pointer",
-                    display:"flex",alignItems:"center",justifyContent:"center"}}>{"⬇"}</button>
+                    display:"flex",alignItems:"center",justifyContent:"center"}}>{"⬇"}</button>)}
               </div>
               {/* 📊 지점 → 근무타입 계층 breakdown */}
               <BreakdownView recs={er} compact={true}/>
@@ -5889,7 +5893,7 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
           );
         })}
       </div>
-      <div style={{background:C.navy,borderRadius:14,padding:"16px",marginBottom:12}}>
+      {_viewerOwner && (<div style={{background:C.navy,borderRadius:14,padding:"16px",marginBottom:12}}>
         <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>{"📥 Daten exportieren"}</div>
         <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV – öffnet direkt in Excel"}</div>
         {/* 📥 A. 월간 통합 정산본 (모든 직원 · CSV) */}
@@ -5921,7 +5925,7 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
             </div>
           </div>
         ))}
-      </div>
+      </div>)}
       {exported&&(
         <div style={{...S.card,display:"flex",alignItems:"center",gap:9,border:`1.5px solid ${C.mint}`,background:C.mintLight}}>
           <span style={{fontSize:18}}>{"✅"}</span>
@@ -6245,10 +6249,17 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
       .filter(s => (s.date||s.d)===todayStr)
       .map(s => ({
         name: (s.status==="getauscht" && s.getauschtMit) ? s.getauschtMit : nm,
-        filiale:(s.filiale||s.f||""), time:(s.time||s.t||"") })));
+        filiale:(s.filiale||s.f||""), time:(s.time||s.t||""),
+        typ:(s.typ||"normal"), autoCreated:!!s.autoCreated })));
+  // 🫥 [자동숨김 가드] 진짜 배정 근무가 있는 사람의 '자동생성 Einspringen(유령)'은 숨긴다.
+  //    (스왑 받은 사람이 옛 코드로 출근해 생긴 유령 근무가 겹쳐 뜨는 것 방지)
+  //    진짜 대타(배정 없음)는 _realByName에 없으므로 그대로 표시된다.
+  const _realByName = new Set(_rosterRaw.filter(x=>!x.autoCreated).map(x=>x.name));
+  const _rosterFiltered = _rosterRaw.filter(x =>
+    !(x.autoCreated && typNorm(x.typ)==="einspringen" && _realByName.has(x.name)));
   // 같은 (사람·지점·시간) 중복 제거 — 넘긴쪽 파생 + 받은쪽 실제 엔트리가 겹치는 것 방지
   const _rosterSeen = new Set();
-  const todayRoster = _rosterRaw
+  const todayRoster = _rosterFiltered
     .filter(x => { const k=x.name+"|"+x.filiale+"|"+x.time; if(_rosterSeen.has(k)) return false; _rosterSeen.add(k); return true; })
     .map(x => { const emp=_rosterUsers.find(u=>sameName(u.vorname,x.name))||null; return { ...x, emp, isTemp:!emp }; })
     // 관리자 계정은 로스터에서 제외 (임시 직원은 emp=null 이므로 유지됨)
@@ -6324,7 +6335,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
               ))}
             </div>
             <div style={{display:"flex",gap:10,flexWrap:"wrap",borderTop:`1px solid ${C.border}`,paddingTop:6}}>
-              {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"TEEnJOY"}].map(({init,l})=>(
+              {[{init:"Ar",l:"Arkaden"},{init:"Ae",l:"Aegidiimarkt"},{init:"Tj",l:"TEEnJOY"},{init:"On",l:"Onigiri"}].map(({init,l})=>(
                 <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
                   <span style={{fontSize:10,fontWeight:800,color:C.navy,background:C.border,borderRadius:4,padding:"1px 5px"}}>{init}</span>
                   <span style={{fontSize:9,color:C.muted}}>{l}</span>
@@ -6342,7 +6353,7 @@ function UebersichtAllTab({ empList, schedule, records, getStatus, sColor, sBg, 
             </div>
           ):(()=>{
             //  : Arkaden  Aegidiimarkt  TEEnJOY
-            const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY"];
+            const filOrder=["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY",ONIGIRI_FILIALE];
             //   shift  (임시 직원 포함 — todayShiftEmps 항목은 {name,emp,isTemp})
             // 각 항목이 이미 [직원 · 지점 · 시간] 단위로 펼쳐져 있다
             const withShift = todayShiftEmps.map(({name,emp,isTemp,filiale,time})=>
