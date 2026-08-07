@@ -342,8 +342,8 @@ function displayNameOf(users, keyOrName){
 }
 
 // ⏰ 근무표 작성 시 추천 시간 — VON(출근) / BIS(퇴근) 독립 배열
-const QUICK_VON_TIMES = ["09:30","10:00","11:00","11:30","12:30","14:00","15:00","15:30","16:00"];
-const QUICK_BIS_TIMES = ["14:00","15:00","15:30","16:00","16:30","17:00","18:00","19:00","20:00"];
+const QUICK_VON_TIMES = ["09:00","09:30","11:00","11:30","12:00","12:30","14:00","15:00","15:30","16:00"];
+const QUICK_BIS_TIMES = ["14:00","15:00","15:30","16:00","17:00","18:00","19:00","20:00"];
 
 // 📍 Filiale = 독립된 지점. ONIGIRI는 정식 지점으로 격상되어 다른 매장과
 //    DB상 완전히 분리된 스케줄/근무 문서를 가진다.
@@ -4596,7 +4596,7 @@ function OnlineArbeitCard({ records, setRecords, userKey, users, month, enabled 
         <div style={{marginTop:10,padding:"11px",borderRadius:10,background:"#f5f3ff",border:`1px solid #c7d2fe`}}>
           <div style={{fontSize:11,fontWeight:800,color:"#4338ca",marginBottom:8}}>{onlineForm.id?"Online-Arbeit bearbeiten":"Neue Online-Arbeit"}</div>
           <input type="date" value={onlineForm.date||""} onChange={e=>setOnlineForm({...onlineForm,date:e.target.value})}
-            style={{...S.input,width:"100%",fontSize:13,padding:"8px",boxSizing:"border-box",marginBottom:8}}/>
+            style={{...S.input,width:"auto",minWidth:150,fontSize:13,padding:"8px 10px",boxSizing:"border-box",marginBottom:8}}/>
           <div style={{display:"flex",gap:8,marginBottom:8}}>
             <div style={{flex:1}}>
               <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"VON"}</div>
@@ -5816,7 +5816,7 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
             <div style={{marginTop:10,padding:"11px",borderRadius:10,background:"#f5f3ff",border:`1px solid #c7d2fe`}}>
               <div style={{fontSize:11,fontWeight:800,color:"#4338ca",marginBottom:8}}>{onlineForm.id?"Online-Arbeit bearbeiten":"Neue Online-Arbeit"}</div>
               <input type="date" value={onlineForm.date||""} onChange={e=>setOnlineForm({...onlineForm,date:e.target.value})}
-                style={{...S.input,width:"100%",fontSize:13,padding:"8px",boxSizing:"border-box",marginBottom:8}}/>
+                style={{...S.input,width:"auto",minWidth:150,fontSize:13,padding:"8px 10px",boxSizing:"border-box",marginBottom:8}}/>
               <div style={{display:"flex",gap:8,marginBottom:8}}>
                 <div style={{flex:1}}>
                   <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"VON"}</div>
@@ -7446,8 +7446,8 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                   <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{"2 · MITARBEITER/IN"}</div>
                   <select value={addEmp} onChange={e=>setAddEmp(e.target.value)} style={{...S.input,width:"100%",fontSize:13,padding:"8px 10px",boxSizing:"border-box"}}>
                     <option value="">{"— auswählen —"}</option>
-                    {(Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key)).sort(byName).map(u=>(
-                      <option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>
+                    {(Array.isArray(users)?users:[]).filter(u=>isOwnerKey(u.key)||!isManagerName(u.key)).sort(byName).map(u=>(
+                      <option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}{isOwnerKey(u.key)?" (Admin)":""}</option>
                     ))}
                     <option disabled>{"──────────"}</option>
                     <option value="__temp__">{"➕ Temp-Name direkt eingeben…"}</option>
