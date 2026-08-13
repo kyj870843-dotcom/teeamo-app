@@ -6086,6 +6086,16 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
   if (!emp) return null;
 
   const empRecs = records.filter(r=>sameName(r.user,emp.vorname));
+  // ⚠️ 중복(같은 날·지점·시간겹침) 의심 기록 id 집합 — 자동 삭제 안 하고 표시만 (관리자가 눈으로 확인 후 삭제).
+  const dupIds = (()=>{
+    const s=new Set();
+    const done=empRecs.filter(r=>r&&r.ein&&r.aus);
+    for(let i=0;i<done.length;i++)for(let j=i+1;j<done.length;j++){
+      const a=done[i],b=done[j];
+      if(a.date===b.date && sameFiliale(a.filiale,b.filiale) && timesOverlap(a.ein+"-"+a.aus, b.ein+"-"+b.aus)){ s.add(a.id); s.add(b.id); }
+    }
+    return s;
+  })();
   const total = empRecs.filter(r=>r.aus).reduce((a,r)=>a+recHours(r),0);
   const byMonth={};
   empRecs.forEach(r=>{const m=r.date.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(r);});
@@ -6167,6 +6177,7 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
                 <span style={{fontSize:14,fontWeight:800,color:C.text}}>{mn[parseInt(mo)]+" "+y}</span>
                 <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(2)+"h"}</span>
                 <span style={{fontSize:10,color:C.muted}}>{mDays+" Tage"}</span>
+                {mRecs.some(r=>dupIds.has(r.id))&&<span style={{fontSize:12,fontWeight:800,color:C.red}} title="Mögliche Doppelung in diesem Monat">{"⚠️"}</span>}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 {mDiff!==null&&<span style={{fontSize:11,fontWeight:700,color:mDiff>=0?C.mintDark:C.red}}>{(mDiff>=0?"+":"")+mDiff.toFixed(2)+"h"}</span>}
@@ -6201,6 +6212,7 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
                           <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:5}}>{filialeMitTyp(r.filiale, r.typ)}</span>
                         </div>
                         <div style={{fontSize:12,color:C.muted,marginTop:1}}>{"Ist: "+r.ein+" - "+(r.aus||"aktiv")}</div>
+                        {dupIds.has(r.id)&&<div style={{fontSize:10,fontWeight:800,color:C.red,marginTop:2}}>{"⚠️ Mögl. Doppelt — bitte prüfen"}</div>}
                       </div>
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
