@@ -1053,6 +1053,17 @@ function today() {
   //    (CET=UTC+1, CEST=UTC+2  )
   return new Date().toLocaleDateString("sv-SE", {timeZone:"Europe/Berlin"});
 }
+// 🕐 브라우저 무관 안정적 '베를린 현재 시각(분 단위)'. (new Date(toLocaleString) 파싱 불안정 회피)
+function berlinNowMinutes() {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {timeZone:"Europe/Berlin", hour:"2-digit", minute:"2-digit", hour12:false}).formatToParts(new Date());
+    const h = Number((parts.find(p=>p.type==="hour")||{}).value);
+    const m = Number((parts.find(p=>p.type==="minute")||{}).value);
+    if (Number.isFinite(h) && Number.isFinite(m)) return (h % 24) * 60 + m;
+  } catch(e) {}
+  const d = new Date();
+  return d.getHours()*60 + d.getMinutes();
+}
 
 // 🔒 Nachtragen 마감: 지난달 근무는 '다음 달 며칠'까지만 수정 가능하다.
 //   급여 마감에 여유를 주기 위해 매월 초 GRACE_DAYS일간은 전달 보정을 허용한다.
@@ -1543,6 +1554,26 @@ function calcShiftMinutes(timeRange) {
   const s = parseMinutes(start), e = parseMinutes(end);
   if (s == null || e == null) return null;
   return e > s ? e - s : null;
+}
+// 📅 [①] 근무표(schedule)에서 한 직원의 특정 달 '예정 근무시간(분)' 합산.
+//    스왑 반영: 넘긴 근무(status:getauscht)는 받은 사람(getauschtMit)에게 귀속, 중복 제거.
+function plannedMonthMinutes(schedule, empName, monthKey){
+  if(!schedule || !empName || !monthKey) return 0;
+  const seen=new Set(); let total=0;
+  Object.keys(schedule).forEach(nm=>{
+    const arr = Array.isArray(schedule[nm]) ? schedule[nm] : Object.values(schedule[nm]||{});
+    arr.forEach(s=>{
+      if(!s) return;
+      const date=s.date||s.d; if(!date || String(date).slice(0,7)!==monthKey) return;
+      const effName=(s.status==="getauscht" && s.getauschtMit) ? s.getauschtMit : nm;
+      if(!sameName(effName, empName)) return;
+      const fil=s.filiale||s.f||"", tm=s.time||s.t||"";
+      const k=date+"|"+fil+"|"+tm;
+      if(seen.has(k)) return; seen.add(k);
+      const mins=calcShiftMinutes(tm); if(mins) total+=mins;
+    });
+  });
+  return total;
 }
 function getShiftStatus(shift, actualRec, date) {
   const todayStr = today();
@@ -2530,7 +2561,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
   const now = new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
   const todayStr = today();
   // 근무시간이 지났는지 (당일 포함)
-  const shiftPassed = d < todayStr || (d === todayStr && t && now.getHours()*60+now.getMinutes() > parseMinutes((t.split("-")[1]||"23:59")));
+  const shiftPassed = d < todayStr || (d === todayStr && t && berlinNowMinutes() > parseMinutes((t.split("-")[1]||"23:59")));
   // 🚫 당일 Nachtragen 차단: 오늘 이미 실시간 출퇴근 기록(Einstempeln 완료 → 근무 중 or
   //    정상 종료)이 있으면 당일 카드의 Nachtragen을 막는다. (자동퇴근은 수정 위해 허용)
   const liveClockToday = (Array.isArray(records)?records:[])
@@ -6081,7 +6112,7 @@ function BranchAccessPanel({ emp, setUsers, userKey }){
   );
 }
 
-function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getStatus, sColor, sBg, setDetailKey, setUsers, monthAccordion, setMonthAccordion, delRecordConfirm, setDelRecordConfirm }) {
+function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getStatus, sColor, sBg, setDetailKey, setUsers, monthAccordion, setMonthAccordion, delRecordConfirm, setDelRecordConfirm, schedule }) {
   const emp = safeUsers.find(u=>u.key===empKey);
   if (!emp) return null;
 
@@ -6165,6 +6196,7 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
       ):monthKeys.map(m=>{
         const mRecs=byMonth[m];
         const mTotal=mRecs.filter(r=>r.aus).reduce((a,r)=>a+recHours(r),0);
+        const plannedH=plannedMonthMinutes(schedule, emp.vorname, m)/60;   // 📅 근무표 예정시간
         const mDays=mRecs.filter(r=>r.aus).length;
         const mDiff=contract>0?mTotal-contract:null;
         const isOpen=monthAccordion[m]!==false;
@@ -6176,6 +6208,7 @@ function EmpDetailView({ empKey, userKey, safeUsers, records, setRecords, getSta
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:14,fontWeight:800,color:C.text}}>{mn[parseInt(mo)]+" "+y}</span>
                 <span style={{fontSize:11,color:C.mintDark,fontWeight:700}}>{mTotal.toFixed(2)+"h"}</span>
+                {plannedH>0&&<span style={{fontSize:11,color:C.muted,fontWeight:600}}>{"/ "+plannedH.toFixed(1)+"h Plan"}</span>}
                 <span style={{fontSize:10,color:C.muted}}>{mDays+" Tage"}</span>
                 {mRecs.some(r=>dupIds.has(r.id))&&<span style={{fontSize:12,fontWeight:800,color:C.red}} title="Mögliche Doppelung in diesem Monat">{"⚠️"}</span>}
               </div>
@@ -7532,6 +7565,133 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
   );
 }
 
+// 📅 [②] Nach Mitarbeiter — 캘린더형.
+//    직원 칩 선택 → 캘린더에 근무일 표시 + 월 실제/예정 시간(①) + 날짜별 근무 리스트.
+//    데이터/계산은 기존과 동일(스왑 반영), 표시 방식만 캘린더로.
+function EmpKalenderView({ allNames, schedule, records, users }) {
+  const MONATE = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+  const todayStr = today();
+  const [selName, setSelName] = useState((allNames&&allNames[0])||null);
+  const [cal, setCal] = useState(()=>{ const p=todayStr.split("-"); return {y:+p[0], m:(+p[1])-1}; });
+  const [selDate, setSelDate] = useState(null); // 특정 날짜 필터 (null=월 전체)
+  const monthKey = cal.y+"-"+String(cal.m+1).padStart(2,"0");
+
+  // 선택 직원의 근무 (스왑 반영: 넘긴 건 받은 사람에게 귀속 + 중복 제거)
+  const empShifts = React.useMemo(()=>{
+    if(!selName) return [];
+    const seen=new Set(), out=[];
+    Object.keys(schedule||{}).forEach(nm=>{
+      const arr = Array.isArray(schedule[nm]) ? schedule[nm] : Object.values(schedule[nm]||{});
+      arr.forEach(s=>{
+        if(!s) return;
+        const d=s.date||s.d; if(!d) return;
+        const effName=(s.status==="getauscht" && s.getauschtMit) ? s.getauschtMit : nm;
+        if(!sameName(effName, selName)) return;
+        const fil=s.filiale||s.f||"", tm=s.time||s.t||"";
+        const k=d+"|"+fil+"|"+tm; if(seen.has(k)) return; seen.add(k);
+        out.push({date:d, filiale:fil, time:tm});
+      });
+    });
+    return out.sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.time).localeCompare(String(b.time)));
+  },[selName, schedule]);
+
+  const monthShifts = empShifts.filter(s=>String(s.date).slice(0,7)===monthKey);
+  const shiftDates = new Set(monthShifts.map(s=>s.date));
+  const listShifts = selDate ? monthShifts.filter(s=>s.date===selDate) : monthShifts;
+
+  const plannedH = plannedMonthMinutes(schedule, selName, monthKey)/60;
+  const istH = (Array.isArray(records)?records:[]).filter(r=>r&&sameName(r.user,selName)&&r.date&&String(r.date).slice(0,7)===monthKey&&r.aus).reduce((a,r)=>a+recHours(r),0);
+
+  // 캘린더 셀 (월요일 시작)
+  const dim = new Date(cal.y, cal.m+1, 0).getDate();
+  const fd = new Date(cal.y, cal.m, 1).getDay();
+  const off = (fd+6)%7;
+  const cells=[]; for(let i=0;i<off;i++)cells.push(null); for(let d=1;d<=dim;d++)cells.push(d);
+  const dateStrOf = dy => monthKey+"-"+String(dy).padStart(2,"0");
+  const prevM=()=>{ setSelDate(null); setCal(c=>c.m===0?{y:c.y-1,m:11}:{y:c.y,m:c.m-1}); };
+  const nextM=()=>{ setSelDate(null); setCal(c=>c.m===11?{y:c.y+1,m:0}:{y:c.y,m:c.m+1}); };
+
+  return (
+    <div style={{padding:"14px"}}>
+      {/* 직원 칩 */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+        {(allNames||[]).map(name=>{
+          const on = selName===name;
+          return <button key={name} onClick={()=>{setSelName(name);setSelDate(null);}}
+            style={{padding:"6px 11px",borderRadius:99,border:`1px solid ${on?C.navy:C.border}`,
+              background:on?C.navy:"#fff",color:on?"#fff":C.text,fontSize:12,fontWeight:on?800:600,cursor:"pointer"}}>{name}</button>;
+        })}
+      </div>
+
+      {!selName ? (
+        <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"18px"}}>Mitarbeiter/in wählen.</div>
+      ) : (
+        <React.Fragment>
+          {/* 실제 / 예정 시간 (①) */}
+          <div style={{...S.card,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontSize:14,fontWeight:800,color:C.text}}>{selName}</div>
+            <div style={{fontSize:13}}>
+              <span style={{color:C.mintDark,fontWeight:800}}>{istH.toFixed(2)+"h"}</span>
+              {plannedH>0&&<span style={{color:C.muted,fontWeight:600}}>{" / "+plannedH.toFixed(1)+"h Plan"}</span>}
+            </div>
+          </div>
+
+          {/* 캘린더 */}
+          <div style={{...S.card,marginBottom:12,padding:"12px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <button onClick={prevM} style={{border:"none",background:"none",fontSize:18,color:C.muted,cursor:"pointer",padding:"0 8px"}}>{"‹"}</button>
+              <div style={{fontSize:14,fontWeight:800,color:C.text}}>{MONATE[cal.m]+" "+cal.y}</div>
+              <button onClick={nextM} style={{border:"none",background:"none",fontSize:18,color:C.muted,cursor:"pointer",padding:"0 8px"}}>{"›"}</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:4}}>
+              {["Mo","Di","Mi","Do","Fr","Sa","So"].map(w=><div key={w} style={{textAlign:"center",fontSize:9,fontWeight:800,color:C.muted}}>{w}</div>)}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
+              {cells.map((d,i)=>{
+                if(d===null) return <div key={"e"+i}/>;
+                const ds=dateStrOf(d), has=shiftDates.has(ds), sel=selDate===ds;
+                return <button key={ds} onClick={()=>{ if(has) setSelDate(sel?null:ds); }}
+                  style={{aspectRatio:"1",border:sel?`2px solid ${C.navy}`:`1px solid ${C.border}`,borderRadius:8,
+                    background:has?C.mintLight:"#fff",cursor:has?"pointer":"default",
+                    display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1,padding:0}}>
+                  <span style={{fontSize:11,fontWeight:has?800:500,color:has?C.mintDark:C.text}}>{d}</span>
+                  {has&&<span style={{width:4,height:4,borderRadius:"50%",background:C.mintDark}}/>}
+                </button>;
+              })}
+            </div>
+            {selDate&&<div style={{textAlign:"center",marginTop:8}}>
+              <button onClick={()=>setSelDate(null)} style={{border:"none",background:C.bg,borderRadius:99,padding:"4px 12px",fontSize:11,color:C.muted,cursor:"pointer",fontWeight:700}}>{"Alle anzeigen"}</button>
+            </div>}
+          </div>
+
+          {/* 날짜별 근무 리스트 */}
+          {listShifts.length===0 ? (
+            <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"16px"}}>Keine Schichten in diesem Monat.</div>
+          ) : listShifts.map((s,i)=>{
+            const ist = istTimeFor(records, selName, s.date, s.filiale);
+            const dd = new Date(s.date+"T00:00:00");
+            return <div key={s.date+s.filiale+s.time+i} style={{...S.card,marginBottom:6,display:"flex",alignItems:"center",gap:10,padding:"10px 12px"}}>
+              <div style={{width:38,height:38,borderRadius:9,background:ist?C.mintLight:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <span style={{fontSize:8,color:C.muted,fontWeight:600}}>{["So","Mo","Di","Mi","Do","Fr","Sa"][dd.getDay()]}</span>
+                <span style={{fontSize:11,fontWeight:800,color:C.navy}}>{filialInit(s.filiale)}</span>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>
+                  {dd.getDate()+". "+MONATE[dd.getMonth()]}
+                  <span style={{fontSize:10,fontWeight:400,color:C.muted,marginLeft:6}}>{s.filiale}{s.time?" · "+s.time:""}</span>
+                </div>
+                {ist
+                  ? <div style={{fontSize:10,fontWeight:700,color:C.mintDark,marginTop:1}}>{"Ist: "+ist.ein+" – "+ist.aus+" ("+stdLabel(ist.ein,ist.aus)+")"}</div>
+                  : <div style={{fontSize:10,color:C.muted,marginTop:1}}>{"— nicht gestempelt"}</div>}
+              </div>
+            </div>;
+          })}
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
 function AdminDienstplanView({ records, setRecords, users, userKey, manager, csvCtx, schedule, antraege, setAntraege }) {
   const [viewMode, setViewMode] = useState("plan");
   const [openEmp, setOpenEmp] = useState(null);
@@ -7699,109 +7859,7 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 
       {/*    */}
       {viewMode==="by_emp"&&(
-        <div style={{padding:"14px"}}>
-          {allNames.map(name=>{
-            // 계정 매칭은 관리자 포함 전체 users에서 찾는다 (Yeaji처럼 관리자 겸 직원도 계정 인정).
-            //   정확 일치가 없으면 uidOf(별칭/느슨 매칭)로 한 번 더 찾아 "Kein Konto" 오표시를 막는다.
-            const allUsers = Array.isArray(users)?users:[];
-            const emp = allUsers.find(e=>sameName(e.vorname,name))
-              || (()=>{ const uid=uidOf(users,name); return uid?userByUid(users,uid):null; })();
-            const accountExists = !!emp;
-            const shifts = norm(activeSchedule[name]||[])
-              .filter(s=>s.date||s.d)
-              .sort((a,b)=>(a.date||a.d).localeCompare(b.date||b.d));
-            const isOpen = openEmp===(emp?emp.key:name);
-            return (
-              <React.Fragment key={emp?emp.key:name}>
-              <div style={{...S.card,marginBottom:8,padding:0,overflow:"hidden"}}>
-                <button onClick={()=>setOpenEmp(isOpen?null:(emp?emp.key:name))}
-                  style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",
-                    display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{width:34,height:34,borderRadius:"50%",background:accountExists?C.navy:C.border,
-                      display:"flex",alignItems:"center",justifyContent:"center",
-                      fontSize:13,fontWeight:800,color:"#fff",flexShrink:0}}>
-                      {emp?emp.kuerzel:name.slice(0,2)}
-                    </div>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>
-                        {name}
-                        {emp && isAdminUser(emp) && <span style={{marginLeft:6,fontSize:9,fontWeight:800,color:C.mintDark,background:C.mintLight,padding:"1px 6px",borderRadius:99}}>{"👑 Admin"}</span>}
-                      </div>
-                      {!accountExists&&<div style={{fontSize:9,color:C.muted}}>Kein Konto</div>}
-                    </div>
-                  </div>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:10,color:C.muted,fontWeight:600}}>{shifts.length} Schichten</span>
-                    <span style={{fontSize:12,color:C.muted}}>{isOpen ? "A" : "V"}</span>
-                  </div>
-                </button>
-                {isOpen&&(
-                  <div style={{borderTop:`1px solid ${C.border}`}}>
-                    {shifts.length===0?(
-                      <div style={{padding:"12px 14px",fontSize:12,color:C.muted}}>Keine Schichten eingetragen.</div>
-                    ):shifts.map((s,i)=>{
-                      const d=s.date||s.d, f=s.filiale||s.f, t=s.time||s.t;
-                      const sSt=s.status||null, gMit=s.getauschtMit||null, gVon=s.getauschtVon||null;
-                      const transl=sSt==="freigegeben"||sSt==="getauscht";
-                      const rec=accountExists?records.find(r=>sameName(r.user,name)&&r.date===d&&sameFiliale(r.filiale,f)):null;
-                      return(
-                        <React.Fragment key={i}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                          padding:"10px 14px",borderBottom:i<shifts.length-1?`1px solid ${C.border}`:"none",
-                          opacity:transl?0.55:1,
-                          background:rec?.aus?C.mintLight:rec?.ein?C.yellowLight:"#fff"}}>
-                          <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                            <div style={{width:34,height:34,borderRadius:8,background:"rgba(255,255,255,.7)",
-                              display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                              <span style={{fontSize:8,color:C.muted}}>{["So","Mo","Di","Mi","Do","Fr","Sa"][new Date(d).getDay()]}</span>
-                              <span style={{fontSize:11,fontWeight:800,color:C.navy}}>{filialInit(f)}</span>
-                            </div>
-                            <div>
-                              <div style={{fontSize:13,fontWeight:700,color:C.text}}>
-                                {new Date(d).toLocaleDateString("de-DE",{day:"numeric",month:"numeric"})}
-                              </div>
-                              <div style={{fontSize:10,color:C.muted}}>{f}{t?` · ${t}`:""}</div>
-                              {accountExists&&(()=>{ const ist=istTimeFor(records,name,d,f); if(!ist) return null;
-                                return (
-                                  <div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:1}}>
-                                    {"Ist: "+ist.ein+" – "+ist.aus+" ("+stdLabel(ist.ein,ist.aus)+")"}
-                                    {ist.isNachtrag&&<span style={{color:C.muted,fontWeight:400}}>{" · korrigiert"}</span>}
-                                    {ist.isAuto&&<span style={{color:C.muted,fontWeight:400}}>{" · Auto"}</span>}
-                                  </div>
-                                );
-                              })()}
-                              {sSt==="freigegeben"&&<div style={{fontSize:9,fontWeight:700,color:"#b45309",marginTop:2}}>🔄 Freigegeben · wartet auf Tausch</div>}
-                              {sSt==="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:2}}>🔄 Getauscht mit {gMit||"?"}</div>}
-                              {gVon&&sSt!=="getauscht"&&<div style={{fontSize:9,fontWeight:700,color:C.mintDark,marginTop:2}}>✔️ Getauscht mit {gVon}</div>}
-                            </div>
-                          </div>
-                          <div style={{textAlign:"right"}}>
-                            {!accountExists?(
-                              <span style={{fontSize:9,padding:"3px 7px",borderRadius:99,background:C.bg,color:C.muted,fontWeight:600}}>Ausstehend</span>
-                            ):rec?(
-                              null
-                            ):(
-                              <span style={{fontSize:9,padding:"3px 7px",borderRadius:99,
-                                background:d<todayStr?C.redLight:C.bg,
-                                color:d<todayStr?C.red:C.muted,fontWeight:600}}>
-                                {d<todayStr?"Nicht erschienen":"Ausstehend"}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <NachMitarbeiterAntrag name={name} d={d} nList={nList}
-                            approveNachtrag={approveNachtrag} rejectNachtrag={rejectNachtrag}/>
-                        </React.Fragment>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-              </React.Fragment>
-            );
-          })}
-        </div>
+        <EmpKalenderView allNames={allNames} schedule={schedule} records={records} users={users}/>
       )}
 
       {/*    */}
@@ -8711,6 +8769,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
       {tab==="uebersicht"&&detailKey&&(
         <EmpDetailView
+          schedule={schedule}
           empKey={detailKey}
           userKey={userKey}
           safeUsers={safeUsers}
