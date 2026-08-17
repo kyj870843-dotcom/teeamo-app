@@ -8263,20 +8263,23 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
             const startMin=sh2*60+sm2;
             // 15분 초과 && 아직 알림 안 보냄
             if(nowMin-startMin<15) continue;
+            // 🔄 [스왑] 넘긴 근무(status:getauscht)는 받은 사람(getauschtMit)이 실제 담당.
+            //    → 넘긴 사람에게 오경보 뜨는 것 방지. 받은 사람 기준으로 출근 여부를 본다.
+            const effName=(sh.status==="getauscht"&&sh.getauschtMit)?sh.getauschtMit:name;
             // [동일 날짜 + 동일 직원] 단일 키 → 매니저별 중복(3개) 생성 방지, 단 1개만
-            const alertKey="noshow_"+name+"_"+todayStr;
+            const alertKey="noshow_"+effName+"_"+todayStr;
             window._fbGet(window._fbRef(window._fbDb,"notifications/"+alertKey)).then(ex=>{
               if(ex.val()) return; // 이미 존재 → 중복 인서트 차단
               // 실제 출근 기록 체크
               window._fbGet(window._fbRef(window._fbDb,"records")).then(recSnap=>{
                 const recs=Object.values(recSnap.val()||{});
-                const clocked=recs.some(r=>sameName(r.user,name)&&r.date===todayStr&&r.ein);
+                const clocked=recs.some(r=>sameName(r.user,effName)&&r.date===todayStr&&r.ein);
                 if(clocked) return; // 이미 출근함
                 // 미출근 경보 발송 (단 1개)
-                const alertMsg="🚨 [No-Show] "+name+" — "+(sh.f||sh.filiale)+" · "+startTime+" — kein Einstempeln.";
+                const alertMsg="🚨 [No-Show] "+effName+" — "+(sh.f||sh.filiale)+" · "+startTime+" — kein Einstempeln.";
                 window._fbSet(window._fbRef(window._fbDb,"notifications/"+alertKey),{
                   type:"noshow_alert", kategorie:"🚨 NoShow",
-                  user:name, date:todayStr, filiale:sh.f||sh.filiale, time:startTime,
+                  user:effName, date:todayStr, filiale:sh.f||sh.filiale, time:startTime,
                   text:alertMsg, gelesen:false, urgent:true, ts:Date.now()
                 }).catch(()=>{});
               }).catch(()=>{});
