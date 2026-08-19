@@ -2560,8 +2560,11 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
   const [showTausch, setShowTausch] = useState(false); // Schichttausch 모달
   const now = new Date(new Date().toLocaleString("en-US",{timeZone:"Europe/Berlin"}));
   const todayStr = today();
-  // 근무시간이 지났는지 (당일 포함)
-  const shiftPassed = d < todayStr || (d === todayStr && t && berlinNowMinutes() > parseMinutes((t.split("-")[1]||"23:59")));
+  // 근무시간이 지났는지 (당일 포함).
+  // ⚠️ 유효한 종료시각이 있고(=null/0 아님) 그 시각을 실제로 넘겼을 때만 '오늘' 근무를 지난 것으로 본다.
+  //    (종료시각이 비었거나 파싱 실패면 parseMinutes가 null → 예전엔 'now > null'이 참이 돼 00시부터 오작동했음)
+  const _endMin = (t && t.indexOf("-") >= 0) ? parseMinutes(t.split("-")[1]) : null;
+  const shiftPassed = (d < todayStr) || (d === todayStr && _endMin != null && _endMin > 0 && berlinNowMinutes() > _endMin);
   // 🚫 당일 Nachtragen 차단: 오늘 이미 실시간 출퇴근 기록(Einstempeln 완료 → 근무 중 or
   //    정상 종료)이 있으면 당일 카드의 Nachtragen을 막는다. (자동퇴근은 수정 위해 허용)
   const liveClockToday = (Array.isArray(records)?records:[])
