@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#2C2C2C" />
+<title>teeamo · Dienstplan</title>
+
+<!-- React + Babel (빌드 없음) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.0/babel.min.js"></script>
+
+<!-- Firebase (출퇴근앱과 동일: 모듈형 v10.12.0, 같은 프로젝트 teeamo-app) -->
+<script type="module" id="firebase-init">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+  const firebaseConfig = {
+    apiKey: "AIzaSyAdFpLR51E3uV5i4CDB-By1iC0lr-7vfBA",
+    authDomain: "teeamo-app.firebaseapp.com",
+    databaseURL: "https://teeamo-app-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "teeamo-app",
+    storageBucket: "teeamo-app.firebasestorage.app",
+    messagingSenderId: "1042377090448",
+    appId: "1:1042377090448:web:dea5af3a6c56949b543f15"
+  };
+  try {
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    window._fbDb = db; window._fbRef = ref; window._fbOnValue = onValue; window._fbSet = set; window._fbGet = get;
+    window._fbReady = true;
+  } catch (e) { console.warn("Firebase init:", e); window._fbReady = false; }
+  window.dispatchEvent(new Event("firebase-ready"));
+</script>
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { background: var(--bg); }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--text); line-height: 1.45; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 500px; margin: 0 auto; min-height: 100vh; background: var(--bg); padding-bottom: 40px; }
+
+  .header { position: sticky; top: 0; z-index: 20; background: var(--bg); padding: 16px 16px 12px; border-bottom: 1px solid var(--border); }
+  .brand { display: flex; align-items: center; justify-content: space-between; }
+  .brand h1 { font-size: 18px; font-weight: 800; letter-spacing: -0.3px; color: var(--navy); }
+  .brand .sub { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .conn { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; } .dot.on { background: #4CAF50; } .dot.off { background: var(--muted); }
+  .who { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--mintDark); font-weight: 700; background: var(--mintLight); padding: 9px 12px; border-radius: 10px; }
+  .who .logout { background: transparent; border: none; color: var(--muted); font-weight: 700; font-size: 12px; cursor: pointer; }
+
+  .toggle { display: flex; gap: 6px; margin-top: 12px; background: var(--mintLight); padding: 4px; border-radius: 12px; }
+  .toggle button { flex: 1; border: none; background: transparent; padding: 9px 0; border-radius: 9px; font-size: 13px; font-weight: 700; color: var(--mintDark); cursor: pointer; }
+  .toggle button.active { background: #fff; color: var(--navy); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+
+  .card { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+  .card.tight { padding: 12px 14px; }
+  .label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 8px; }
+
+  select { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 15px; color: var(--text); background: #fff; font-weight: 600; appearance: none; -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%23A09080' stroke-width='2' fill='none' stroke-linecap='round'/></svg>");
+    background-repeat: no-repeat; background-position: right 14px center; }
+
+  /* Login */
+  .login-wrap { padding: 40px 16px; text-align: center; }
+  .login-logo { font-size: 30px; font-weight: 800; color: var(--navy); letter-spacing: -0.5px; }
+  .login-sub { font-size: 13px; color: var(--muted); margin-top: 4px; margin-bottom: 24px; }
+  .pin { letter-spacing: 8px; text-align: center; font-size: 22px; font-weight: 800; padding: 14px; border: 1px solid var(--border); border-radius: 12px; width: 100%; background: #fff; color: var(--navy); }
+  .err { color: var(--red); font-size: 13px; font-weight: 700; margin-top: 10px; }
+
+  .monthbar { display: flex; align-items: center; justify-content: space-between; margin: 6px 16px 0; }
+  .monthbar .m { font-size: 20px; font-weight: 800; color: var(--navy); letter-spacing: -0.3px; }
+  .monthbar .cnt { font-size: 12px; color: var(--mintDark); font-weight: 700; background: var(--mintLight); padding: 4px 10px; border-radius: 20px; }
+
+  .banner { margin: 12px 16px 0; padding: 12px 14px; border-radius: 12px; font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: flex-start; }
+  .banner.open { background: var(--mintLight); color: var(--mintDark); }
+  .banner.locked { background: #F7ECE8; color: var(--red); }
+  .banner b { font-weight: 800; }
+
+  .cal-head { display: grid; grid-template-columns: repeat(7,1fr); margin-bottom: 6px; }
+  .cal-head div { text-align: center; font-size: 11px; font-weight: 700; color: var(--muted); padding: 4px 0; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 5px; }
+  .cell { aspect-ratio: 1/1; border: 1px solid var(--border); border-radius: 10px; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; position: relative; transition: all .12s; user-select: none; }
+  .cell.empty { border: none; background: transparent; cursor: default; }
+  .cell .num { font-size: 14px; font-weight: 700; color: var(--text); }
+  .cell.weekend .num { color: var(--muted); }
+  .cell .sub { font-size: 9px; font-weight: 800; line-height: 1; }
+  .cell.full { background: var(--mint); border-color: var(--mint); } .cell.full .num { color: #fff; }
+  .cell.part { background: var(--mintLight); border-color: var(--mint); } .cell.part .num { color: var(--mintDark); } .cell.part .sub { color: var(--mintDark); }
+  .cell.no { background: #F7ECE8; border-color: #E8CFC7; } .cell.no .num { color: var(--red); } .cell.no .sub { color: var(--red); }
+  .cell.sel { border-color: var(--navy); border-width: 2px; }
+  .cell.locked { cursor: default; }
+
+  .day-title { font-size: 15px; font-weight: 800; color: var(--navy); margin-bottom: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { border: 1px solid var(--border); background: #fff; color: var(--text); padding: 9px 14px; border-radius: 999px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .chip.on { background: var(--mint); border-color: var(--mint); color: #fff; }
+  .chip.no.on { background: var(--red); border-color: var(--red); color: #fff; }
+  .chip:disabled { opacity: .5; cursor: not-allowed; }
+  .timerow { display: flex; gap: 16px; margin-top: 14px; }
+  .timerow label { font-size: 14px; font-weight: 700; color: var(--navy); display: flex; align-items: center; gap: 8px; }
+  .timein { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 15px; font-weight: 700; color: var(--text); font-family: inherit; background: #fff; }
+
+  .btn { width: 100%; border: none; border-radius: 12px; padding: 15px; font-size: 15px; font-weight: 800; cursor: pointer; }
+  .btn-primary { background: var(--navy); color: #fff; }
+  .btn-primary:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+  .btn-ghost { background: #fff; border: 1px solid var(--border); color: var(--red); }
+  .btn-sm { padding: 10px; font-size: 13px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; text-align: center; line-height: 1.5; }
+  .footer-note { font-size: 11px; color: var(--muted); text-align: center; margin: 18px 16px 0; line-height: 1.6; }
+
+  .ovrow { display: flex; align-items: center; justify-content: space-between; padding: 12px 4px; border-bottom: 1px solid var(--border); }
+  .ovrow:last-child { border-bottom: none; }
+  .ovname { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 700; color: var(--navy); }
+  .ovname .emoji { font-size: 18px; }
+  .badge { font-size: 11px; font-weight: 800; padding: 5px 11px; border-radius: 20px; }
+  .badge.done { background: #E7F3E9; color: #3B7D45; } .badge.draft { background: var(--mintLight); color: var(--mintDark); } .badge.none { background: #F1EDE7; color: var(--muted); }
+
+  /* Planen 아젠다 */
+  .subtoggle { display:flex; gap:6px; margin:12px 16px 0; }
+  .subtoggle button { flex:1; border:1px solid var(--border); background:#fff; border-radius:10px; padding:9px 0; font-size:13px; font-weight:700; color:var(--mintDark); cursor:pointer; }
+  .subtoggle button.on { background:var(--navy); color:#fff; border-color:var(--navy); }
+  .day-block { background:#fff; border:1px solid var(--border); border-radius:14px; margin:12px 16px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+  .day-hd { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; font-weight:800; color:var(--navy); font-size:15px; cursor:pointer; }
+  .day-hd.we { color:var(--muted); }
+  .day-hd .chev { color:var(--muted); font-size:12px; }
+  .day-hd .mini-cnt { font-size:11px; font-weight:800; color:var(--mintDark); background:var(--mintLight); padding:3px 9px; border-radius:20px; }
+  .br { padding:8px 14px 10px; border-top:1px solid var(--border); }
+  .br-name { font-size:11px; font-weight:800; color:var(--mintDark); text-transform:uppercase; letter-spacing:.3px; margin-bottom:6px; display:flex; align-items:center; gap:8px; }
+  .slot-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:3px 0; }
+  .slot-t { font-size:13px; font-weight:800; color:var(--navy); min-width:92px; }
+  .slot-staff { display:flex; gap:5px; flex-wrap:wrap; flex:1; }
+  .staff { font-size:12px; font-weight:700; color:var(--mintDark); background:var(--mintLight); padding:3px 8px; border-radius:20px; white-space:nowrap; }
+  .staff b { color:var(--red); cursor:pointer; margin-left:3px; }
+  .muted { color:var(--muted); font-size:12px; }
+  .mini { border:none; background:transparent; cursor:pointer; font-size:13px; color:var(--mintDark); font-weight:700; }
+  select.mini-select { width:auto; padding:5px 24px 5px 8px; font-size:12px; font-weight:700; color:var(--mintDark); border:1px dashed var(--mint); border-radius:8px; background-position:right 8px center; }
+  .scope-row { display:flex; gap:6px; margin:8px 0; flex-wrap:wrap; }
+  .scope-row button { border:1px solid var(--border); background:#fff; border-radius:8px; padding:6px 10px; font-size:12px; font-weight:700; color:var(--text); cursor:pointer; }
+  .scope-row button.on { background:var(--navy); color:#fff; border-color:var(--navy); }
+  .editbox { background:var(--mintLight); border-radius:10px; padding:10px; margin-top:6px; }
+  .editrow { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:6px; }
+
+  /* Planen 주간 그리드 (B) */
+  .fullbleed { width:100vw; position:relative; margin-left:calc(50% - 50vw); }
+  .weekwrap { max-width:1120px; margin:0 auto; padding:0 12px; }
+  .weeknav { display:flex; align-items:center; justify-content:space-between; margin:10px 0; }
+  .weeknav button { border:1px solid var(--border); background:#fff; border-radius:10px; padding:8px 14px; font-weight:800; color:var(--navy); cursor:pointer; }
+  .weeknav button:disabled { opacity:.4; cursor:not-allowed; }
+  .weeknav .wlbl { font-weight:800; color:var(--navy); font-size:15px; }
+  .weekgrid { display:grid; grid-template-columns:repeat(7, minmax(130px,1fr)); gap:8px; overflow-x:auto; padding-bottom:10px; }
+  .wcol { background:#fff; border:1px solid var(--border); border-radius:12px; min-width:130px; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+  .wcol.empty { background:transparent; border:none; box-shadow:none; }
+  .wcol-hd { font-weight:800; color:var(--navy); font-size:13px; padding:8px 10px; border-bottom:1px solid var(--border); }
+  .wcol.we .wcol-hd { color:var(--muted); }
+  .wbr { padding:6px 10px 8px; border-bottom:1px dashed var(--border); }
+  .wbr:last-child { border-bottom:none; }
+  .wbr-name { font-size:10px; font-weight:800; color:var(--mintDark); text-transform:uppercase; letter-spacing:.3px; display:flex; justify-content:space-between; align-items:center; }
+  .wslot { margin-top:5px; }
+  .wslot-t { font-size:12px; font-weight:800; color:var(--navy); }
+  .wslot .staff { font-size:11px; padding:2px 7px; margin-top:2px; }
+
+  /* Planen 3일 포커스 뷰 */
+  .fokus-scroll { overflow-x:auto; padding-bottom:8px; }
+  .fokus-wrap { display:grid; grid-template-columns:minmax(180px,0.85fr) minmax(300px,1.7fr) minmax(180px,0.85fr); gap:10px; align-items:start; }
+  .fday { background:#fff; border:1px solid var(--border); border-radius:14px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+  .fday.side { opacity:.42; cursor:pointer; }
+  .fday.side:hover { opacity:.7; }
+  .fday.center { box-shadow:0 4px 16px rgba(0,0,0,.10); border-color:var(--mint); }
+  .fhd { display:flex; align-items:center; justify-content:space-between; font-weight:800; color:var(--navy); font-size:15px; margin-bottom:8px; }
+  .fhd .arrows button { border:1px solid var(--border); background:#fff; border-radius:8px; padding:2px 11px; font-weight:800; cursor:pointer; color:var(--navy); font-size:16px; }
+  .fhd .arrows button:disabled { opacity:.35; cursor:not-allowed; }
+  .emp-list { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 10px; }
+  .emp { border:1px solid var(--mint); background:var(--mintLight); color:var(--mintDark); border-radius:20px; padding:5px 10px; font-size:12px; font-weight:700; cursor:grab; user-select:none; }
+  .emp.assigned { opacity:.4; }
+  .emp.picked { outline:2px solid var(--navy); outline-offset:1px; }
+  .fbr { border-top:1px solid var(--border); padding-top:6px; margin-top:6px; }
+  .fslot { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:5px 6px; border-radius:9px; }
+  .fslot.drop { background:var(--mintLight); outline:2px dashed var(--mint); cursor:pointer; }
+  .empsearch { width:100%; border:1px solid var(--border); border-radius:9px; padding:8px 10px; font-size:13px; font-weight:600; margin-bottom:8px; font-family:inherit; color:var(--text); }
+  .emp-list.scroll { max-height:124px; overflow-y:auto; align-content:flex-start; }
+  .stats-body { display:flex; flex-wrap:wrap; gap:6px; max-height:132px; overflow-y:auto; align-content:flex-start; }
+  .stat-chip { background:var(--mintLight); color:var(--mintDark); border-radius:20px; padding:5px 10px; font-size:12px; font-weight:700; white-space:nowrap; }
+  .stat-chip .h { color:var(--navy); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef } = React;
+
+/* ===== 디자인 토큰 ===== */
+const C = { navy:"#2C2C2C", mint:"#7A9BAE", mintDark:"#5C7F94", mintLight:"#EAF1F5", bg:"#FAF8F5", muted:"#A09080", border:"#E8E2DA", red:"#C4604A", text:"#2C2C2C" };
+Object.entries(C).forEach(([k,v]) => document.documentElement.style.setProperty("--"+k, v));
+
+/* ===== 상수 (출퇴근앱과 동일) ===== */
+const OWNER_KEY = "yeaji";
+const FILIALEN = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY","ONIGIRI"];
+const IS_ONIGIRI = (f) => String(f||"").trim().toUpperCase()==="ONIGIRI";
+const VON = ["09:00","09:30","11:00","11:30","12:00","12:30","14:00","15:00","15:30","16:00"];
+const BIS = ["14:00","15:00","15:30","16:00","17:00","18:00","19:00","20:00"];
+const FILIAL_SHORT = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt", "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI" };
+// 지점별 기본 시간표(초기값) — 관리자가 수정하기 전 매월/매주 이 슬롯이 적용됨
+const DEFAULT_BASE = {}; // 시간표 초기값 비움 — 관리자가 ✎ 로 직접 설정
+const clone = (o) => JSON.parse(JSON.stringify(o||{}));
+const asArr = (v) => Array.isArray(v) ? v.filter(x=>x!=null) : (v && typeof v==="object" ? Object.values(v).filter(x=>x!=null) : []);
+const weekdayMon = (date) => (new Date(date+"T00:00:00").getDay()+6)%7;
+const WD_ADV = ["montags","dienstags","mittwochs","donnerstags","freitags","samstags","sonntags"];
+const sortSlots = (arr) => arr.slice().sort((a,b)=>{ const sa=(a||"").slice(0,5), sb=(b||"").slice(0,5); if(!sa&&!sb)return 0; if(!sa)return 1; if(!sb)return -1; return sa<sb?-1:(sa>sb?1:0); });
+// (날짜,지점) 슬롯 해석: 그날 > 그달 > 기본(vorlagen.base) > 코드기본
+function resolveSlots(v, date, branch){
+  v = v||{}; const wd=String(weekdayMon(date)); const mk=date.slice(0,7);
+  const d = v.day && v.day[date] && v.day[date][branch];
+  if(d!=null) return asArr(d);
+  const mo = v.month && v.month[mk] && v.month[mk][wd] && v.month[mk][wd][branch];
+  if(mo!=null) return asArr(mo);
+  const b = v.base && v.base[wd] && v.base[wd][branch];
+  if(b!=null) return asArr(b);
+  return asArr(DEFAULT_BASE[wd] && DEFAULT_BASE[wd][branch]);
+}
+// 수정 범위 적용: scope = "day"|"month"|"base"
+function setSlotsScoped(v, date, branch, slots, scope){
+  const next=clone(v); const wd=String(weekdayMon(date)); const mk=date.slice(0,7);
+  next.day=next.day||{}; next.month=next.month||{}; next.base=next.base||{};
+  if(scope==="day"){ next.day[date]=next.day[date]||{}; next.day[date][branch]=slots; }
+  else if(scope==="month"){ next.month[mk]=next.month[mk]||{}; next.month[mk][wd]=next.month[mk][wd]||{}; next.month[mk][wd][branch]=slots; if(next.day[date]) delete next.day[date][branch]; }
+  else if(scope==="weekday"){ next.base[wd]=next.base[wd]||{}; next.base[wd][branch]=slots; }
+  else { for(let i=0;i<7;i++){ next.base[String(i)]=next.base[String(i)]||{}; next.base[String(i)][branch]=slots; } }
+  return next;
+}
+// 직원이 해당 슬롯 근무 가능한가? (제출 가용성 기준)
+function isAvailableFor(entry, slotStr){
+  if(!entry) return false;
+  if(entry.mode==="nicht") return false;
+  if(entry.mode==="ganztags") return true;
+  if(entry.mode==="zeit"){
+    const m=/^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(slotStr||"");
+    if(!m) return true; // 시간없는 슬롯(ONIGIRI) → 그날 가능하면 OK
+    const ab=entry.ab||"00:00", bis=entry.bis||"23:59";
+    return ab<=m[1] && m[2]<=bis;
+  }
+  return false;
+}
+const DEADLINE_DAY = 20;
+const MONTHS_DE = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+const WD_DE = ["Mo","Di","Mi","Do","Fr","Sa","So"];
+
+/* 데모(미연결)용 샘플 — 실제 구조와 동일한 형태 */
+const DEMO_USERS = []; // 데모 직원 없음 — 배포 후 Firebase의 실제 users 사용
+
+/* ===== 유틸 ===== */
+const pad2 = (n) => String(n).padStart(2,"0");
+const ymd = (y,m,d) => `${y}-${pad2(m)}-${pad2(d)}`;
+const sameKey = (a,b) => String(a==null?"":a).trim().toLowerCase() === String(b==null?"":b).trim().toLowerCase() && String(a||"").trim()!=="";
+function nextMonthOf(now){ let y=now.getFullYear(), m=now.getMonth()+1; m+=1; if(m>12){m=1;y+=1;} return {y,m}; }
+const daysInMonth = (y,m) => new Date(y,m,0).getDate();
+const firstOffsetMon = (y,m) => (new Date(y,m-1,1).getDay()+6)%7;
+const shortT = (t) => !t ? "" : (t.endsWith(":00") ? t.slice(0,2) : t);
+function zeitLabel(e){ const a=shortT(e.ab), b=shortT(e.bis); if(a&&b) return a+"–"+b; if(a) return a+"→"; if(b) return "→"+b; return "🕐"; }
+const labelOf = (u) => u ? ((u.emoji?u.emoji+" ":"") + (u.vorname||u.key)) : "";
+const isAdmin = (u) => !!u && (sameKey(u.key, OWNER_KEY) || u.allBranches === true);
+
+function slotHours(time){
+  const m = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(time||"");
+  if(!m) return 0;
+  const a=(+m[1])*60+(+m[2]), b=(+m[3])*60+(+m[4]);
+  return Math.max(0,(b-a)/60);
+}
+function availText(e){
+  if(!e) return "—";
+  if(e.mode==="ganztags") return "Ganztags";
+  if(e.mode==="nicht") return "Nicht verfügbar";
+  const a=e.ab||"", b=e.bis||"";
+  if(a&&b) return a+"–"+b; if(a) return "ab "+a; if(b) return "bis "+b; return "Zeit";
+}
+// users(객체/배열) → 배열 정규화 (출퇴근앱은 key로 키가 매겨진 객체로 저장)
+function usersToArray(val){
+  if(!val) return [];
+  if(Array.isArray(val)) return val.filter(Boolean);
+  return Object.entries(val).map(([k,v]) => ({ key:(v&&v.key)||k, ...(v&&typeof v==="object"?v:{}) }))
+    .filter(u => u.key);
+}
+function getLinkedUid(){
+  const p = new URLSearchParams(location.search);
+  let u = p.get("uid");
+  if(!u && location.hash){ const h = location.hash.replace("#",""); if(h && !h.includes("=")) u = h; }
+  return u || null;
+}
+
+/* ===== Demo 인메모리 저장소 (배포 전 미리보기 전용, 새로고침 시 초기화) ===== */
+const DEMO = { data:{}, subs:{} };
+function _dget(path){ const ps=path.split("/"); let n=DEMO.data; for(const p of ps){ if(n==null)return null; n=n[p]; } return n===undefined?null:n; }
+function _dclone(v){ return v==null?null:JSON.parse(JSON.stringify(v)); }
+function demoSub(path, cb){ (DEMO.subs[path]=DEMO.subs[path]||[]).push(cb); cb(_dclone(_dget(path))); return ()=>{ DEMO.subs[path]=(DEMO.subs[path]||[]).filter(f=>f!==cb); }; }
+function demoSet(path, val){
+  const ps=path.split("/"); let n=DEMO.data;
+  for(let i=0;i<ps.length-1;i++){ const p=ps[i]; if(n[p]==null||typeof n[p]!=="object") n[p]={}; n=n[p]; }
+  if(val==null) delete n[ps[ps.length-1]]; else n[ps[ps.length-1]]=val;
+  Object.keys(DEMO.subs).forEach(sp=>{ if(path===sp || path.indexOf(sp+"/")===0 || sp.indexOf(path+"/")===0){ const v=_dclone(_dget(sp)); DEMO.subs[sp].forEach(cb=>cb(v)); } });
+}
+let _demoSeeded=false;
+function seedDemoAvailability(month){
+  if(_demoSeeded) return; _demoSeeded=true;
+  const y=+month.slice(0,4), m=+month.slice(5,7); const dim=new Date(y,m,0).getDate();
+  DEMO_USERS.forEach((u,idx)=>{
+    const slots={};
+    for(let d=1; d<=dim; d++){
+      const key=month+"-"+String(d).padStart(2,"0");
+      const mod=(d+idx)%4;
+      if(mod===0) slots[key]={mode:"ganztags"};
+      else if(mod===1) slots[key]={mode:"zeit",ab:"11:00",bis:"20:00"};
+      else if(mod===2) slots[key]={mode:"zeit",ab:"15:00",bis:"20:00"};
+    }
+    demoSet("verfuegbarkeit/"+month+"/"+u.key, {submitted:false, submittedAt:Date.now(), slots});
+  });
+}
+
+/* ===== Firebase 헬퍼 (실연결 시 모듈형 전역 재사용 / Demo면 인메모리) ===== */
+const hasDB = () => !!window._fbDb;
+function subscribe(path, cb){
+  if(hasDB()){
+    const r = window._fbRef(window._fbDb, path);
+    const off = window._fbOnValue(r, snap => cb(snap.val()));
+    return () => { try{ off(); }catch(e){} };
+  }
+  return demoSub(path, cb);
+}
+function writeNode(path, data){
+  if(hasDB()) return window._fbSet(window._fbRef(window._fbDb, path), data);
+  demoSet(path, data); return Promise.resolve();
+}
+
+/* ============================================================ */
+function App(){
+  // Firebase 준비 상태
+  const [fb, setFb] = useState(window._fbReady === true ? "ready" : (window._fbReady === false ? "demo" : "wait"));
+  useEffect(()=>{
+    if(fb !== "wait") return;
+    const done = () => setFb(window._fbReady ? "ready" : "demo");
+    if(window._fbReady !== undefined){ done(); return; }
+    window.addEventListener("firebase-ready", done);
+    const t = setTimeout(()=> setFb(f => f==="wait" ? (window._fbReady ? "ready":"demo") : f), 1200);
+    return ()=>{ window.removeEventListener("firebase-ready", done); clearTimeout(t); };
+  },[]);
+  const connected = fb === "ready";
+  const demo = fb === "demo";
+
+  const now = new Date();
+  const { y:ty, m:tm } = useMemo(()=>nextMonthOf(now),[]);
+  const targetMonth = `${ty}-${pad2(tm)}`;
+  const deadlinePassed = now.getDate() > DEADLINE_DAY;
+  const deadlineLabel = `${DEADLINE_DAY}. ${MONTHS_DE[now.getMonth()]}`;
+  const linkedUid = useMemo(()=>getLinkedUid(),[]);
+
+  const [users, setUsers] = useState([]);
+  const [pins, setPins] = useState({});
+  const [session, setSession] = useState(null);  // { uid, isAdmin }
+  const [view, setView] = useState("me");         // me | admin
+
+  useEffect(()=>{
+    if(fb === "wait") return;
+    if(demo){ setUsers(DEMO_USERS); setPins({}); return; }
+    const offU = subscribe("users", v => setUsers(usersToArray(v)));
+    const offP = subscribe("pins", v => setPins(v || {}));
+    return ()=>{ offU(); offP(); };
+  },[fb]);
+
+  const me = session ? users.find(u => sameKey(u.key, session.uid)) : null;
+
+  if(fb === "wait"){
+    return <div className="wrap"><div className="login-wrap"><div className="login-logo">teeamo</div><div className="login-sub">Verbinde …</div></div></div>;
+  }
+
+  if(!session){
+    return <Login users={users} pins={pins} linkedUid={linkedUid} demo={demo} connected={connected}
+                  onLogin={(uid,admin)=>{ setSession({uid, isAdmin:admin}); setView(admin && !linkedUid ? "admin" : "me"); }} />;
+  }
+
+  return (
+    <div className="wrap">
+      <div className="header">
+        <div className="brand">
+          <div><h1>teeamo · Dienstplan</h1><div className="sub">Verfügbarkeit</div></div>
+          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"}</div>
+        </div>
+        <div className="who">
+          <span>Angemeldet als <b>{labelOf(me) || session.uid}</b></span>
+          <button className="logout" onClick={()=>{ setSession(null); location.hash=""; }}>Abmelden</button>
+        </div>
+        {session.isAdmin && (
+          <div className="toggle">
+            <button className={view==="me"?"active":""} onClick={()=>setView("me")}>👤 Meine</button>
+            <button className={view==="admin"?"active":""} onClick={()=>setView("admin")}>👑 Übersicht</button>
+            <button className={view==="plan"?"active":""} onClick={()=>setView("plan")}>🗓️ Planen</button>
+          </div>
+        )}
+      </div>
+
+      {session.isAdmin && view==="plan"
+        ? <PlanView users={users} targetMonth={targetMonth} ty={ty} tm={tm} />
+        : session.isAdmin && view==="admin"
+        ? <AdminView users={users} targetMonth={targetMonth} ty={ty} tm={tm} deadlinePassed={deadlinePassed} deadlineLabel={deadlineLabel} />
+        : <EmployeeView uid={session.uid} targetMonth={targetMonth} ty={ty} tm={tm} deadlinePassed={deadlinePassed} deadlineLabel={deadlineLabel} />}
+
+      {demo && <div className="footer-note">Demo-Modus (keine Live-Verbindung). Deploy auf Vercel verbindet mit echten Daten.</div>}
+    </div>
+  );
+}
+
+/* ===== 로그인 (PIN) ===== */
+function Login({ users, pins, linkedUid, demo, connected, onLogin }){
+  const linkedUser = linkedUid ? users.find(u => sameKey(u.key, linkedUid)) : null;
+  const [uid, setUid] = useState(linkedUid && linkedUser ? linkedUser.key : "");
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(()=>{ if(linkedUid && linkedUser) setUid(linkedUser.key); },[users]); // eslint-disable-line
+
+  function submit(){
+    setErr("");
+    const u = users.find(x => sameKey(x.key, uid));
+    if(!u){ setErr("Bitte Namen wählen."); return; }
+    if(demo){ onLogin(u.key, isAdmin(u)); return; }
+    const stored = pins[u.key];
+    if(stored != null && String(stored) !== String(pin)){ setErr("Falsche PIN."); return; }
+    onLogin(u.key, isAdmin(u));
+  }
+
+  return (
+    <div className="wrap">
+      <div className="login-wrap">
+        <div className="login-logo">teeamo</div>
+        <div className="login-sub">Dienstplan · Verfügbarkeit</div>
+      </div>
+      <div className="card">
+        {linkedUid && linkedUser ? (
+          <div className="day-title" style={{textAlign:"center",marginBottom:"16px"}}>Hallo {labelOf(linkedUser)} 👋</div>
+        ) : (
+          <>
+            <div className="label">Wer bist du?</div>
+            <select value={uid} onChange={e=>{ setUid(e.target.value); setErr(""); }} style={{marginBottom:"14px"}}>
+              <option value="">— Mitarbeiter wählen —</option>
+              {users.map(u => <option key={u.key} value={u.key}>{labelOf(u)}</option>)}
+            </select>
+          </>
+        )}
+
+        {!demo && (
+          <>
+            <div className="label">PIN</div>
+            <input className="pin" type="password" inputMode="numeric" pattern="[0-9]*" value={pin}
+              onChange={e=>{ setPin(e.target.value.replace(/\D/g,"")); setErr(""); }}
+              onKeyDown={e=>{ if(e.key==="Enter") submit(); }} placeholder="••••" autoFocus />
+          </>
+        )}
+        {demo && (users.length===0 ? <div className="hint" style={{marginTop:0}}>Vorschau ist leer. Nach dem Deploy erscheinen die echten Mitarbeiter aus Firebase.</div> : <div className="hint" style={{marginTop:0}}>Demo — keine PIN nötig.</div>)}
+        {err && <div className="err">{err}</div>}
+        <button className="btn btn-primary" style={{marginTop:"16px"}} onClick={submit} disabled={!uid}>Anmelden</button>
+        <div className="hint">Deine Verfügbarkeit sehen nur du und die Verwaltung.</div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== 직원: 가용성 제출 (5-1) ===== */
+function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel }){
+  const [slots,setSlots]=useState({});
+  const [submitted,setSubmitted]=useState(false);
+  const [submittedAt,setSubmittedAt]=useState(null);
+  const [msel,setMsel]=useState([]);
+  const [bMode,setBMode]=useState("ganztags");
+  const [bAb,setBAb]=useState(""); const [bBis,setBBis]=useState("");
+  const [confirming,setConfirming]=useState(false);
+  const [saving,setSaving]=useState(false);
+
+  useEffect(()=>{ const off=subscribe(`verfuegbarkeit/${targetMonth}/${uid}`,data=>{
+    if(data){ setSlots(data.slots||{}); setSubmitted(!!data.submitted); setSubmittedAt(data.submittedAt||null); }
+    else { setSlots({}); setSubmitted(false); setSubmittedAt(null); }
+  }); return off; },[uid,targetMonth]);
+
+  const locked=submitted||deadlinePassed;
+  const entered=Object.keys(slots).length;
+
+  // 한 날짜만 선택하면 그 날의 기존 값을 패널로 불러와 '수정'처럼 느껴지게
+  useEffect(()=>{
+    if(msel.length===1){ const e=slots[msel[0]]; if(e){ setBMode(e.mode); if(e.mode==="zeit"){ setBAb(e.ab||""); setBBis(e.bis||""); } } }
+  },[msel]); // eslint-disable-line
+
+  function persist(nextSlots,opts){ opts=opts||{}; const clean={}; Object.keys(nextSlots).forEach(d=>{if(nextSlots[d])clean[d]=nextSlots[d];});
+    const payload={submitted:opts.submit?true:submitted,submittedAt:opts.submit?Date.now():(submittedAt||null),slots:clean};
+    setSaving(true); writeNode(`verfuegbarkeit/${targetMonth}/${uid}`,payload).finally(()=>setSaving(false));
+    setSlots(clean); if(opts.submit){setSubmitted(true);setSubmittedAt(payload.submittedAt);} }
+  function onPick(date){ if(locked)return; setMsel(s=> s.indexOf(date)>=0 ? s.filter(d=>d!==date) : [...s,date]); }
+  function batchEntry(){ if(bMode==="ganztags")return {mode:"ganztags"}; if(bMode==="nicht")return {mode:"nicht"}; return {mode:"zeit",ab:bAb,bis:bBis}; }
+  function applyBatch(){ if(!msel.length)return; const e=batchEntry(); const next={...slots}; msel.forEach(d=>{next[d]=e;}); persist(next); setMsel([]); }
+  function clearDays(){ if(!msel.length)return; const next={...slots}; msel.forEach(d=>{delete next[d];}); persist(next); setMsel([]); }
+  function doSubmit(){ persist(slots,{submit:true}); setConfirming(false); setMsel([]); }
+
+  const canApply = bMode!=="zeit" || !!bAb || !!bBis;
+  const wd1 = msel.length===1 ? WD_DE[(new Date(msel[0]+"T00:00:00").getDay()+6)%7] : "";
+
+  return (<div>
+    <div className="monthbar"><span className="m">{MONTHS_DE[tm-1]} {ty}</span><span className="cnt">{entered} {entered===1?"Tag":"Tage"} eingetragen</span></div>
+    {locked ? (<div className="banner locked"><span>🔒</span><span><b>{submitted&&!deadlinePassed?"Eingereicht.":"Frist vorbei — automatisch eingereicht."}</b><br/>Bearbeitung gesperrt.</span></div>)
+      : (<div className="banner open"><span>🗓️</span><span>Tage antippen, dann Zeit wählen. Bearbeitbar bis <b>{deadlineLabel}</b>.</span></div>)}
+
+    <div className="card">
+      <div className="cal-head">{WD_DE.map(w=><div key={w}>{w}</div>)}</div>
+      <Calendar ty={ty} tm={tm} slots={slots} selDate={null} multiSet={msel} locked={locked} onPick={onPick} />
+      {!locked && msel.length===0 && <div className="hint" style={{marginTop:"10px"}}>Tippe einen oder mehrere Tage an.</div>}
+    </div>
+
+    {!locked && msel.length>0 && (<div className="card">
+      <div className="day-title">{msel.length===1 ? (wd1+", "+parseInt(msel[0].slice(-2),10)+". "+MONTHS_DE[tm-1]) : (msel.length+" Tage ausgewählt")}</div>
+      <div className="chips">
+        <button className={"chip"+(bMode==="ganztags"?" on":"")} onClick={()=>setBMode("ganztags")}>Ganztags</button>
+        <button className={"chip"+(bMode==="zeit"?" on":"")} onClick={()=>setBMode("zeit")}>Zeitraum</button>
+        <button className={"chip no"+(bMode==="nicht"?" on":"")} onClick={()=>setBMode("nicht")}>Nicht verfügbar</button>
+      </div>
+      {bMode==="zeit" && (<div className="timerow">
+        <label>ab <input type="time" step="900" className="timein" value={bAb} onChange={e=>setBAb(e.target.value)} /></label>
+        <label>bis <input type="time" step="900" className="timein" value={bBis} onChange={e=>setBBis(e.target.value)} /></label>
+      </div>)}
+      <div style={{display:"flex",gap:"8px",marginTop:"12px"}}>
+        <button className="btn btn-ghost btn-sm" onClick={clearDays}>Leeren</button>
+        <button className="btn btn-primary btn-sm" onClick={applyBatch} disabled={!canApply}>Übernehmen</button>
+      </div>
+    </div>)}
+
+    {!locked && (<div className="card">
+      {!confirming ? (<>
+        <button className="btn btn-primary" disabled={entered===0||saving} onClick={()=>setConfirming(true)}>Jetzt einreichen</button>
+        <div className="hint">Nach dem Einreichen keine Änderungen mehr möglich.<br/>Ohne Einreichen wird am {deadlineLabel} automatisch übernommen.</div>
+      </>) : (<>
+        <div style={{fontSize:"14px",fontWeight:700,color:C.navy,marginBottom:"12px",textAlign:"center"}}>{entered} {entered===1?"Tag":"Tage"} einreichen?<br/><span style={{fontWeight:600,color:C.muted,fontSize:"13px"}}>Danach gesperrt.</span></div>
+        <div style={{display:"flex",gap:"8px"}}>
+          <button className="btn btn-ghost btn-sm" onClick={()=>setConfirming(false)}>Abbrechen</button>
+          <button className="btn btn-primary btn-sm" onClick={doSubmit}>Ja, einreichen</button>
+        </div>
+      </>)}
+    </div>)}
+  </div>);
+}
+
+function Calendar({ ty, tm, slots, selDate, multiSet, locked, onPick }){
+  const total = daysInMonth(ty,tm), offset = firstOffsetMon(ty,tm);
+  const cells=[]; for(let i=0;i<offset;i++)cells.push(null); for(let d=1;d<=total;d++)cells.push(d);
+  return (
+    <div className="cal-grid">
+      {cells.map((d,i)=>{
+        if(d===null) return <div key={"e"+i} className="cell empty"></div>;
+        const key=ymd(ty,tm,d);
+        const e=slots[key];
+        const weekend=((offset+(d-1))%7)>=5;
+        let st="",sub="";
+        if(e){ if(e.mode==="ganztags")st="full"; else if(e.mode==="nicht"){st="no";sub="✕";} else if(e.mode==="zeit"){st="part";sub=zeitLabel(e);} }
+        const inMulti = multiSet && multiSet.indexOf(key)>=0;
+        const cls=["cell"]; if(st)cls.push(st); if(weekend&&!st)cls.push("weekend"); if(selDate===key||inMulti)cls.push("sel"); if(locked)cls.push("locked");
+        return (<div key={key} className={cls.join(" ")} onClick={()=>onPick(key)}>
+          <span className="num">{d}</span>{sub&&<span className="sub">{sub}</span>}
+        </div>);
+      })}
+    </div>
+  );
+}
+
+function DayEditor({ date, tm, entry, locked, onSet, onClear }){
+  const dObj = new Date(date+"T00:00:00");
+  const wd = WD_DE[(dObj.getDay()+6)%7];
+  const dayNum = parseInt(date.slice(-2),10);
+  const mode = entry ? entry.mode : null;
+  const ab = (entry && entry.mode==="zeit") ? (entry.ab||"") : "";
+  const bis = (entry && entry.mode==="zeit") ? (entry.bis||"") : "";
+  return (
+    <div>
+      <div className="day-title">{wd}, {dayNum}. {MONTHS_DE[tm-1]}</div>
+      <div className="chips">
+        <button className={"chip"+(mode==="ganztags"?" on":"")} disabled={locked} onClick={()=>onSet({mode:"ganztags"})}>Ganztags</button>
+        <button className={"chip"+(mode==="zeit"?" on":"")} disabled={locked} onClick={()=>onSet({mode:"zeit",ab,bis})}>Zeitraum</button>
+        <button className={"chip no"+(mode==="nicht"?" on":"")} disabled={locked} onClick={()=>onSet({mode:"nicht"})}>Nicht verfügbar</button>
+      </div>
+      {mode==="zeit" && (
+        <div className="timerow">
+          <label>ab <input type="time" step="900" className="timein" value={ab} disabled={locked} onChange={e=>onSet({mode:"zeit",ab:e.target.value,bis})} /></label>
+          <label>bis <input type="time" step="900" className="timein" value={bis} disabled={locked} onChange={e=>onSet({mode:"zeit",ab,bis:e.target.value})} /></label>
+        </div>
+      )}
+      {mode==="zeit" && !ab && !bis && <div className="hint" style={{marginTop:"8px",textAlign:"left"}}>Mind. eine Zeit angeben (ab oder bis).</div>}
+      {entry && !locked && <div style={{marginTop:"12px"}}><button className="btn btn-ghost btn-sm" onClick={onClear}>Eintrag löschen</button></div>}
+    </div>
+  );
+}
+
+
+/* ===== 관리자: 편성 에디터 (5-2 · 초안 전용) =====
+   ⚠️ 저장 위치 = dienstplan_draft/<월> (격리). 라이브 schedule 은 아직 안 건드림.
+      확정→라이브 반영(schedule + schedule_YYYY_MM)은 다음 단계에서 연결. */
+function PlanView({ users, targetMonth, ty, tm }){
+  const [avail,setAvail]=useState({});
+  const [draft,setDraft]=useState({});
+  const [vorlagen,setVorlagen]=useState({});
+  const [openDate,setOpenDate]=useState(null);
+  const [editing,setEditing]=useState(null);
+  const [pmode,setPmode]=useState("fokus");
+  const [wk,setWk]=useState(0);
+  const editRef=useRef(null);
+  const [focusDate,setFocusDate]=useState(ymd(ty,tm,1));
+  const [pick,setPick]=useState(null);
+  const [empQuery,setEmpQuery]=useState("");
+  const [onlyOpen,setOnlyOpen]=useState(false);
+  const [statsOpen,setStatsOpen]=useState(true);
+  const centerRef=useRef(null);
+
+  useEffect(()=>subscribe(`verfuegbarkeit/${targetMonth}`,v=>setAvail(v||{})),[targetMonth]);
+  useEffect(()=>subscribe(`dienstplan_draft/${targetMonth}`,v=>setDraft(v||{})),[targetMonth]);
+  useEffect(()=>subscribe("vorlagen",v=>setVorlagen(v||{})),[]);
+  useEffect(()=>{ if(editing && editRef.current){ try{ editRef.current.scrollIntoView({behavior:"smooth",block:"center"}); }catch(e){} } },[editing]);
+  useEffect(()=>{ if(pmode==="fokus" && centerRef.current){ try{ centerRef.current.scrollIntoView({inline:"center",block:"nearest",behavior:"smooth"}); }catch(e){} } },[focusDate,pmode]);
+
+  const availEntry=(uid,date)=>{ const d=avail[uid]; return (d&&d.slots&&d.slots[date])||null; };
+  const uName=(uid)=>{ const u=users.find(x=>sameKey(x.key,uid)); return u?(u.vorname||u.key):uid; };
+  const uEmoji=(uid)=>{ const u=users.find(x=>sameKey(x.key,uid)); return (u&&u.emoji)||"🧋"; };
+
+  function saveDraft(next){ setDraft(next); writeNode(`dienstplan_draft/${targetMonth}`,next); }
+  function assignedUids(date,branch,slot){ const out=[]; Object.entries(draft).forEach(([uid,list])=>{ asArr(list).forEach(sh=>{ if(sh.date===date && sh.filiale===branch && (sh.time||"")===(slot||"")) out.push(uid); }); }); return out; }
+  function addAssign(uid,date,branch,slot){ const list=asArr(draft[uid]).slice(); if(list.some(sh=>sh.date===date&&sh.filiale===branch&&(sh.time||"")===(slot||"")))return; list.push({date,filiale:branch,time:slot||"",typ:"normal"}); saveDraft({...draft,[uid]:list}); }
+  function removeAssign(uid,date,branch,slot){ const list=asArr(draft[uid]).filter(sh=>!(sh.date===date&&sh.filiale===branch&&(sh.time||"")===(slot||""))); const next={...draft}; if(list.length)next[uid]=list; else delete next[uid]; saveDraft(next); }
+
+  function saveVorlagen(next){ setVorlagen(next); writeNode("vorlagen",next); }
+  function openEdit(date,branch){ setEditing({date,branch,slots:sortSlots(resolveSlots(vorlagen,date,branch)),scope:"day",von:"11:00",bis:"20:00"}); }
+  function editAddSlot(){ setEditing(e=>{ const t=IS_ONIGIRI(e.branch)?"":`${e.von}-${e.bis}`; if(e.slots.indexOf(t)>=0)return e; return {...e,slots:sortSlots([...e.slots,t])}; }); }
+  function editRemoveSlot(t){ setEditing(e=>({...e,slots:e.slots.filter(x=>x!==t)})); }
+  function editSave(){ const next=setSlotsScoped(vorlagen,editing.date,editing.branch,editing.slots,editing.scope); saveVorlagen(next); setEditing(null); }
+  function shiftFocus(delta){ const o=new Date(focusDate+"T00:00:00"); o.setDate(o.getDate()+delta); if(o.getFullYear()!==ty||(o.getMonth()+1)!==tm) return; setFocusDate(ymd(o.getFullYear(),o.getMonth()+1,o.getDate())); setPick(null); }
+
+  const stats=users.map(u=>{ const list=asArr(draft[u.key]); const hours=list.reduce((h,sh)=>h+slotHours(sh.time),0); return {...u,count:list.length,hours}; }).filter(x=>x.count>0).sort((a,b)=> b.hours-a.hours || (a.vorname||a.key).localeCompare(b.vorname||b.key,"de"));
+
+  const total=daysInMonth(ty,tm);
+  const dates=[]; for(let d=1;d<=total;d++) dates.push(ymd(ty,tm,d));
+
+  // 주 단위 묶기
+  const offset=firstOffsetMon(ty,tm);
+  const cells=[]; for(let i=0;i<offset;i++)cells.push(null); dates.forEach(d=>cells.push(d)); while(cells.length%7!==0)cells.push(null);
+  const weeks=[]; for(let i=0;i<cells.length;i+=7) weeks.push(cells.slice(i,i+7));
+  const wkIdx=Math.min(wk,weeks.length-1);
+  const week=weeks[wkIdx]||[];
+  const wdays=week.filter(Boolean);
+  const wlabel=wdays.length ? (parseInt(wdays[0].slice(-2),10)+".–"+parseInt(wdays[wdays.length-1].slice(-2),10)+". "+MONTHS_DE[tm-1]) : "";
+
+  const availSelect=(date,branch,slot,asg)=>{
+    const avail4=users.filter(u=> isAvailableFor(availEntry(u.key,date),slot) && asg.indexOf(u.key)<0);
+    return (<select className="mini-select" value="" onChange={e=>{ if(e.target.value) addAssign(e.target.value,date,branch,slot); }}>
+      <option value="">+ zuweisen</option>
+      {avail4.map(u=><option key={u.key} value={u.key}>{(u.emoji?u.emoji+" ":"")+(u.vorname||u.key)}</option>)}
+    </select>);
+  };
+
+  const editorPanel = editing ? (
+    <div className="editbox">
+      <div style={{fontSize:"12px",fontWeight:800,color:C.mintDark,marginBottom:"6px"}}>{WD_DE[weekdayMon(editing.date)]} {parseInt(editing.date.slice(-2),10)}. · {FILIAL_SHORT[editing.branch]||editing.branch}</div>
+      <div className="editrow">{editing.slots.length===0 && <span className="muted">Keine Zeiten</span>}
+        {editing.slots.map(t=><span key={t} className="staff" style={{background:"#fff"}}>{t||"ohne Zeit"} <b onClick={()=>editRemoveSlot(t)}>✕</b></span>)}
+      </div>
+      {!IS_ONIGIRI(editing.branch) ? (<div className="editrow">
+        <select className="timein" value={editing.von} onChange={e=>setEditing(x=>({...x,von:e.target.value}))}>{VON.map(t=><option key={t}>{t}</option>)}</select>
+        <span style={{fontWeight:800,color:C.muted}}>–</span>
+        <select className="timein" value={editing.bis} onChange={e=>setEditing(x=>({...x,bis:e.target.value}))}>{BIS.map(t=><option key={t}>{t}</option>)}</select>
+        <button className="mini" onClick={editAddSlot}>+ hinzufügen</button>
+      </div>) : (<div className="editrow"><button className="mini" onClick={editAddSlot}>+ Slot (ohne Zeit)</button></div>)}
+      <div className="scope-row">
+        <button className={editing.scope==="day"?"on":""} onClick={()=>setEditing(x=>({...x,scope:"day"}))}>Nur dieser Tag</button>
+        <button className={editing.scope==="month"?"on":""} onClick={()=>setEditing(x=>({...x,scope:"month"}))}>Diesen Monat</button>
+        <button className={editing.scope==="weekday"?"on":""} onClick={()=>setEditing(x=>({...x,scope:"weekday"}))}>{WD_ADV[weekdayMon(editing.date)]}</button>
+        <button className={editing.scope==="always"?"on":""} onClick={()=>setEditing(x=>({...x,scope:"always"}))}>Immer</button>
+      </div>
+      <div style={{display:"flex",gap:"8px"}}>
+        <button className="btn btn-ghost btn-sm" onClick={()=>setEditing(null)}>Abbrechen</button>
+        <button className="btn btn-primary btn-sm" onClick={editSave}>Speichern</button>
+      </div>
+    </div>
+  ) : null;
+
+  const dimF=daysInMonth(ty,tm);
+  const fdn=parseInt(focusDate.slice(-2),10);
+  const fprev = fdn>1 ? ymd(ty,tm,fdn-1) : null;
+  const fnext = fdn<dimF ? ymd(ty,tm,fdn+1) : null;
+  const empsAvail=(date)=>users.filter(u=>{ const e=availEntry(u.key,date); return e && e.mode!=="nicht"; });
+  const assignedOnDay=(uid,date)=>asArr(draft[uid]).some(sh=>sh.date===date);
+  const renderSide=(date)=> date ? (
+    <div className="fday side" key={"s"+date} onClick={()=>{ setFocusDate(date); setPick(null); }}>
+      <div className="fhd" style={{fontSize:"13px",marginBottom:"4px"}}>{WD_DE[weekdayMon(date)]} {parseInt(date.slice(-2),10)}.</div>
+      {FILIALEN.map(b=>{ const sl=resolveSlots(vorlagen,date,b); if(!sl.length) return null;
+        return (<div className="fbr" key={b}><div className="wbr-name">{FILIAL_SHORT[b]||b}</div>
+          {sl.map(sx=>{ const asg=assignedUids(date,b,sx); return (<div className="slot-row" key={sx||"o"}><span className="slot-t" style={{minWidth:"72px",fontSize:"11px"}}>{sx||"—"}</span><span className="slot-staff">{asg.map(uid=><span className="staff" key={uid} style={{fontSize:"10px",padding:"1px 6px"}}>{uEmoji(uid)} {uName(uid)}</span>)}</span></div>); })}
+        </div>);
+      })}
+    </div>
+  ) : (<div className="fday side" key="sx" style={{visibility:"hidden"}}></div>);
+  const centerBlock = (
+    <div className="fday center" ref={centerRef} key={focusDate}>
+      <div className="fhd">
+        <span className="arrows"><button onClick={()=>shiftFocus(-1)} disabled={!fprev}>‹</button></span>
+        <span>{WD_DE[weekdayMon(focusDate)]}, {fdn}. {MONTHS_DE[tm-1]}</span>
+        <span className="arrows"><button onClick={()=>shiftFocus(1)} disabled={!fnext}>›</button></span>
+      </div>
+      {(()=>{
+        const all=empsAvail(focusDate);
+        const q=empQuery.trim().toLowerCase();
+        let list=all.filter(u=>!q||(u.vorname||u.key||"").toLowerCase().indexOf(q)>=0);
+        list=list.slice().sort((a,b)=>{ const aa=assignedOnDay(a.key,focusDate)?1:0, bb=assignedOnDay(b.key,focusDate)?1:0; if(aa!==bb)return aa-bb; return (a.vorname||a.key).localeCompare(b.vorname||b.key,"de"); });
+        if(onlyOpen) list=list.filter(u=>!assignedOnDay(u.key,focusDate));
+        const openCount=all.filter(u=>!assignedOnDay(u.key,focusDate)).length;
+        return (<>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"6px"}}>
+            <span className="label" style={{margin:0}}>Verfügbar · {all.length}</span>
+            <label style={{fontSize:"11px",fontWeight:700,color:C.muted,display:"flex",alignItems:"center",gap:"5px",cursor:"pointer"}}>
+              <input type="checkbox" checked={onlyOpen} onChange={e=>setOnlyOpen(e.target.checked)} /> nur offene ({openCount})
+            </label>
+          </div>
+          <input className="empsearch" placeholder="Name suchen…" value={empQuery} onChange={e=>setEmpQuery(e.target.value)} />
+          <div className="emp-list scroll">
+            {list.length===0 && <span className="muted">Niemand.</span>}
+            {list.map(u=>{ const e=availEntry(u.key,focusDate);
+              return (<span key={u.key} className={"emp"+(assignedOnDay(u.key,focusDate)?" assigned":"")+(pick===u.key?" picked":"")}
+                draggable onDragStart={ev=>{ setPick(u.key); try{ ev.dataTransfer.setData("text/plain",u.key); }catch(x){} }}
+                onClick={()=>setPick(pp=>pp===u.key?null:u.key)}>
+                {u.emoji||"🧋"} {u.vorname||u.key} · {availText(e)}
+              </span>);
+            })}
+          </div>
+        </>);
+      })()}
+      {FILIALEN.map(branch=>{
+        const slots=resolveSlots(vorlagen,focusDate,branch);
+        const isEd=editing&&editing.date===focusDate&&editing.branch===branch;
+        return (<div className="fbr" key={branch}>
+          <div className="br-name">{FILIAL_SHORT[branch]||branch}<button className="mini" onClick={()=>isEd?setEditing(null):openEdit(focusDate,branch)}>{isEd?"✕":"✎ Zeiten"}</button></div>
+          {isEd && <div ref={editRef}>{editorPanel}</div>}
+          {slots.map(slot=>{
+            const asg=assignedUids(focusDate,branch,slot);
+            const canDrop = pick && isAvailableFor(availEntry(pick,focusDate),slot);
+            return (<div key={slot||"o"} className={"fslot"+(canDrop?" drop":"")}
+              onDragOver={ev=>{ if(canDrop) ev.preventDefault(); }}
+              onDrop={ev=>{ ev.preventDefault(); if(canDrop) addAssign(pick,focusDate,branch,slot); }}
+              onClick={()=>{ if(canDrop) addAssign(pick,focusDate,branch,slot); }}>
+              <span className="slot-t">{slot||"ohne Zeit"}</span>
+              <span className="slot-staff">{asg.map(uid=><span className="staff" key={uid}>{uEmoji(uid)} {uName(uid)}<b onClick={ev=>{ ev.stopPropagation(); removeAssign(uid,focusDate,branch,slot); }}>✕</b></span>)}</span>
+            </div>);
+          })}
+          {slots.length===0 && <div className="muted">Keine Zeiten — „✎ Zeiten“.</div>}
+        </div>);
+      })}
+    </div>
+  );
+
+  return (<div>
+    <div className="monthbar"><span className="m">{MONTHS_DE[tm-1]} {ty}</span><span className="cnt">Entwurf</span></div>
+
+    <div className="card">
+      <div className="label" style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",margin:0}} onClick={()=>setStatsOpen(o=>!o)}>
+        <span>Stunden (Entwurf){stats.length>0?" · "+stats.length:""}</span>
+        <span style={{color:C.muted}}>{statsOpen?"▾":"▸"}</span>
+      </div>
+      {statsOpen && (<>
+        {stats.length===0 && <div className="hint" style={{marginTop:"8px"}}>Noch keine Einteilungen.</div>}
+        {stats.length>0 && <div className="stats-body" style={{marginTop:"10px"}}>
+          {stats.map(s=>(<span className="stat-chip" key={s.key}>{s.emoji||"🧋"} {s.vorname||s.key} · <span className="h">{s.hours.toFixed(1)} h</span> · {s.count}×</span>))}
+        </div>}
+      </>)}
+    </div>
+
+    <div className="subtoggle">
+      <button className={pmode==="fokus"?"on":""} onClick={()=>setPmode("fokus")}>3 Tage</button>
+      <button className={pmode==="woche"?"on":""} onClick={()=>setPmode("woche")}>Woche</button>
+      <button className={pmode==="liste"?"on":""} onClick={()=>setPmode("liste")}>Liste</button>
+    </div>
+
+    {pmode==="fokus" && (
+      <div className="fullbleed"><div className="weekwrap">
+        <div className="fokus-scroll"><div className="fokus-wrap">{renderSide(fprev)}{centerBlock}{renderSide(fnext)}</div></div>
+        {pick && <div className="hint" style={{marginTop:"6px"}}>„{uName(pick)}“ ausgewählt — auf eine passende Zeit tippen (oder ziehen). Nochmal antippen zum Abwählen.</div>}
+      </div></div>
+    )}
+
+    {pmode==="woche" && (
+      <div className="fullbleed"><div className="weekwrap">
+        <div className="weeknav">
+          <button onClick={()=>setWk(w=>Math.max(0,w-1))} disabled={wkIdx<=0}>‹ Woche</button>
+          <span className="wlbl">{wlabel}</span>
+          <button onClick={()=>setWk(w=>Math.min(weeks.length-1,w+1))} disabled={wkIdx>=weeks.length-1}>Woche ›</button>
+        </div>
+        <div className="weekgrid">
+          {week.map((date,i)=>{
+            if(!date) return <div className="wcol empty" key={"e"+i}></div>;
+            const wd=weekdayMon(date);
+            return (<div className={"wcol"+(wd>=5?" we":"")} key={date}>
+              <div className="wcol-hd">{WD_DE[wd]} {parseInt(date.slice(-2),10)}.</div>
+              {FILIALEN.map(branch=>{
+                const slots=resolveSlots(vorlagen,date,branch);
+                if(!slots.length) return null;
+                return (<div className="wbr" key={branch}>
+                  <div className="wbr-name">{FILIAL_SHORT[branch]||branch}<button className="mini" onClick={()=>openEdit(date,branch)}>✎</button></div>
+                  {slots.map(slot=>{
+                    const asg=assignedUids(date,branch,slot);
+                    return (<div className="wslot" key={slot||"o"}>
+                      <div className="wslot-t">{slot||"ohne Zeit"}</div>
+                      <div className="slot-staff">{asg.map(uid=><span className="staff" key={uid}>{uEmoji(uid)} {uName(uid)}<b onClick={()=>removeAssign(uid,date,branch,slot)}>✕</b></span>)}</div>
+                      {availSelect(date,branch,slot,asg)}
+                    </div>);
+                  })}
+                </div>);
+              })}
+            </div>);
+          })}
+        </div>
+        {editing && <div ref={editRef} className="card" style={{margin:"10px 0 0"}}>{editorPanel}</div>}
+      </div></div>
+    )}
+
+    {pmode==="liste" && dates.map(date=>{
+      const wd=weekdayMon(date); const open=openDate===date;
+      let dayCount=0; FILIALEN.forEach(b=> resolveSlots(vorlagen,date,b).forEach(sl=> dayCount+=assignedUids(date,b,sl).length));
+      return (<div className="day-block" key={date}>
+        <div className={"day-hd"+(wd>=5?" we":"")} onClick={()=>{ setOpenDate(open?null:date); setEditing(null); }}>
+          <span>{WD_DE[wd]}, {parseInt(date.slice(-2),10)}. {MONTHS_DE[tm-1]}</span>
+          <span style={{display:"flex",gap:"8px",alignItems:"center"}}>{dayCount>0 && <span className="mini-cnt">{dayCount}</span>}<span className="chev">{open?"▾":"▸"}</span></span>
+        </div>
+        {open && FILIALEN.map(branch=>{
+          const slots=resolveSlots(vorlagen,date,branch);
+          const isEd = editing && editing.date===date && editing.branch===branch;
+          return (<div className="br" key={branch}>
+            <div className="br-name">{FILIAL_SHORT[branch]||branch}<button className="mini" onClick={()=>isEd?setEditing(null):openEdit(date,branch)}>{isEd?"✕":"✎ Zeiten"}</button></div>
+            {isEd && <div ref={editRef}>{editorPanel}</div>}
+            {slots.map(slot=>{
+              const asg=assignedUids(date,branch,slot);
+              return (<div className="slot-row" key={slot||"onigiri"}>
+                <span className="slot-t">{slot||"ohne Zeit"}</span>
+                <span className="slot-staff">{asg.map(uid=><span className="staff" key={uid}>{uEmoji(uid)} {uName(uid)}<b onClick={()=>removeAssign(uid,date,branch,slot)}>✕</b></span>)}</span>
+                {availSelect(date,branch,slot,asg)}
+              </div>);
+            })}
+            {slots.length===0 && <div className="muted">Keine Zeiten — „✎ Zeiten“ zum Hinzufügen.</div>}
+          </div>);
+        })}
+        {!open && (<div className="br" style={{paddingTop:"6px"}}>
+          {FILIALEN.map(branch=>{
+            const slots=resolveSlots(vorlagen,date,branch);
+            if(!slots.length) return null;
+            return (<div key={branch} style={{marginBottom:"6px"}}>
+              <div className="br-name" style={{marginBottom:"2px"}}>{FILIAL_SHORT[branch]||branch}</div>
+              {slots.map(slot=>{ const asg=assignedUids(date,branch,slot);
+                return (<div className="slot-row" key={slot||"o"}>
+                  <span className="slot-t">{slot||"ohne Zeit"}</span>
+                  <span className="slot-staff">{asg.length? asg.map(uid=><span className="staff" key={uid}>{uEmoji(uid)} {uName(uid)}</span>) : <span className="muted">—</span>}</span>
+                </div>);
+              })}
+            </div>);
+          })}
+        </div>)}
+      </div>);
+    })}
+
+    <div className="footer-note">Zeiten ändern: „✎“ → Nur dieser Tag / Diesen Monat / Immer.<br/>Zuteilungen im Entwurf (<b>dienstplan_draft</b>). Live-Übertrag folgt.</div>
+  </div>);
+}
+
+/* ===== 관리자: 제출 현황 (5-1 미리보기) ===== */
+function AdminView({ users, targetMonth, ty, tm, deadlinePassed, deadlineLabel }){
+  const [monthData, setMonthData] = useState({});
+  useEffect(()=> subscribe(`verfuegbarkeit/${targetMonth}`, v => setMonthData(v||{})), [targetMonth]);
+
+  const rows = users.map(u=>{
+    const d = monthData[u.key];
+    const days = d && d.slots ? Object.keys(d.slots).length : 0;
+    let state="none";
+    if(d) state = (d.submitted||deadlinePassed) ? "done" : (days>0?"draft":"none");
+    return { ...u, days, state };
+  });
+  const doneCount = rows.filter(r=>r.state==="done").length;
+
+  return (
+    <div>
+      <div className="monthbar"><span className="m">{MONTHS_DE[tm-1]} {ty}</span><span className="cnt">{doneCount}/{rows.length} eingereicht</span></div>
+      <div className={"banner "+(deadlinePassed?"locked":"open")}>
+        <span>{deadlinePassed?"🔒":"⏳"}</span>
+        <span>{deadlinePassed ? <>Frist ({deadlineLabel}) vorbei — alle Angaben gelten als eingereicht.</> : <>Einreichefrist: <b>{deadlineLabel}</b>.</>}</span>
+      </div>
+      <div className="card">
+        <div className="label">Eingegangene Verfügbarkeiten</div>
+        {rows.length===0 && <div className="hint">Keine Mitarbeiter geladen.</div>}
+        {rows.map(r=>(
+          <div className="ovrow" key={r.key}>
+            <span className="ovname"><span className="emoji">{r.emoji||"🧋"}</span>{r.vorname||r.key}{sameKey(r.key,OWNER_KEY)?" 👑":""}</span>
+            <span style={{display:"flex",alignItems:"center",gap:"8px"}}>
+              {r.days>0 && <span style={{fontSize:"12px",color:C.muted,fontWeight:700}}>{r.days} Tage</span>}
+              <span className={"badge "+r.state}>{r.state==="done"?"Eingereicht":r.state==="draft"?"In Arbeit":"Offen"}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="footer-note">Dienstplan-Editor (Zuweisung auf Filialen &amp; Zeiten) folgt im nächsten Schritt.</div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
