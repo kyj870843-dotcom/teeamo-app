@@ -2292,23 +2292,23 @@ async function ensureEinspringenShift(name, date, filiale, vonTime) {
   try {
     const rsnap = await window._fbGet(window._fbRef(window._fbDb, "schedule"));
     const root = rsnap.val() || {};
-    const sh = root[name];
-    const arr = !sh ? [] : (Array.isArray(sh) ? sh : Object.values(sh));
-    // 🎯 같은 날·같은 지점에 이미 '자동 대타(autoCreated)' 근무가 있으면 새로 만들지 않는다.
-    //    자동 대타는 '이 사람이 이 지점에서 일했다'는 표시라 지점당 하나면 충분하다.
-    //    → 출근/퇴근 흐름에서 함수가 여러 번 불려도 중복 근무표가 안 생긴다.
-    //    (관리자가 직접 짠 계획 근무는 autoCreated가 아니므로, 그것과 시간이 겹칠 때만 스킵)
     const bisChk = isOnigiriFiliale(filiale) ? "" : SHOP_CLOSING_TIME;
     const newRange = bisChk ? (vonTime + "-" + bisChk) : "";
-    const exists = arr.some(s => {
-      if(!s || (s.d||s.date) !== date) return false;
-      if(!sameFiliale(s.f||s.filiale, filiale)) return false;
-      // 자동 대타가 이미 있으면 무조건 스킵(중복 방지)
-      if(s.autoCreated) return true;
-      // 계획 근무는 시간이 겹칠 때만 스킵(안 겹치면 별개 근무이므로 대타 생성 허용)
-      const tm = s.t || s.time;
-      if(!tm || !tm.includes("-") || !newRange) return true;
-      return timesOverlap(tm, newRange);
+    // 🔄 [스왑] 모든 이름의 근무를 훑어, '넘긴 근무(status:getauscht)는 받은 사람(getauschtMit)에게 귀속'시켜
+    //    이 사람(name)이 이 날·이 지점에 이미 근무가 있으면 대타(einspringen)를 새로 만들지 않는다.
+    //    (스왑으로 받은 근무를 못 찾아 einspringen 유령 근무표 + 자동 20:00 퇴근이 생기던 문제 방지)
+    const exists = Object.keys(root).some(nm => {
+      const a = Array.isArray(root[nm]) ? root[nm] : Object.values(root[nm]||{});
+      return a.some(s => {
+        if(!s || (s.d||s.date) !== date) return false;
+        if(!sameFiliale(s.f||s.filiale, filiale)) return false;
+        const effName = (s.status==="getauscht" && s.getauschtMit) ? s.getauschtMit : nm;
+        if(!sameName(effName, name)) return false;   // 이 근무가 name의 것(직접 or 스왑수령)이 아니면 무시
+        if(s.autoCreated) return true;
+        const tm = s.t || s.time;
+        if(!tm || !tm.includes("-") || !newRange) return true;
+        return timesOverlap(tm, newRange);
+      });
     });
     if (exists) return false;
     // ⏰ 종료 시각은 임시로 마감(20:00). 마감 이후 출근이면 시작을 그대로 종료로 둔다.
@@ -7209,7 +7209,9 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                         <button onClick={()=>setEditRow(null)} style={{flex:1,padding:"10px",borderRadius:9,border:"1px solid "+C.border,background:"#fff",color:C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}>Abbrechen</button>
                         <button onClick={()=>{
                           const nt=(editRow.von&&editRow.bis)?editRow.von+"-"+editRow.bis:(r.time||"");
-                          patchScheduleShift(r.rawName, selDate, {f:editRow.fil, filiale:editRow.fil, t:nt, time:nt});
+                          // 🎯 원래 지점(fil)+원래 시간(r.time)으로 '그 근무만' 지정해 수정한다.
+                          //    (patchScheduleShift는 이름+날짜만 봐서 같은 날 다른 지점까지 바꿔버렸음)
+                          patchScheduleShiftAtFiliale(r.rawName, selDate, fil, {f:editRow.fil, filiale:editRow.fil, t:nt, time:nt}, r.time);
                           setEditRow(null);
                         }} style={{flex:2,padding:"10px",borderRadius:9,border:"none",background:C.navy,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>{"💾 Speichern"}</button>
                       </div>
