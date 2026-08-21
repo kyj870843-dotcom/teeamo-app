@@ -181,6 +181,7 @@
   .stats-body { display:flex; flex-wrap:wrap; gap:6px; max-height:132px; overflow-y:auto; align-content:flex-start; }
   .stat-chip { background:var(--mintLight); color:var(--mintDark); border-radius:20px; padding:5px 10px; font-size:12px; font-weight:700; white-space:nowrap; }
   .stat-chip .h { color:var(--navy); }
+  .cal-grid, .cal-grid .cell { touch-action: none; }
 </style>
 </head>
 <body>
@@ -388,7 +389,7 @@ function App(){
       <div className="header">
         <div className="brand">
           <div><h1>teeamo · Dienstplan</h1><div className="sub">Verfügbarkeit</div></div>
-          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v5</div>
+          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v6</div>
         </div>
         <div className="who">
           <span>Angemeldet als <b>{labelOf(me) || session.uid}</b></span>
@@ -521,7 +522,7 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel,
 
     <div className="card">
       <div className="cal-head">{WD_DE.map(w=><div key={w}>{w}</div>)}</div>
-      <Calendar ty={ty} tm={tm} slots={slots} selDate={null} multiSet={msel} locked={locked} onPick={onPick} />
+      <Calendar ty={ty} tm={tm} slots={slots} selDate={null} multiSet={msel} locked={locked} onPick={onPick} onDragSelect={setMsel} />
       {!locked && msel.length===0 && <div className="hint" style={{marginTop:"10px"}}>Tippe einen oder mehrere Tage an.</div>}
       {!locked && (
         <div style={{display:"flex",gap:"8px",marginTop:"10px"}}>
@@ -568,11 +569,23 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel,
   </div>);
 }
 
-function Calendar({ ty, tm, slots, selDate, multiSet, locked, onPick }){
+function Calendar({ ty, tm, slots, selDate, multiSet, locked, onPick, onDragSelect }){
   const total = daysInMonth(ty,tm), offset = firstOffsetMon(ty,tm);
   const cells=[]; for(let i=0;i<offset;i++)cells.push(null); for(let d=1;d<=total;d++)cells.push(d);
+  const dragRef = useRef({on:false,anchor:null,moved:false});
+  const cbRef = useRef({});
+  cbRef.current = { onPick, onDragSelect, locked };
+  function dateAt(x,y){ const el=document.elementFromPoint(x,y); const cell=el&&el.closest?el.closest("[data-date]"):null; return cell?cell.getAttribute("data-date"):null; }
+  function rangeDates(a,b){ if(!a||!b) return a?[a]:[]; const lo=a<b?a:b, hi=a<b?b:a; const out=[]; let d=new Date(lo+"T00:00:00"); const end=new Date(hi+"T00:00:00"); while(d<=end){ out.push(ymd(d.getFullYear(),d.getMonth()+1,d.getDate())); d.setDate(d.getDate()+1); } return out; }
+  function onDown(e){ if(cbRef.current.locked) return; const date=dateAt(e.clientX,e.clientY); if(!date) return; dragRef.current={on:true,anchor:date,moved:false}; }
+  function onMove(e){ const st=dragRef.current; if(!st.on) return; const date=dateAt(e.clientX,e.clientY); if(!date||!st.anchor) return; if(date!==st.anchor) st.moved=true; if(st.moved && cbRef.current.onDragSelect) cbRef.current.onDragSelect(rangeDates(st.anchor,date)); }
+  useEffect(()=>{
+    function up(){ const st=dragRef.current; if(!st.on) return; if(!st.moved && st.anchor && cbRef.current.onPick) cbRef.current.onPick(st.anchor); dragRef.current={on:false,anchor:null,moved:false}; }
+    window.addEventListener("pointerup",up);
+    return ()=>window.removeEventListener("pointerup",up);
+  },[]);
   return (
-    <div className="cal-grid">
+    <div className="cal-grid" style={{touchAction:"none"}} onPointerDown={onDown} onPointerMove={onMove}>
       {cells.map((d,i)=>{
         if(d===null) return <div key={"e"+i} className="cell empty"></div>;
         const key=ymd(ty,tm,d);
@@ -582,7 +595,7 @@ function Calendar({ ty, tm, slots, selDate, multiSet, locked, onPick }){
         if(e){ if(e.mode==="ganztags")st="full"; else if(e.mode==="nicht"){st="no";sub="✕";} else if(e.mode==="zeit"){st="part";sub=zeitLabel(e);} }
         const inMulti = multiSet && multiSet.indexOf(key)>=0;
         const cls=["cell"]; if(st)cls.push(st); if(weekend&&!st)cls.push("weekend"); if(selDate===key||inMulti)cls.push("sel"); if(locked)cls.push("locked");
-        return (<div key={key} className={cls.join(" ")} onClick={()=>onPick(key)}>
+        return (<div key={key} data-date={key} className={cls.join(" ")}>
           <span className="num">{d}</span>{sub&&<span className="sub">{sub}</span>}
         </div>);
       })}
