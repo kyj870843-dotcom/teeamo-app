@@ -386,7 +386,7 @@ function App(){
       <div className="header">
         <div className="brand">
           <div><h1>teeamo · Dienstplan</h1><div className="sub">Verfügbarkeit</div></div>
-          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v2</div>
+          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v3</div>
         </div>
         <div className="who">
           <span>Angemeldet als <b>{labelOf(me) || session.uid}</b></span>
@@ -468,7 +468,7 @@ function Login({ users, pins, linkedUid, demo, connected, onLogin }){
 }
 
 /* ===== 직원: 가용성 제출 (5-1) ===== */
-function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel }){
+function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel, admin, onBack, editName }){
   const [slots,setSlots]=useState({});
   const [submitted,setSubmitted]=useState(false);
   const [submittedAt,setSubmittedAt]=useState(null);
@@ -483,7 +483,7 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel 
     else { setSlots({}); setSubmitted(false); setSubmittedAt(null); }
   }); return off; },[uid,targetMonth]);
 
-  const locked=submitted||deadlinePassed;
+  const locked = admin ? false : (submitted||deadlinePassed);
   const entered=Object.keys(slots).length;
 
   // 한 날짜만 선택하면 그 날의 기존 값을 패널로 불러와 '수정'처럼 느껴지게
@@ -505,9 +505,10 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel 
   const wd1 = msel.length===1 ? WD_DE[(new Date(msel[0]+"T00:00:00").getDay()+6)%7] : "";
 
   return (<div>
+    {admin && <div className="card tight" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px"}}><button className="mini" onClick={onBack}>‹ Zurück</button><span style={{fontWeight:800,color:C.navy}}>Bearbeiten: {editName}</span><span style={{width:"52px"}}></span></div>}
     <div className="monthbar"><span className="m">{MONTHS_DE[tm-1]} {ty}</span><span className="cnt">{entered} {entered===1?"Tag":"Tage"} eingetragen</span></div>
     {locked ? (<div className="banner locked"><span>🔒</span><span><b>{submitted&&!deadlinePassed?"Eingereicht.":"Frist vorbei — automatisch eingereicht."}</b><br/>Bearbeitung gesperrt.</span></div>)
-      : (<div className="banner open"><span>🗓️</span><span>Tage antippen, dann Zeit wählen. Bearbeitbar bis <b>{deadlineLabel}</b>.</span></div>)}
+      : (<div className="banner open"><span>🗓️</span><span>{admin ? "Admin-Bearbeitung — Änderungen werden sofort gespeichert." : <>Tage antippen, dann Zeit wählen. Bearbeitbar bis <b>{deadlineLabel}</b>.</>}</span></div>)}
 
     <div className="card">
       <div className="cal-head">{WD_DE.map(w=><div key={w}>{w}</div>)}</div>
@@ -532,7 +533,7 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel 
       </div>
     </div>)}
 
-    {!locked && (<div className="card">
+    {!locked && !admin && (<div className="card">
       {!confirming ? (<>
         <button className="btn btn-primary" disabled={entered===0||saving} onClick={()=>setConfirming(true)}>Jetzt einreichen</button>
         <div className="hint">Nach dem Einreichen keine Änderungen mehr möglich.<br/>Ohne Einreichen wird am {deadlineLabel} automatisch übernommen.</div>
@@ -872,6 +873,7 @@ function PlanView({ users, targetMonth, ty, tm }){
 /* ===== 관리자: 제출 현황 (5-1 미리보기) ===== */
 function AdminView({ users, targetMonth, ty, tm, deadlinePassed, deadlineLabel }){
   const [monthData, setMonthData] = useState({});
+  const [editUid, setEditUid] = useState(null);
   useEffect(()=> subscribe(`verfuegbarkeit/${targetMonth}`, v => setMonthData(v||{})), [targetMonth]);
 
   const rows = users.map(u=>{
@@ -883,6 +885,8 @@ function AdminView({ users, targetMonth, ty, tm, deadlinePassed, deadlineLabel }
   });
   const doneCount = rows.filter(r=>r.state==="done").length;
 
+  if(editUid){ const eu=users.find(u=>sameKey(u.key,editUid)); return (<EmployeeView uid={editUid} admin={true} onBack={()=>setEditUid(null)} editName={eu?((eu.emoji?eu.emoji+" ":"")+(eu.vorname||eu.key)):editUid} targetMonth={targetMonth} ty={ty} tm={tm} deadlinePassed={deadlinePassed} deadlineLabel={deadlineLabel} />); }
+
   return (
     <div>
       <div className="monthbar"><span className="m">{MONTHS_DE[tm-1]} {ty}</span><span className="cnt">{doneCount}/{rows.length} eingereicht</span></div>
@@ -892,18 +896,20 @@ function AdminView({ users, targetMonth, ty, tm, deadlinePassed, deadlineLabel }
       </div>
       <div className="card">
         <div className="label">Eingegangene Verfügbarkeiten</div>
+        <div className="hint" style={{margin:"0 0 8px",textAlign:"left"}}>Zeile antippen → Verfügbarkeit ansehen &amp; bearbeiten.</div>
         {rows.length===0 && <div className="hint">Keine Mitarbeiter geladen.</div>}
         {rows.map(r=>(
-          <div className="ovrow" key={r.key}>
+          <div className="ovrow" key={r.key} style={{cursor:"pointer"}} onClick={()=>setEditUid(r.key)}>
             <span className="ovname"><span className="emoji">{r.emoji||"🧋"}</span>{r.vorname||r.key}{isOwnerKey(r.key)?" 👑":""}</span>
             <span style={{display:"flex",alignItems:"center",gap:"8px"}}>
               {r.days>0 && <span style={{fontSize:"12px",color:C.muted,fontWeight:700}}>{r.days} Tage</span>}
               <span className={"badge "+r.state}>{r.state==="done"?"Eingereicht":r.state==="draft"?"In Arbeit":"Offen"}</span>
+              <span style={{color:C.muted,fontWeight:800}}>›</span>
             </span>
           </div>
         ))}
       </div>
-      <div className="footer-note">Dienstplan-Editor (Zuweisung auf Filialen &amp; Zeiten) folgt im nächsten Schritt.</div>
+      <div className="footer-note">Als Admin kannst du jede Verfügbarkeit direkt bearbeiten — auch nach Fristende. Änderungen erscheinen sofort im „Planen“-Tab.</div>
     </div>
   );
 }
