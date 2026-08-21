@@ -389,7 +389,7 @@ function App(){
       <div className="header">
         <div className="brand">
           <div><h1>teeamo · Dienstplan</h1><div className="sub">Verfügbarkeit</div></div>
-          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v6</div>
+          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v7</div>
         </div>
         <div className="who">
           <span>Angemeldet als <b>{labelOf(me) || session.uid}</b></span>
@@ -573,12 +573,13 @@ function Calendar({ ty, tm, slots, selDate, multiSet, locked, onPick, onDragSele
   const total = daysInMonth(ty,tm), offset = firstOffsetMon(ty,tm);
   const cells=[]; for(let i=0;i<offset;i++)cells.push(null); for(let d=1;d<=total;d++)cells.push(d);
   const dragRef = useRef({on:false,anchor:null,moved:false});
+  const baseRef = useRef([]);
   const cbRef = useRef({});
-  cbRef.current = { onPick, onDragSelect, locked };
+  cbRef.current = { onPick, onDragSelect, locked, multiSet };
   function dateAt(x,y){ const el=document.elementFromPoint(x,y); const cell=el&&el.closest?el.closest("[data-date]"):null; return cell?cell.getAttribute("data-date"):null; }
   function rangeDates(a,b){ if(!a||!b) return a?[a]:[]; const lo=a<b?a:b, hi=a<b?b:a; const out=[]; let d=new Date(lo+"T00:00:00"); const end=new Date(hi+"T00:00:00"); while(d<=end){ out.push(ymd(d.getFullYear(),d.getMonth()+1,d.getDate())); d.setDate(d.getDate()+1); } return out; }
-  function onDown(e){ if(cbRef.current.locked) return; const date=dateAt(e.clientX,e.clientY); if(!date) return; dragRef.current={on:true,anchor:date,moved:false}; }
-  function onMove(e){ const st=dragRef.current; if(!st.on) return; const date=dateAt(e.clientX,e.clientY); if(!date||!st.anchor) return; if(date!==st.anchor) st.moved=true; if(st.moved && cbRef.current.onDragSelect) cbRef.current.onDragSelect(rangeDates(st.anchor,date)); }
+  function onDown(e){ if(cbRef.current.locked) return; const date=dateAt(e.clientX,e.clientY); if(!date) return; baseRef.current = Array.isArray(cbRef.current.multiSet)?cbRef.current.multiSet.slice():[]; dragRef.current={on:true,anchor:date,moved:false}; }
+  function onMove(e){ const st=dragRef.current; if(!st.on) return; const date=dateAt(e.clientX,e.clientY); if(!date||!st.anchor) return; if(date!==st.anchor) st.moved=true; if(st.moved && cbRef.current.onDragSelect){ const r=rangeDates(st.anchor,date); const seen={}, out=[]; baseRef.current.forEach(x=>{if(!seen[x]){seen[x]=1;out.push(x);}}); r.forEach(x=>{if(!seen[x]){seen[x]=1;out.push(x);}}); cbRef.current.onDragSelect(out); } }
   useEffect(()=>{
     function up(){ const st=dragRef.current; if(!st.on) return; if(!st.moved && st.anchor && cbRef.current.onPick) cbRef.current.onPick(st.anchor); dragRef.current={on:false,anchor:null,moved:false}; }
     window.addEventListener("pointerup",up);
