@@ -389,7 +389,7 @@ function App(){
       <div className="header">
         <div className="brand">
           <div><h1>teeamo · Dienstplan</h1><div className="sub">Verfügbarkeit</div></div>
-          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v7</div>
+          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v8</div>
         </div>
         <div className="who">
           <span>Angemeldet als <b>{labelOf(me) || session.uid}</b></span>
@@ -668,7 +668,7 @@ function PlanView({ users, targetMonth, ty, tm }){
 
   function saveVorlagen(next){ setVorlagen(next); writeNode("vorlagen",next); }
   function openEdit(date,branch){ setEditing({date,branch,slots:sortSlots(resolveSlots(vorlagen,date,branch)),scope:"day",von:"11:00",bis:"20:00"}); }
-  function editAddSlot(){ setEditing(e=>{ const t=IS_ONIGIRI(e.branch)?"":`${e.von}-${e.bis}`; if(e.slots.indexOf(t)>=0)return e; return {...e,slots:sortSlots([...e.slots,t])}; }); }
+  function editAddSlot(){ setEditing(e=>{ let t; if(IS_ONIGIRI(e.branch)){ t=""; } else { const v=normTime(e.von), b=normTime(e.bis); if(!v||!b) return e; t=v+"-"+b; } if(e.slots.indexOf(t)>=0)return e; return {...e,slots:sortSlots([...e.slots,t])}; }); }
   function editRemoveSlot(t){ setEditing(e=>({...e,slots:e.slots.filter(x=>x!==t)})); }
   function editSave(){ const next=setSlotsScoped(vorlagen,editing.date,editing.branch,editing.slots,editing.scope); saveVorlagen(next); setEditing(null); }
   function shiftFocus(delta){ const o=new Date(focusDate+"T00:00:00"); o.setDate(o.getDate()+delta); if(o.getFullYear()!==ty||(o.getMonth()+1)!==tm) return; setFocusDate(ymd(o.getFullYear(),o.getMonth()+1,o.getDate())); setPick(null); }
@@ -702,9 +702,9 @@ function PlanView({ users, targetMonth, ty, tm }){
         {editing.slots.map(t=><span key={t} className="staff" style={{background:"#fff"}}>{t||"ohne Zeit"} <b onClick={()=>editRemoveSlot(t)}>✕</b></span>)}
       </div>
       {!IS_ONIGIRI(editing.branch) ? (<div className="editrow">
-        <select className="timein" value={editing.von} onChange={e=>setEditing(x=>({...x,von:e.target.value}))}>{VON.map(t=><option key={t}>{t}</option>)}</select>
+        <input type="text" inputMode="numeric" placeholder="z.B. 0930" className="timein" style={{width:"84px"}} value={editing.von} onChange={e=>setEditing(x=>({...x,von:fmtTime(e.target.value)}))} />
         <span style={{fontWeight:800,color:C.muted}}>–</span>
-        <select className="timein" value={editing.bis} onChange={e=>setEditing(x=>({...x,bis:e.target.value}))}>{BIS.map(t=><option key={t}>{t}</option>)}</select>
+        <input type="text" inputMode="numeric" placeholder="z.B. 1500" className="timein" style={{width:"84px"}} value={editing.bis} onChange={e=>setEditing(x=>({...x,bis:fmtTime(e.target.value)}))} />
         <button className="mini" onClick={editAddSlot}>+ hinzufügen</button>
       </div>) : (<div className="editrow"><button className="mini" onClick={editAddSlot}>+ Slot (ohne Zeit)</button></div>)}
       <div className="scope-row">
@@ -844,8 +844,7 @@ function PlanView({ users, targetMonth, ty, tm }){
                     const asg=assignedUids(date,branch,slot);
                     return (<div className="wslot" key={slot||"o"}>
                       <div className="wslot-t">{slot||"ohne Zeit"}</div>
-                      <div className="slot-staff">{asg.map(uid=><span className="staff" key={uid}>{uEmoji(uid)} {uName(uid)}<b onClick={()=>removeAssign(uid,date,branch,slot)}>✕</b></span>)}</div>
-                      {availSelect(date,branch,slot,asg)}
+                      <div className="slot-staff">{asg.length? asg.map(uid=><span className="staff" key={uid}>{uEmoji(uid)} {uName(uid)}<b onClick={()=>removeAssign(uid,date,branch,slot)}>✕</b></span>) : <span className="muted" style={{fontSize:"11px"}}>—</span>}</div>
                     </div>);
                   })}
                 </div>);
