@@ -261,6 +261,8 @@ function nextMonthOf(now){ let y=now.getFullYear(), m=now.getMonth()+1; m+=1; if
 const daysInMonth = (y,m) => new Date(y,m,0).getDate();
 const firstOffsetMon = (y,m) => (new Date(y,m-1,1).getDay()+6)%7;
 const shortT = (t) => !t ? "" : (t.endsWith(":00") ? t.slice(0,2) : t);
+const fmtTime = (raw) => { const d=String(raw==null?"":raw).replace(/\D/g,"").slice(0,4); return d.length<=2 ? d : d.slice(0,2)+":"+d.slice(2); };
+const normTime = (t) => { const d=String(t==null?"":t).replace(/\D/g,""); if(d.length!==4) return ""; return pad2(Math.min(23,+d.slice(0,2)))+":"+pad2(Math.min(59,+d.slice(2))); };
 function zeitLabel(e){ const a=shortT(e.ab), b=shortT(e.bis); if(a&&b) return a+"–"+b; if(a) return a+"→"; if(b) return "→"+b; return "🕐"; }
 const labelOf = (u) => u ? ((u.emoji?u.emoji+" ":"") + (u.vorname||u.key)) : "";
 const isAdmin = (u) => !!u && ( isManagerName(u.key) || isManagerName(u.vorname) || u.isAdmin===true || u.role==="Admin" || u.role==="Management" || u.allBranches===true );
@@ -386,7 +388,7 @@ function App(){
       <div className="header">
         <div className="brand">
           <div><h1>teeamo · Dienstplan</h1><div className="sub">Verfügbarkeit</div></div>
-          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v3</div>
+          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v4</div>
         </div>
         <div className="who">
           <span>Angemeldet als <b>{labelOf(me) || session.uid}</b></span>
@@ -486,9 +488,13 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel,
   const locked = admin ? false : (submitted||deadlinePassed);
   const entered=Object.keys(slots).length;
 
-  // 한 날짜만 선택하면 그 날의 기존 값을 패널로 불러와 '수정'처럼 느껴지게
+  // 한 날짜만 선택하면 그 날 값 불러오고, 없으면 입력칸 리셋(이전 값 안 남게)
   useEffect(()=>{
-    if(msel.length===1){ const e=slots[msel[0]]; if(e){ setBMode(e.mode); if(e.mode==="zeit"){ setBAb(e.ab||""); setBBis(e.bis||""); } } }
+    if(msel.length===1){
+      const e=slots[msel[0]];
+      if(e){ setBMode(e.mode); setBAb(e.mode==="zeit"?(e.ab||""):""); setBBis(e.mode==="zeit"?(e.bis||""):""); }
+      else { setBAb(""); setBBis(""); }
+    }
   },[msel]); // eslint-disable-line
 
   function persist(nextSlots,opts){ opts=opts||{}; const clean={}; Object.keys(nextSlots).forEach(d=>{if(nextSlots[d])clean[d]=nextSlots[d];});
@@ -496,12 +502,12 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel,
     setSaving(true); writeNode(`verfuegbarkeit/${targetMonth}/${uid}`,payload).finally(()=>setSaving(false));
     setSlots(clean); if(opts.submit){setSubmitted(true);setSubmittedAt(payload.submittedAt);} }
   function onPick(date){ if(locked)return; setMsel(s=> s.indexOf(date)>=0 ? s.filter(d=>d!==date) : [...s,date]); }
-  function batchEntry(){ if(bMode==="ganztags")return {mode:"ganztags"}; if(bMode==="nicht")return {mode:"nicht"}; return {mode:"zeit",ab:bAb,bis:bBis}; }
+  function batchEntry(){ if(bMode==="ganztags")return {mode:"ganztags"}; if(bMode==="nicht")return {mode:"nicht"}; return {mode:"zeit",ab:normTime(bAb),bis:normTime(bBis)}; }
   function applyBatch(){ if(!msel.length)return; const e=batchEntry(); const next={...slots}; msel.forEach(d=>{next[d]=e;}); persist(next); setMsel([]); }
   function clearDays(){ if(!msel.length)return; const next={...slots}; msel.forEach(d=>{delete next[d];}); persist(next); setMsel([]); }
   function doSubmit(){ persist(slots,{submit:true}); setConfirming(false); setMsel([]); }
 
-  const canApply = bMode!=="zeit" || !!bAb || !!bBis;
+  const canApply = bMode!=="zeit" || !!normTime(bAb) || !!normTime(bBis);
   const wd1 = msel.length===1 ? WD_DE[(new Date(msel[0]+"T00:00:00").getDay()+6)%7] : "";
 
   return (<div>
@@ -524,8 +530,8 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel,
         <button className={"chip no"+(bMode==="nicht"?" on":"")} onClick={()=>setBMode("nicht")}>Nicht verfügbar</button>
       </div>
       {bMode==="zeit" && (<div className="timerow">
-        <label>ab <input type="time" step="900" className="timein" value={bAb} onChange={e=>setBAb(e.target.value)} /></label>
-        <label>bis <input type="time" step="900" className="timein" value={bBis} onChange={e=>setBBis(e.target.value)} /></label>
+        <label>ab <input type="text" inputMode="numeric" placeholder="z.B. 0900" className="timein" style={{width:"96px"}} value={bAb} onChange={e=>setBAb(fmtTime(e.target.value))} /></label>
+        <label>bis <input type="text" inputMode="numeric" placeholder="z.B. 1500" className="timein" style={{width:"96px"}} value={bBis} onChange={e=>setBBis(fmtTime(e.target.value))} /></label>
       </div>)}
       <div style={{display:"flex",gap:"8px",marginTop:"12px"}}>
         <button className="btn btn-ghost btn-sm" onClick={clearDays}>Leeren</button>
