@@ -388,7 +388,7 @@ function App(){
       <div className="header">
         <div className="brand">
           <div><h1>teeamo · Dienstplan</h1><div className="sub">Verfügbarkeit</div></div>
-          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v4</div>
+          <div className="conn"><span className={"dot "+(connected?"on":"off")}></span>{connected?"Verbunden":"Demo"} · v5</div>
         </div>
         <div className="who">
           <span>Angemeldet als <b>{labelOf(me) || session.uid}</b></span>
@@ -479,6 +479,7 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel,
   const [bAb,setBAb]=useState(""); const [bBis,setBBis]=useState("");
   const [confirming,setConfirming]=useState(false);
   const [saving,setSaving]=useState(false);
+  const [confirmClear,setConfirmClear]=useState(false);
 
   useEffect(()=>{ const off=subscribe(`verfuegbarkeit/${targetMonth}/${uid}`,data=>{
     if(data){ setSlots(data.slots||{}); setSubmitted(!!data.submitted); setSubmittedAt(data.submittedAt||null); }
@@ -506,6 +507,8 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel,
   function applyBatch(){ if(!msel.length)return; const e=batchEntry(); const next={...slots}; msel.forEach(d=>{next[d]=e;}); persist(next); setMsel([]); }
   function clearDays(){ if(!msel.length)return; const next={...slots}; msel.forEach(d=>{delete next[d];}); persist(next); setMsel([]); }
   function doSubmit(){ persist(slots,{submit:true}); setConfirming(false); setMsel([]); }
+  function selectAll(){ if(locked)return; const dim=daysInMonth(ty,tm); const all=[]; for(let d=1;d<=dim;d++) all.push(ymd(ty,tm,d)); setMsel(all); }
+  function clearAll(){ if(locked)return; persist({}); setMsel([]); setConfirmClear(false); }
 
   const canApply = bMode!=="zeit" || !!normTime(bAb) || !!normTime(bBis);
   const wd1 = msel.length===1 ? WD_DE[(new Date(msel[0]+"T00:00:00").getDay()+6)%7] : "";
@@ -520,6 +523,17 @@ function EmployeeView({ uid, targetMonth, ty, tm, deadlinePassed, deadlineLabel,
       <div className="cal-head">{WD_DE.map(w=><div key={w}>{w}</div>)}</div>
       <Calendar ty={ty} tm={tm} slots={slots} selDate={null} multiSet={msel} locked={locked} onPick={onPick} />
       {!locked && msel.length===0 && <div className="hint" style={{marginTop:"10px"}}>Tippe einen oder mehrere Tage an.</div>}
+      {!locked && (
+        <div style={{display:"flex",gap:"8px",marginTop:"10px"}}>
+          {!confirmClear ? (<>
+            <button className="btn btn-ghost btn-sm" style={{color:C.mintDark,borderColor:C.border}} onClick={selectAll}>Alle auswählen</button>
+            <button className="btn btn-ghost btn-sm" onClick={()=>setConfirmClear(true)} disabled={entered===0}>Alle löschen</button>
+          </>) : (<>
+            <button className="btn btn-ghost btn-sm" style={{color:C.muted,borderColor:C.border}} onClick={()=>setConfirmClear(false)}>Abbrechen</button>
+            <button className="btn btn-primary btn-sm" style={{background:C.red}} onClick={clearAll}>Wirklich alle löschen</button>
+          </>)}
+        </div>
+      )}
     </div>
 
     {!locked && msel.length>0 && (<div className="card">
