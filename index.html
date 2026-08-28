@@ -5769,14 +5769,14 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
     else downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
   }
   function exportSummary(fmt="xlsx"){
-    const hdr=["Name","Rolle","Arbeitstage","Gesamtstunden","Arkaden","Aegidiimarkt","TEEnJOY","Onigiri","Online","Ø Std/Tag"];
+    const hdr=["Name","Rolle","Gesamtstunden","Arkaden","Aegidiimarkt","TEEnJOY","Onigiri","Online"];
     const rows=[hdr,...empList.map(emp=>{
       const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
       const total=er.reduce((a,r)=>a+recHours(r),0);
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+recHours(r),0);});
       const onlineH=er.filter(r=>isOnlineFiliale(r.filiale)).reduce((a,r)=>a+recHours(r),0);
       const onigiriH=er.filter(r=>isOnigiriFiliale(r.filiale)).reduce((a,r)=>a+recHours(r),0);
-      return[emp.vorname,emp.role,er.length,Number(total.toFixed(2)),Number((byFil["TEEAMO Arkaden"]||0).toFixed(2)),Number((byFil["TEEAMO Aegidiimarkt"]||0).toFixed(2)),Number((byFil["TEEnJOY"]||0).toFixed(2)),Number(onigiriH.toFixed(2)),Number(onlineH.toFixed(2)),er.length?Number((total/er.length).toFixed(2)):0];
+      return[emp.vorname,emp.role,Number(total.toFixed(2)),Number((byFil["TEEAMO Arkaden"]||0).toFixed(2)),Number((byFil["TEEAMO Aegidiimarkt"]||0).toFixed(2)),Number((byFil["TEEnJOY"]||0).toFixed(2)),Number(onigiriH.toFixed(2)),Number(onlineH.toFixed(2))];
     })];
     if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monatsübersicht");
     else downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
@@ -5797,7 +5797,6 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
     const rows=[
       ["Abrechnung", emp.vorname+(emp.nachname?" "+emp.nachname:"")],
       ["Monat", monthLabel(selMonth)],
-      ["Arbeitstage", String(er.length)],
       ["Gesamtstunden", num(bd.total)],
       [],
       ["— Aufschlüsselung: Filiale → Arbeitstyp —"],
