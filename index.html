@@ -2147,7 +2147,8 @@ function nachtragenSchicht({ userName, date, filiale, ein, aus, pauseSec, origTy
   //    origTyp이 넘어오면 그걸 쓰고, 없으면 nachtrag로 둔다. (통계에서 Einspringen이 Regulär로
   //    잘못 분류되지 않게 함)
   const finalTyp = (origTyp && typNorm(origTyp)==="einspringen") ? "einspringen" : "nachtrag";
-  const rec = { id:Date.now(), user:userName, date, filiale:filiale||"", ein, aus, note:"", typ:finalTyp, pauseSec:Math.max(0, pauseSec||0), korrigiert:true };
+  // ✅ 정정본은 '확인 완료' 상태로 저장 → prüfen이 남지 않는다.
+  const rec = { id:Date.now(), user:userName, date, filiale:filiale||"", ein, aus, note:"", typ:finalTyp, pauseSec:Math.max(0, pauseSec||0), korrigiert:true, prüfen:false, geprüft:true };
   // 🔁 같은 근무를 여러 번 고쳐도 최종 1개만 남긴다 (중복 합산 방지).
   //    직원·날짜·지점이 같고 '시간이 겹치는' 기존 기록(실시간 출퇴근 + 이전 nachtrag)을
   //    지우고 이번 것만 남긴다. 시간이 안 겹치는 별개 근무(오전/오후)는 보존한다.
@@ -2155,6 +2156,7 @@ function nachtragenSchicht({ userName, date, filiale, ein, aus, pauseSec, origTy
   const sameSession = (r)=>{
     if(!(r && sameName(r.user,userName) && r.date===date)) return false;
     if(filiale && r.filiale && !sameFiliale(r.filiale, filiale)) return false;
+    if(r.isAutoCheckedOut) return true;   // 🆕 자동퇴근 기록은 정정 대상 → 시간 겹침 무관하게 대체
     const rRange = (r.ein && r.aus) ? (r.ein + "-" + r.aus) : "";
     if(!newRange || !rRange) return true;
     return timesOverlap(rRange, newRange);
@@ -2201,6 +2203,9 @@ function overrideWithNachtrag({ a, setRecords }){
   const sameSession = (r)=>{
     if(!(r && sameName(r.user,a.user) && r.date===a.date)) return false;
     if(a.filiale && r.filiale && !sameFiliale(r.filiale, a.filiale)) return false;
+    // 🆕 자동퇴근(isAutoCheckedOut) 기록은 '정정 대상' 자체다.
+    //    같은 직원·날짜·지점이면 시간 겹침과 무관하게 무조건 대체 → 자동+정정 이중저장 방지.
+    if(r.isAutoCheckedOut) return true;
     const rRange = (r.ein && r.aus) ? (r.ein + "-" + r.aus) : "";
     // 어느 한쪽이라도 시간이 없으면(구형/자동기록) 같은 날·지점 = 같은 세션으로 본다
     if(!newRange || !rRange) return true;
@@ -5064,7 +5069,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     try{localStorage.removeItem(CLOCK_KEY);}catch{}
   }
   function submitNachtrag(){
-    // 🔒 지난달 근무 Nachtragen은 유예 기간(다음 달 초 며칠) 이후 차단
+    // 🔒 지난달(정산 끝난) 근무 Nachtragen은 유예 기간 이후 차단 — 여긴 그대로 유지
     if(nachtragLocked(nDatum)){
       setNMsg("Für abgeschlossene Monate ist kein Nachtragen möglich.");
       return;
@@ -5074,19 +5079,21 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
     const id = Date.now();
     const ts = id;
     const pauseSec=Math.max(0,parseInt(nPause,10)||0)*60;   // 분 → 초
-    // Firebase   (antraege +   notifications)
-    setAntraege(prev=>[...prev,{id,user:user.vorname,date:nDatum,filiale:nFiliale,ein:nEin,aus:nAus,pauseSec,grund:nGrund,status:"offen",zustaendig:"all"}]);
+    // 원래 근무 타입 추정(einspringen 보존용)
+    const _existing = (Array.isArray(records)?records:[]).find(r=>r&&sameName(r.user,user.vorname)&&r.date===nDatum&&(!nFiliale||sameFiliale(r.filiale,nFiliale)));
+    const origTyp = _existing ? _existing.typ : "";
+    // ✅ 자동 적용 (승인 대기 없음): 기록에 바로 반영 + prüfen/자동퇴근/옛기록 정리
+    nachtragenSchicht({ userName:user.vorname, date:nDatum, filiale:nFiliale, ein:nEin, aus:nAus, pauseSec, origTyp, setRecords });
+    // 📣 관리자에겐 '정보성' 알림만 (승인 버튼 없음). status:genehmigt + autoApplied 플래그.
     if (window._fbDb && window._fbRef && window._fbSet) {
-      ["yeaji"].forEach(mgr => {
-        window._fbSet(window._fbRef(window._fbDb, `notifications/nachtrag_${id}_${mgr}`), {
-          type: "nachtrag", kategorie: "Nachtrag",
-          user: user.vorname, date: nDatum, filiale: nFiliale, ein: nEin, aus: nAus,
-          pauseSec, grund: nGrund, antragId: id,
-          zustaendig: mgr, bearbeitetVon: null, status: "offen", gelesen: false, ts
-        }).catch(e => console.error(e));
-      });
+      window._fbSet(window._fbRef(window._fbDb, `notifications/nachtrag_${id}_yeaji`), {
+        type: "nachtrag", kategorie: "Nachtrag", autoApplied: true,
+        user: user.vorname, date: nDatum, filiale: nFiliale, ein: nEin, aus: nAus,
+        pauseSec, grund: nGrund, antragId: id,
+        zustaendig: "yeaji", status: "genehmigt", gelesen: false, ts
+      }).catch(e => console.error(e));
     }
-    setNMsg("Antrag eingereicht! Wird von Yeaji oder Teddy geprüft.");setNGrund("");setNPause("");
+    setNMsg("✅ Nachgetragen.");setNGrund("");setNPause("");
   }
 
   const elStr=`${pad(Math.floor(elapsed/3600))}:${pad(Math.floor((elapsed%3600)/60))}:${pad(elapsed%60)}`;
@@ -5728,10 +5735,20 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
   const onlineTotal = onlineMonthRecs.reduce((a,r)=>a+recHours(r),0);
   // 근무 기록이 있는 계정은 관리자(하이브리드 포함)여도 정산 목록에 포함
   const _workerNames = new Set((Array.isArray(records)?records:[]).map(r=>r.user));
-  const empList=(Array.isArray(users)?users:[])
+  const monthRecs=records.filter(r=>r.date&&r.date.startsWith(selMonth)&&r.aus&&!STAT_EXCLUDED_MONTHS.has(r.date.slice(0,7)));
+  const _baseEmp=(Array.isArray(users)?users:[])
     .filter(u=>!isManagerName(u.key) || _workerNames.has(u.vorname))
     .sort(byName);
-  const monthRecs=records.filter(r=>r.date&&r.date.startsWith(selMonth)&&r.aus&&!STAT_EXCLUDED_MONTHS.has(r.date.slice(0,7)));
+  // 🆕 [퇴사자 유지] 계정이 삭제됐어도 이 달(selMonth) 근무 기록이 있으면 정산 목록에 남긴다.
+  //    → 8월 근무한 사람을 9월에 삭제해도, 8월을 보면 화면·다운로드에 그대로 보인다. (맨 아래 배치)
+  const _ehemalige=[];
+  (monthRecs||[]).forEach(r=>{
+    if(!r||!r.user) return;
+    if(_baseEmp.some(e=>sameName(e.vorname,r.user))) return;
+    if(_ehemalige.some(g=>sameName(g.vorname,r.user))) return;
+    _ehemalige.push({ key:"__ehemalig_"+r.user, vorname:r.user, role:"Staff", _ehemalig:true });
+  });
+  const empList=[..._baseEmp, ..._ehemalige];
 
   function downloadCSV(rows,filename){
     const bom="﻿";
@@ -8622,12 +8639,20 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           </div>
           <div style={{fontSize:10,color:C.muted,marginBottom:2}}>{n.filiale} · {n.ein} – {n.aus}</div>
           <div style={{fontSize:11,color:C.text,background:C.bg,borderRadius:8,padding:"7px 9px",marginBottom:10}}>{"📌"}{n.grund}</div>
-          <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>handleNachtragNotif(key,n,false)}
-              style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
-            <button onClick={()=>handleNachtragNotif(key,n,true)}
-              style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"✅ Genehmigen"}</button>
-          </div>
+          {n.autoApplied ? (
+            <>
+              <div style={{fontSize:9,color:C.mintDark,marginBottom:8,fontWeight:700}}>{"✅ Automatisch übernommen."}</div>
+              <button onClick={()=>markRead(key)}
+                style={{width:"100%",padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>{"✓ Zur Kenntnis"}</button>
+            </>
+          ) : (
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>handleNachtragNotif(key,n,false)}
+                style={{flex:1,padding:"9px",borderRadius:9,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>Ablehnen</button>
+              <button onClick={()=>handleNachtragNotif(key,n,true)}
+                style={{flex:2,padding:"9px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"✅ Genehmigen"}</button>
+            </div>
+          )}
         </>}
 
         {/* Prfen */}
