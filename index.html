@@ -390,6 +390,20 @@ function sessionIdFor(name, date, filiale){
   return "clock_"+uid+"_"+date+"_"+filialeSlug(filiale);
 }
 function sameFiliale(a,b){ return filialeSlug(a)===filialeSlug(b); }
+// 🕐 한 기록(rec)이 '예정 근무 시간대(plannedTime, "HH:MM-HH:MM")'에 속하는지 판정.
+//    같은 날·같은 지점에 오픈/마감처럼 여러 세션이 있을 때, 각 근무 칸이 자기 기록만
+//    집어오도록 쓰는 매칭. 시간이 없으면(ONIGIRI 등) 항상 true → 기존 동작 유지.
+function recWindowMatch(rec, plannedTime){
+  if(!plannedTime || String(plannedTime).indexOf("-")<0) return true;
+  const p=String(plannedTime).split("-");
+  const pa=parseMinutes(p[0]), pb=parseMinutes(p[1]);
+  if(pa==null||pb==null) return true;
+  const ra=parseMinutes(rec&&rec.ein);
+  if(ra==null) return true;
+  const rb=(rec&&rec.aus&&rec.aus!=="")?parseMinutes(rec.aus):ra;
+  const TOL=120; // ±2시간 허용 (실제 도장이 예정과 조금 달라도 같은 세션으로 인정)
+  return ra <= pb+TOL && rb >= pa-TOL;
+}
 // 특정 [직원·날짜·지점] 근무의 실제 기록을 찾는다.
 //  · 지점을 지정하면 그 지점 기록만 반환(다른 지점 근무에 간섭 금지)
 //  · 구 데이터(지점 없이 저장된 record)는 지점 지정 시 매칭에서 제외
@@ -405,10 +419,12 @@ function isStaleOpenRecord(rec, list){
     String(r.ein||"") >= String(rec.ein||"")
   );
 }
-function recordForShift(records, name, date, filiale){
+function recordForShift(records, name, date, filiale, plannedTime){
   const list=(Array.isArray(records)?records:[]).filter(r=>r&&sameName(r.user,name)&&r.date===date);
   if(filiale===undefined||filiale===null) return list[0]||null;
-  const exact=list.filter(r=>sameFiliale(r.filiale, filiale));
+  let exact=list.filter(r=>sameFiliale(r.filiale, filiale));
+  // 🕐 같은 날·지점에 오픈/마감 등 여러 세션이 있으면 이 예정 시간대에 맞는 기록만 본다
+  if(plannedTime) exact=exact.filter(r=>recWindowMatch(r, plannedTime));
   if(exact.length===0) return null;
   const byLatest=(a,b)=>String(b.ein||"").localeCompare(String(a.ein||""));
   // 진행 중(aus 없음) 우선 — 단, 유령 기록은 제외
@@ -1036,9 +1052,11 @@ function filialeMitTyp(filiale, typ, opts){
 // 실제(Ist) 근무시간: name·date의 실제 출퇴근 or 승인된 Nachtragen 시간을 반환.
 //  · 승인된 Nachtragen(typ:"nachtrag") 우선 → 그다음 완료된 실시간 출퇴근 기록.
 //  · 완전한 ein·aus 쌍이 있을 때만 반환(진행 중/미출근이면 null → Ist 미표시).
-function istTimeFor(records, name, date, filiale){
-  const list = (Array.isArray(records)?records:[]).filter(r=>r&&sameName(r.user,name)&&r.date===date&&
+function istTimeFor(records, name, date, filiale, plannedTime){
+  let list = (Array.isArray(records)?records:[]).filter(r=>r&&sameName(r.user,name)&&r.date===date&&
     (filiale===undefined||filiale===null||sameFiliale(r.filiale, filiale)));
+  // 🕐 예정 시간대가 주어지면 그 창에 맞는 기록만 (오픈/마감 분리)
+  if(plannedTime) list = list.filter(r=>recWindowMatch(r, plannedTime));
   if(!list.length) return null;
   // ⏱ 같은 날 같은 지점에서 여러 번 근무했다면 '가장 최근(출근 시각이 늦은)' 기록을 쓴다.
   //    (배열 순서상 앞에 있던 옛 기록이 최신 도장을 덮어 표시되던 버그 수정)
@@ -2541,7 +2559,7 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
   const f = s.f || s.filiale;
   const t = s.t || s.time;
   // 🔒 이 근무 카드(지점)에 해당하는 기록만 매칭 — 같은 날 다른 지점 근무와 분리
-  const actualRec = recordForShift(records, userName, d, f);
+  const actualRec = recordForShift(records, userName, d, f, t);
   const status = getShiftStatus({ time: t }, actualRec, d);
   const [showModal, setShowModal] = useState(false);
   const [modalTab, setModalTab] = useState("absagen"); // "absagen" | "nachtrag"
@@ -5772,6 +5790,71 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
       downloadCSV(rows, filename.replace(".xlsx",".csv"));
     }
   }
+  // 📘 여러 시트를 한 .xlsx 파일로 묶어 저장 (Komplett-Export)
+  function downloadXLSXMulti(sheets, filename){
+    try{
+      const wb=window.XLSX.utils.book_new();
+      const used={};
+      sheets.forEach(s=>{
+        const ws=window.XLSX.utils.aoa_to_sheet(s.rows&&s.rows.length?s.rows:[[""]]);
+        let nm=String(s.name||"Blatt").replace(/[\[\]\:\*\?\/\\]/g,"").trim().slice(0,28)||"Blatt";
+        const low=nm.toLowerCase();
+        if(used[low]){ used[low]++; nm=nm.slice(0,25)+"_"+used[low]; } else used[low]=1;
+        window.XLSX.utils.book_append_sheet(wb, ws, nm);
+      });
+      window.XLSX.writeFile(wb, filename);
+      setExported(filename);setTimeout(()=>setExported(null),3000);
+    }catch(e){ console.error("XLSX-Multi:",e); setExported("⚠️ Export fehlgeschlagen"); setTimeout(()=>setExported(null),3000); }
+  }
+  // ── Zeilen-Builder: 개별·통합에서 공용으로 재사용 ──
+  function summaryRows(){
+    const hdr=["Name","Rolle","Gesamtstunden","Arkaden","Aegidiimarkt","TEEnJOY","Onigiri","Online"];
+    return [hdr,...empList.map(emp=>{
+      const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
+      const total=er.reduce((a,r)=>a+recHours(r),0);
+      const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+recHours(r),0);});
+      const onlineH=er.filter(r=>isOnlineFiliale(r.filiale)).reduce((a,r)=>a+recHours(r),0);
+      const onigiriH=er.filter(r=>isOnigiriFiliale(r.filiale)).reduce((a,r)=>a+recHours(r),0);
+      return[emp.vorname,emp.role,Number(total.toFixed(2)),Number((byFil["TEEAMO Arkaden"]||0).toFixed(2)),Number((byFil["TEEAMO Aegidiimarkt"]||0).toFixed(2)),Number((byFil["TEEnJOY"]||0).toFixed(2)),Number(onigiriH.toFixed(2)),Number(onlineH.toFixed(2))];
+    })];
+  }
+  function gesamtRows(){ return [ABRECHNUNG_HEADER, ...abrechnungRows(monthRecs, schedule)]; }
+  function empRows(emp){
+    const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
+    const bd=buildBreakdown(er);
+    const num=h=>h.toFixed(2).replace(".",",");
+    return [
+      ["Abrechnung", emp.vorname+(emp.nachname?" "+emp.nachname:"")],
+      ["Monat", monthLabel(selMonth)],
+      ["Gesamtstunden", num(bd.total)],
+      [],
+      ["— Aufschlüsselung: Filiale → Arbeitstyp —"],
+      ["Filiale","Arbeitstyp","Stunden"],
+      ...bd.byFiliale.flatMap(f=>[
+        [f.filiale,"GESAMT",num(f.total)],
+        ...f.byTyp.map(t=>[f.filiale, t.icon+" "+t.lbl, num(t.std)]),
+      ]),
+      [],
+      ["— Tagesdetails —"],
+      ABRECHNUNG_HEADER,
+      ...abrechnungRows(er, schedule),
+    ];
+  }
+  // ③ Stundennachweis (전원 상세, 기존 Monatsabrechnung-Gesamt을 .xlsx로)
+  function exportGesamt(){ downloadXLSX(gesamtRows(), `Stundennachweis_${selMonth}.xlsx`, "Stundennachweis"); }
+  // ① Komplett-Excel: Monatsübersicht + Stundennachweis + 직원별 시트 전부
+  function exportKomplett(){
+    const sheets=[
+      {name:"Monatsübersicht", rows: summaryRows()},
+      {name:"Stundennachweis", rows: gesamtRows()},
+    ];
+    empList.forEach(emp=>{
+      const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
+      if(er.length===0) return;   // 이 달 기록 있는 직원만 개별 시트
+      sheets.push({name:(stripEmoji(emp.vorname||"")||emp.vorname||"MA"), rows: empRows(emp)});
+    });
+    downloadXLSXMulti(sheets, `Komplett_${selMonth}.xlsx`);
+  }
   function exportDetail(fmt="xlsx"){
     const hdr=["Name","Datum","Wochentag","Filiale","Einstempeln","Ausstempeln","Pause (Min)","Arbeitsstunden (netto)","Typ","Anmerkung"];
     const rows=[hdr,...[...monthRecs].sort((a,b)=>a.date.localeCompare(b.date)).map(r=>{
@@ -5806,30 +5889,10 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
     downloadCsvRows(rows, fn);
     setExported(fn); setTimeout(()=>setExported(null),3000);
   }
-  // 📥 B. 직원별 개별 CSV — 일자별 상세 + 지점별/타입별 집계 요약 포함
+  // 📥 직원별 개별 .xlsx — 일자별 상세 + 지점별/타입별 집계 요약 (empRows 재사용)
   function exportAbrechnungMitarbeiter(emp){
-    const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
-    const bd=buildBreakdown(er);
-    const num=h=>h.toFixed(2).replace(".",",");
-    const rows=[
-      ["Abrechnung", emp.vorname+(emp.nachname?" "+emp.nachname:"")],
-      ["Monat", monthLabel(selMonth)],
-      ["Gesamtstunden", num(bd.total)],
-      [],
-      ["— Aufschlüsselung: Filiale → Arbeitstyp —"],
-      ["Filiale","Arbeitstyp","Stunden"],
-      ...bd.byFiliale.flatMap(f=>[
-        [f.filiale,"GESAMT",num(f.total)],
-        ...f.byTyp.map(t=>[f.filiale, t.icon+" "+t.lbl, num(t.std)]),
-      ]),
-      [],
-      ["— Tagesdetails —"],
-      ABRECHNUNG_HEADER,
-      ...abrechnungRows(er, schedule),
-    ];
-    const fn=`Abrechnung_${(emp.vorname||"Mitarbeiter").replace(/[^\p{L}\p{N}_-]/gu,"")}_${selMonth}.csv`;
-    downloadCsvRows(rows, fn);
-    setExported(fn); setTimeout(()=>setExported(null),3000);
+    const fn=`Abrechnung_${(emp.vorname||"Mitarbeiter").replace(/[^\p{L}\p{N}_-]/gu,"")}_${selMonth}.xlsx`;
+    downloadXLSX(empRows(emp), fn, (stripEmoji(emp.vorname||"MA")||"MA").slice(0,28)||"MA");
   }
 
   return(
@@ -5933,7 +5996,7 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
                   )}
                 </div>
                 {/* 📥 직원별 개별 정산 CSV — 🔒 오너 전용 */}
-                {_viewerOwner && (<button onClick={()=>exportAbrechnungMitarbeiter(emp)} title={"Abrechnung CSV – "+emp.vorname}
+                {_viewerOwner && (<button onClick={()=>exportAbrechnungMitarbeiter(emp)} title={"Abrechnung – "+emp.vorname}
                   style={{flexShrink:0,width:32,height:32,borderRadius:9,border:"1px solid "+C.border,
                     background:C.mintLight,color:C.mintDark,fontSize:14,fontWeight:800,cursor:"pointer",
                     display:"flex",alignItems:"center",justifyContent:"center"}}>{"⬇"}</button>)}
@@ -5946,34 +6009,32 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
       </div>
       {_viewerOwner && (<div style={{background:C.navy,borderRadius:14,padding:"16px",marginBottom:12}}>
         <div style={{fontSize:12,fontWeight:800,color:"#fff",marginBottom:3}}>{"📥 Daten exportieren"}</div>
-        <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Excel oder CSV – öffnet direkt in Excel"}</div>
-        {/* 📥 A. 월간 통합 정산본 (모든 직원 · CSV) */}
+        <div style={{fontSize:10,color:"rgba(255,255,255,.4)",marginBottom:14}}>{"Als Excel (.xlsx) – öffnet direkt in Excel"}</div>
+        {/* ① Komplett-Excel — 한 파일에 전부 */}
         <div style={{background:"rgba(255,255,255,.07)",borderRadius:10,padding:"12px",marginBottom:8,
           border:"1px solid rgba(255,255,255,.18)"}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{"Monatsabrechnung – Gesamt"}</div>
+          <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{"📘 Komplett-Excel"}</div>
           <div style={{fontSize:9,color:"rgba(255,255,255,.4)",marginBottom:10}}>
-            {"Alle Mitarbeiter/innen · Datum · Filiale · Arbeitstyp · Plan/Ist-Zeiten · Std · Nachtragen"}
+            {"Alles in einer Datei: Monatsübersicht + Stundennachweis + je Mitarbeiter/in ein Blatt"}
           </div>
-          <button onClick={exportAbrechnungGesamt}
+          <button onClick={exportKomplett}
             style={{width:"100%",padding:"11px",borderRadius:8,border:"none",
               background:`linear-gradient(135deg,${C.yellow},#C99A2E)`,color:"#fff",fontWeight:800,fontSize:12,cursor:"pointer"}}>
-            {"⬇ Gesamt-CSV ("+monthLabel(selMonth)+")"}
+            {"⬇ Komplett-Excel ("+monthLabel(selMonth)+")"}
           </button>
           <div style={{fontSize:9,color:"rgba(255,255,255,.35)",marginTop:7,lineHeight:1.5}}>
             {"Einzelne Abrechnungen: ⬇-Symbol neben dem Namen in der Übersicht oben."}
           </div>
         </div>
+        {/* ② Monatsübersicht  ③ Stundennachweis */}
         {[
-          {title:"Stundennachweis (Details)",sub:"Jeder Tag · Name · Datum · Filiale · Ein/Aus · Std",fnXlsx:()=>exportDetail("xlsx"),fnCsv:()=>exportDetail("csv"),file:`Detail_${selMonth}`},
-          {title:"Monatsübersicht (Zusammenfassung)",sub:"Pro Mitarbeiterin · Gesamtstunden · je Filiale",fnXlsx:()=>exportSummary("xlsx"),fnCsv:()=>exportSummary("csv"),file:`Übersicht_${selMonth}`},
-        ].map(({title,sub,fnXlsx,fnCsv,file})=>(
+          {title:"Monatsübersicht (Zusammenfassung)",sub:"Pro Mitarbeiter/in · Gesamtstunden · je Filiale",fn:exportSummary,file:`Übersicht_${selMonth}`},
+          {title:"Stundennachweis",sub:"Alle Mitarbeiter/innen · Datum · Filiale · Plan/Ist-Zeiten · Std · Nachtragen",fn:exportGesamt,file:`Nachweis_${selMonth}`},
+        ].map(({title,sub,fn,file})=>(
           <div key={file} style={{background:"rgba(255,255,255,.07)",borderRadius:10,padding:"12px",marginBottom:8}}>
             <div style={{fontSize:12,fontWeight:700,color:"#fff",marginBottom:2}}>{title}</div>
             <div style={{fontSize:9,color:"rgba(255,255,255,.4)",marginBottom:10}}>{sub}</div>
-            <div style={{display:"flex",gap:7}}>
-              <button onClick={fnXlsx} style={{flex:2,padding:"10px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"⬇ Excel (.xlsx)"}</button>
-              <button onClick={fnCsv} style={{flex:1,padding:"10px",borderRadius:8,border:`1px solid rgba(255,255,255,.2)`,background:"transparent",color:"rgba(255,255,255,.6)",fontWeight:700,fontSize:10,cursor:"pointer"}}>CSV</button>
-            </div>
+            <button onClick={fn} style={{width:"100%",padding:"10px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${C.mint},${C.mintDark})`,color:"#fff",fontWeight:800,fontSize:11,cursor:"pointer"}}>{"⬇ Excel (.xlsx)"}</button>
           </div>
         ))}
       </div>)}
@@ -7095,8 +7156,8 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
     .sort((a,b)=>(a.filiale||"").localeCompare(b.filiale||"")||(a.time||"").localeCompare(b.time||""));
   const byFil={}; dayShifts.forEach(r=>{ (byFil[r.filiale]=byFil[r.filiale]||[]).push(r); });
   // 🔒 [직원·날짜·지점] 단위로 기록을 찾는다 (지점별 독립 판정)
-  const recFor=(name, filiale)=> selDate!==todayStr ? null
-    : recordForShift(records, name, selDate, filiale);
+  const recFor=(name, filiale, plannedTime)=> selDate!==todayStr ? null
+    : recordForShift(records, name, selDate, filiale, plannedTime);
 
   // 🔁 freigeben 취소/복구 — freieSchichten에서 제거 + 근무표 status 초기화.
   //    (마켓엔 없는데 근무표만 freigegeben으로 남은 '끊긴' 상태도 이걸로 되돌린다)
@@ -7191,7 +7252,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                 const isMine=!!highlightName&&!r.isOffen&&
                   samePerson({uid:r.uid,name:r.rawName},{uid:myUid,name:highlightName});
                 // 🔄 [Offene Schicht]는 실존 직원이 아니므로 출퇴근 기록을 조회하지 않는다
-                const rec=r.isOffen?null:recFor(r.rawName, fil);
+                const rec=r.isOffen?null:recFor(r.rawName, fil, r.time);
                 const transl=r.status==="freigegeben"||r.status==="getauscht";
                 const rowKey=(r.uid||r.rawName)+"|"+fil+"|"+idx;
                 const editing = editRow&&editRow.key===rowKey;
@@ -7324,7 +7385,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                         );
                       })()}
                       {(()=>{ if(r.isOffen) return null;
-                        const ist=istTimeFor(records,r.rawName,selDate,fil); if(!ist) return null;
+                        const ist=istTimeFor(records,r.rawName,selDate,fil,r.time); if(!ist) return null;
                         // 📍 지점 변경 대상이 되는 실제 기록 (본인 또는 관리자만)
                         const canMove = (isMine || allowDelete) && !!setRecords && !!rec;
                         return (
@@ -7690,7 +7751,7 @@ function EmpKalenderView({ allNames, schedule, records, users }) {
           {listShifts.length===0 ? (
             <div style={{...S.card,textAlign:"center",color:C.muted,fontSize:12,padding:"16px"}}>Keine Schichten in diesem Monat.</div>
           ) : listShifts.map((s,i)=>{
-            const ist = istTimeFor(records, selName, s.date, s.filiale);
+            const ist = istTimeFor(records, selName, s.date, s.filiale, s.time);
             const dd = new Date(s.date+"T00:00:00");
             return <div key={s.date+s.filiale+s.time+i} style={{...S.card,marginBottom:6,display:"flex",alignItems:"center",gap:10,padding:"10px 12px"}}>
               <div style={{width:38,height:38,borderRadius:9,background:ist?C.mintLight:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
