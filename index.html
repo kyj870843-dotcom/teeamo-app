@@ -4613,6 +4613,19 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
           // 미연결 이름 중 이미 이력/정상연결에 있는 것은 이력 쪽에서만 보여준다(중복 방지)
           const linkedTempSet = new Set(linkedEntries.map(e=>e.temp.toLowerCase()));
           const openOnly = openTempNames.filter(n=>!linkedTempSet.has(n.toLowerCase()));
+          // 🔗 같은 계정으로 연결된 항목들을 한 줄로 묶기 (중복 표시 제거 · 데이터는 유지)
+          const _grp = {};
+          linkedEntries.forEach(e=>{
+            const gk = String(e.realKey||e.real||e.temp).toLowerCase();
+            (_grp[gk]=_grp[gk]||[]).push(e);
+          });
+          const groupedLinked = Object.values(_grp).map(arr=>{
+            const primary = arr.find(e=>sameNameStrict(e.temp,e.real))
+              || arr.find(e=>String(e.temp).toLowerCase()===String(e.real).toLowerCase())
+              || arr[0];
+            const aliases = arr.filter(e=>e!==primary).map(e=>e.temp);
+            return {...primary, aliases};
+          }).sort((a,b)=>b.ts-a.ts);
 
           async function doLink(tn){
             const real=zuweisenSel[tn];
@@ -4690,7 +4703,7 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
               {zuweisenMsg&&<div style={{fontSize:11,fontWeight:700,color:C.mintDark,marginBottom:8}}>{zuweisenMsg}</div>}
 
               {/* ── 미연결 임시 이름 ── */}
-              {openOnly.length===0 && linkedEntries.length===0 ? (
+              {openOnly.length===0 && groupedLinked.length===0 ? (
                 <div style={{fontSize:11,color:C.muted,textAlign:"center",padding:"10px 0"}}>Keine offenen Temp-Namen.</div>
               ) : openOnly.map(tn=>(
                 <div key={tn} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
@@ -4710,30 +4723,30 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
                 </div>
               ))}
 
-              {/* ── 연결 이력 (재연결 가능) ── */}
-              {linkedEntries.length>0 && (
+              {/* ── 연결됨 (계정별 1줄로 묶음, 재연결 가능) ── */}
+              {groupedLinked.length>0 && (
                 <div style={{marginTop:openOnly.length>0?12:0,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
                   <div style={{fontSize:9,fontWeight:800,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".04em"}}>
                     {"✅ Zugeordnet (erneut zuordnen möglich)"}
                   </div>
-                  {linkedEntries.map(e=>(
-                    <div key={e.temp} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                      <div style={{flex:"0 0 auto",fontSize:12,fontWeight:800,minWidth:70,
-                        background:C.mintLight,color:C.mintDark,padding:"6px 8px",borderRadius:8}}>{e.temp}</div>
-                      <span style={{color:C.muted,flexShrink:0}}>{"→"}</span>
-                      <select value={zuweisenSel[e.temp]??e.real} onChange={ev=>setZuweisenSel(prev=>({...prev,[e.temp]:ev.target.value}))}
-                        style={{...S.input,flex:1,minWidth:0,fontSize:12,padding:"7px 8px",boxSizing:"border-box"}}>
-                        {realEmps.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
-                      </select>
-                      <button onClick={()=>doRelink(e.temp)}
-                        title="Erneut zuordnen (Alias)"
-                        style={{flexShrink:0,padding:"7px 9px",borderRadius:8,border:"none",fontSize:11,fontWeight:800,cursor:"pointer",
-                          background:C.mintDark,color:"#fff"}}>{"↻"}</button>
-                      <button onClick={()=>setTempLinks(prev=>{ const n={...(prev||{})};
-                        Object.keys(n).forEach(k=>{ if((n[k]?.temp||k).toLowerCase()===e.temp.toLowerCase()) delete n[k]; });
-                        return n; })}
-                        title="Aus Liste entfernen"
-                        style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontSize:14,cursor:"pointer"}}>{"×"}</button>
+                  {groupedLinked.map(e=>(
+                    <div key={e.temp} style={{marginBottom:8}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{flex:"0 0 auto",fontSize:12,fontWeight:800,minWidth:70,
+                          background:C.mintLight,color:C.mintDark,padding:"6px 8px",borderRadius:8}}>{e.temp}</div>
+                        <span style={{color:C.muted,flexShrink:0}}>{"→"}</span>
+                        <select value={zuweisenSel[e.temp]??e.real} onChange={ev=>setZuweisenSel(prev=>({...prev,[e.temp]:ev.target.value}))}
+                          style={{...S.input,flex:1,minWidth:0,fontSize:12,padding:"7px 8px",boxSizing:"border-box"}}>
+                          {realEmps.map(u=><option key={u.key} value={u.vorname}>{u.vorname}{u.nachname?" "+u.nachname:""}</option>)}
+                        </select>
+                        <button onClick={()=>doRelink(e.temp)}
+                          title="Erneut zuordnen (Alias)"
+                          style={{flexShrink:0,padding:"7px 9px",borderRadius:8,border:"none",fontSize:11,fontWeight:800,cursor:"pointer",
+                            background:C.mintDark,color:"#fff"}}>{"↻"}</button>
+                      </div>
+                      {e.aliases&&e.aliases.length>0&&(
+                        <div style={{fontSize:9.5,color:C.muted,marginTop:3,marginLeft:78}}>{"auch: "+e.aliases.join(", ")}</div>
+                      )}
                     </div>
                   ))}
                 </div>
