@@ -5118,6 +5118,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const timeStr=`${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showKeys, setShowKeys] = useState(false);   // 🔑 열쇠 보드 팝업
 
   return(
     <div style={{background:C.bg,minHeight:"100vh",paddingBottom:80}}>
@@ -5151,6 +5152,10 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           onLogout={onLogout}
           onClose={()=>setShowSettings(false)}
         />)}
+      {showKeys && (
+        <KeyBoardModal meName={user&&user.vorname} isAdmin={false} users={users}
+          onClose={()=>setShowKeys(false)} />
+      )}
       <div style={{...S.hdr,...(hybridStaff?{paddingTop:16,paddingBottom:18}:{})}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
@@ -5165,10 +5170,16 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             )}
           </div>
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
-            <button onClick={()=>setShowSettings(true)}
-              style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
-              {"⚙️"}
-            </button>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={()=>setShowKeys(true)} title="Schlüssel"
+                style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
+                {"🔑"}
+              </button>
+              <button onClick={()=>setShowSettings(true)}
+                style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
+                {"⚙️"}
+              </button>
+            </div>
             <button onClick={onLogout}
               style={{fontSize:10,background:"rgba(255,255,255,.08)",border:"0.5px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.65)",borderRadius:7,padding:"4px 10px",cursor:"pointer"}}>
               Abmelden
@@ -5242,9 +5253,6 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               </div>
             </div>
           )}
-          {/* 🔑 열쇠 현황판 (직원) */}
-          <SchluesselBoard meName={user&&user.vorname} isAdmin={false} users={users} />
-
           <div style={{textAlign:"center",marginBottom:18}}>
             {/* 📍 지점을 고르기 전에는 출근 버튼을 누를 수 없다 (오입력 방지) */}
             <button onClick={()=>{ if(!clockedIn && !selFiliale) return; setModal(clockedIn?"aus":"ein"); }}
@@ -8341,6 +8349,7 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
   const [monthAccordion,setMonthAccordion]=useState({});
   const [delRecordConfirm,setDelRecordConfirm]=useState(null);
   const [showMgrSettings, setShowMgrSettings] = useState(false);
+  const [showMgrKeys, setShowMgrKeys] = useState(false);   // 🔑 열쇠 보드 팝업
   const [aTab, setATab] = useState("nachtrag");
   const [openAId, setOpenAId] = useState(null);
   const [uTab, setUTab] = useState("all");
@@ -8818,6 +8827,10 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           isAdmin={true}
         />
       )}
+      {showMgrKeys && (
+        <KeyBoardModal meName={displayNameOf(safeUsers, userKey)} isAdmin={true} users={safeUsers}
+          onClose={()=>setShowMgrKeys(false)} />
+      )}
       <div style={{...S.hdr,...(hybrid?{paddingTop:16,paddingBottom:18}:{})}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
@@ -8836,6 +8849,10 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
                   {"🔁 Mitarbeiter-Modus"}
                 </button>
               )}
+              <button onClick={()=>setShowMgrKeys(true)} title="Schlüssel"
+                style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
+                {"🔑"}
+              </button>
               <button onClick={()=>setShowMgrSettings(true)}
                 style={{background:"rgba(255,255,255,.12)",border:"0.5px solid rgba(255,255,255,.2)",borderRadius:10,padding:"8px",cursor:"pointer",fontSize:20,lineHeight:1}}>
                 {"⚙️"}
@@ -8865,9 +8882,6 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
         </div>
 
       </div>
-      {tab==="uebersicht"&&!detailKey&&(
-        <SchluesselBoard meName={displayNameOf(safeUsers, userKey)} isAdmin={true} users={safeUsers} />
-      )}
       {tab==="uebersicht"&&!detailKey&&(
         <UebersichtAllTab
           empList={allStaffList}
@@ -9130,6 +9144,21 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 function keyShortFil(f){
   const m={ "TEEAMO Arkaden":"Arkaden","TEEAMO Aegidiimarkt":"Aegidiimarkt","TEEnJOY":"TEEnJOY" };
   return m[f]||f;
+}
+// 🔑 열쇠 보드 팝업(모달) — 설정 옆 🔑 버튼으로 어느 탭에서든 열람
+function KeyBoardModal({ onClose, meName, isAdmin, users }){
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:3000,
+      display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"38px 12px",overflowY:"auto"}}>
+      <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:460}}>
+        <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+          <button onClick={onClose} style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:10,
+            padding:"6px 12px",fontWeight:800,fontSize:13,cursor:"pointer",color:C.muted}}>{"✕ Schließen"}</button>
+        </div>
+        <SchluesselBoard meName={meName} isAdmin={isAdmin} users={users} />
+      </div>
+    </div>
+  );
 }
 function SchluesselBoard({ meName, isAdmin, users }){
   const [keys] = useFirebase("keys", {});
