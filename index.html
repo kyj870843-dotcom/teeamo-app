@@ -344,6 +344,12 @@ function displayNameOf(users, keyOrName){
 // ⏰ 근무표 작성 시 추천 시간 — VON(출근) / BIS(퇴근) 독립 배열
 const QUICK_VON_TIMES = ["09:00","09:30","11:00","11:30","12:00","12:30","14:00","15:00","15:30","16:00"];
 const QUICK_BIS_TIMES = ["14:00","15:00","15:30","16:00","17:00","18:00","19:00","20:00"];
+// ⚙️ 관리자가 config/quickTimes로 덮어쓸 수 있음. 없거나 비면 위 기본값 사용.
+function resolveQuickTimes(cfg){
+  const von = (cfg && Array.isArray(cfg.von) && cfg.von.length) ? cfg.von : QUICK_VON_TIMES;
+  const bis = (cfg && Array.isArray(cfg.bis) && cfg.bis.length) ? cfg.bis : QUICK_BIS_TIMES;
+  return { von, bis };
+}
 
 // 📍 Filiale = 독립된 지점. ONIGIRI는 정식 지점으로 격상되어 다른 매장과
 //    DB상 완전히 분리된 스케줄/근무 문서를 가진다.
@@ -4082,6 +4088,70 @@ function MasterGate({ userKey }){
   );
 }
 
+// ⏰ 관리자: 근무표 VON/BIS 빠른 시간 버튼 편집 (config/quickTimes)
+function ZeitPresetEditor(){
+  const [cfg] = useFirebase("config/quickTimes", null);
+  const [vonAdd, setVonAdd] = useState("");
+  const [bisAdd, setBisAdd] = useState("");
+  const cur = resolveQuickTimes(cfg);
+  function writeBoth(von,bis){
+    if(!window._fbDb||!window._fbRef||!window._fbSet) return;
+    window._fbSet(window._fbRef(window._fbDb,"config/quickTimes"), {von, bis}).catch(e=>console.error("quickTimes:",e));
+  }
+  function addTime(which, t){
+    const v = String(t||"").trim();
+    if(!isValidTimeStr(v)) return;
+    const list = which==="von"?cur.von:cur.bis;
+    if(list.indexOf(v)<0){
+      const next = [...list, v].sort();
+      writeBoth(which==="von"?next:cur.von, which==="bis"?next:cur.bis);
+    }
+    which==="von"?setVonAdd(""):setBisAdd("");
+  }
+  function removeTime(which, t){
+    const list = which==="von"?cur.von:cur.bis;
+    const next = list.filter(x=>x!==t);
+    writeBoth(which==="von"?next:cur.von, which==="bis"?next:cur.bis);
+  }
+  function resetDefaults(){
+    if(!window.confirm("Auf Standardzeiten zurücksetzen?")) return;
+    writeBoth(QUICK_VON_TIMES.slice(), QUICK_BIS_TIMES.slice());
+  }
+  const group = (label, which, list, addVal, setAddVal) => (
+    <div style={{marginBottom:12}}>
+      <div style={{fontSize:10,fontWeight:800,color:C.mintDark,marginBottom:6}}>{label}</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:7}}>
+        {list.map(t=>(
+          <span key={t} style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11,fontWeight:700,
+            padding:"4px 5px 4px 9px",borderRadius:8,background:C.mintLight,color:C.mintDark}}>
+            {t}
+            <button onClick={()=>removeTime(which,t)} title="Entfernen"
+              style={{border:"none",background:"transparent",cursor:"pointer",color:C.mintDark,fontSize:12,lineHeight:1,padding:"0 2px"}}>{"✕"}</button>
+          </span>
+        ))}
+        {list.length===0 && <span style={{fontSize:10,color:C.muted}}>{"—"}</span>}
+      </div>
+      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <TimeInput value={addVal} onChange={setAddVal}
+          style={{...S.input,width:92,fontSize:13,textAlign:"center",padding:"7px 6px"}}/>
+        <button onClick={()=>addTime(which, addVal)}
+          style={{fontSize:11,fontWeight:800,padding:"7px 12px",borderRadius:8,border:"none",background:C.mintDark,color:"#fff",cursor:"pointer"}}>{"+ Hinzufügen"}</button>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{...S.card,marginBottom:12}}>
+      <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"⏰ Zeit-Presets (Dienstplan)"}</div>
+      <div style={{fontSize:10,color:C.muted,marginBottom:12}}>
+        {"Schnellauswahl-Buttons beim Erstellen von Schichten. Änderungen gelten sofort für alle."}
+      </div>
+      {group("VON (Beginn)","von",cur.von,vonAdd,setVonAdd)}
+      {group("BIS (Ende)","bis",cur.bis,bisAdd,setBisAdd)}
+      <button onClick={resetDefaults}
+        style={{fontSize:10,fontWeight:700,padding:"6px 10px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,cursor:"pointer"}}>{"↺ Standardzeiten"}</button>
+    </div>
+  );
+}
 function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdmin }) {
   // 🔐 위험 기능은 '마스터 해제 + 오너(Yeaji) 로그인'일 때만 노출한다.
   //    다른 관리자(Teddy·Tingting·Huy)는 암호를 넣어도 이 기능이 보이지 않는다.
@@ -4398,6 +4468,9 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             </div>
           )}
         </div>
+
+        {/* ⏰ 근무표 빠른 시간 프리셋 편집 — 관리자 전용 */}
+        {isAdmin && <ZeitPresetEditor/>}
 
         {/* 🔗 임시 계정 매칭 (Zuweisen) — 관리자 전용 */}
         {isAdmin && (()=>{
@@ -7163,6 +7236,9 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
     return map;
   },[keysNode]);
   const keysHeldBy = name => heldByName[String(name||"").trim().toLowerCase()]||[];
+  // ⏰ 관리자 편집 가능한 VON/BIS 프리셋 (config/quickTimes, 없으면 기본값)
+  const [quickCfgDK] = useFirebase("config/quickTimes", null);
+  const { von:Q_VON_DK, bis:Q_BIS_DK } = resolveQuickTimes(quickCfgDK);
   // 인라인 수정/양도/Nachtragen 상태
   const [editRow, setEditRow] = useState(null);   // {name, fil, von, bis}
   const [nachRow, setNachRow] = useState(null);   // {name, von, bis}
@@ -7704,8 +7780,8 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                   </div>
                 ) : (
                   <div style={{display:"flex",gap:10,marginBottom:10}}>
-                    {[{lbl:"4 · VON",val:addVon,set:setAddVon,quick:QUICK_VON_TIMES},
-                      {lbl:"BIS",   val:addBis,set:setAddBis,quick:QUICK_BIS_TIMES}].map(({lbl,val,set,quick})=>(
+                    {[{lbl:"4 · VON",val:addVon,set:setAddVon,quick:Q_VON_DK},
+                      {lbl:"BIS",   val:addBis,set:setAddBis,quick:Q_BIS_DK}].map(({lbl,val,set,quick})=>(
                       <div key={lbl} style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>{lbl}</div>
                         <TimeInput value={val} onChange={set} style={{...S.input,width:"100%",fontSize:14,padding:"8px 6px",boxSizing:"border-box"}}/>
@@ -8050,8 +8126,9 @@ function AdminDienstplanView({ records, setRecords, users, userKey, manager, csv
 function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
   const empOptions = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key) && u.vorname!==adminName).sort(byName);
-  // ⏰ 추천 시간: VON/BIS 독립 배열 (전역 상수 공유)
-  const QUICK_VON = QUICK_VON_TIMES, QUICK_BIS = QUICK_BIS_TIMES;
+  // ⏰ 추천 시간: 관리자 편집 가능한 프리셋 (config/quickTimes, 없으면 기본값)
+  const [quickCfgUp] = useFirebase("config/quickTimes", null);
+  const { von:QUICK_VON, bis:QUICK_BIS } = resolveQuickTimes(quickCfgUp);
   const DRAFT_KEY = "teeamo_schicht_cart_v1";
   const filShort = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt", "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI" };
 
