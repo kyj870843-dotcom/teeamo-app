@@ -3653,11 +3653,21 @@ function LoginView({onLogin,users,setUsers,getPin,setPin:savePinFn,csvCtx}){
 }
 
 //  CLOCK MODAL 
-function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilialen,regularShifts,clockTyp,CLOCK_KEY,onClose,onEin,onAus}){
+function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilialen,regularShifts,clockTyp,CLOCK_KEY,onClose,onEin,onAus,users,meName}){
   const isEin = modal==="ein";
   const nowStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
   const [manualMode, setManualMode] = useState(false);
   const [manualTime, setManualTime] = useState(nowStr);
+  // 🔑 퇴근 시 열쇠 확인 (출근 땐 미표시)
+  const [keysNode] = useFirebase("keys", {});
+  const [keyPicker, setKeyPicker] = useState(null);   // 넘기기 대상 고르는 중인 열쇠 id
+  const [keptIds, setKeptIds]     = useState([]);     // "계속 보유" 눌러 확인한 열쇠 id
+  const keyWrite = (k,kind,holder)=>{
+    if(!window._fbDb||!window._fbRef||!window._fbUpdate) return;
+    window._fbUpdate(window._fbRef(window._fbDb,"keys/"+k.id),
+      {holderKind:kind, holder:holder||"", updatedAt:Date.now(), updatedBy:meName||""}).catch(e=>console.error("key(clock):",e));
+    setKeyPicker(null);
+  };
 
   const ausInvalid = !isEin && manualMode && clockInTime && (()=>{
     const [ah,am] = manualTime.split(":").map(Number);
@@ -3790,6 +3800,60 @@ function ClockModal({modal,now,selFiliale,clockFiliale,clockInTime,assignedFilia
             </div>
           )}
         </div>
+
+        {!isEin && (()=>{
+          const allK = Object.values(keysNode||{}).filter(k=>k&&k.id);
+          const held = allK.filter(k=>k.holderKind==="person" && sameName(k.holder, meName));
+          const here = allK.filter(k=>(k.holderKind==="store" && k.filiale===clockFiliale) || (k.holderKind==="other" && k.holder===clockFiliale));
+          if(held.length===0 && here.length===0) return null;
+          const chip = (txt,onClick,primary)=>(
+            <button onClick={onClick} style={{fontSize:11.5,padding:"7px 11px",borderRadius:9,fontWeight:700,cursor:"pointer",
+              border:primary?"none":`1px solid ${C.border}`,background:primary?C.mintDark:"#fff",color:primary?"#fff":C.mintDark,whiteSpace:"nowrap"}}>{txt}</button>
+          );
+          const staffList = safeList(users).filter(u=>u&&u.vorname&&!u.ehemalig&&!sameName(u.vorname,meName))
+            .sort((a,b)=>String(a.vorname).localeCompare(String(b.vorname)));
+          return (
+            <div style={{marginBottom:16,background:"#FBF7EE",border:`1.5px solid ${C.yellow}`,borderRadius:12,padding:"13px 14px"}}>
+              <div style={{fontSize:12.5,fontWeight:800,color:"#7c5c00",marginBottom:10}}>{"🔑 Schlüssel – bitte kurz prüfen"}</div>
+
+              {held.map(k=>(
+                <div key={k.id} style={{marginBottom:12}}>
+                  <div style={{fontSize:12,fontWeight:700,marginBottom:6}}>{(k.label||"Schlüssel")+" ("+keyShortFil(k.filiale)+") · bei dir"}</div>
+                  {keptIds.indexOf(k.id)>=0 ? (
+                    <div style={{fontSize:11,fontWeight:700,color:C.mintDark}}>{"✓ Behalten"}</div>
+                  ) : keyPicker===k.id ? (
+                    <div>
+                      <div style={{fontSize:10.5,fontWeight:700,color:C.muted,marginBottom:6}}>{"Übergeben an:"}</div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {staffList.map(u=>chip(u.vorname, ()=>keyWrite(k,"person",u.vorname)))}
+                        {chip("Abbrechen", ()=>setKeyPicker(null))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {chip("Behalten", ()=>setKeptIds(p=>[...p,k.id]))}
+                      {chip("Übergeben →", ()=>setKeyPicker(k.id))}
+                      {chip("Im Laden lassen", ()=>keyWrite(k,"store",""))}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {here.map(k=>(
+                <div key={k.id} style={{marginBottom:8,paddingTop:held.length?8:0,borderTop:held.length?`1px dashed ${C.yellow}`:"none"}}>
+                  <div style={{fontSize:12,marginBottom:6}}>{"Noch im Laden: "+(k.label||"Schlüssel")+" ("+keyShortFil(k.filiale)+")"}</div>
+                  {keptIds.indexOf("take_"+k.id)>=0 ? (
+                    <div style={{fontSize:11,fontWeight:700,color:C.mintDark}}>{"✓ Mitgenommen"}</div>
+                  ) : (
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {chip("🔑 Mitnehmen", ()=>{ keyWrite(k,"person",meName); setKeptIds(p=>[...p,"take_"+k.id]); }, true)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
 
         <div style={{display:"flex",gap:9}}>
           <button onClick={onClose} style={{flex:1,padding:"12px",borderRadius:11,border:`1.5px solid ${C.border}`,background:C.card,color:C.muted,fontWeight:700,fontSize:13,cursor:"pointer"}}>Abbrechen</button>
@@ -5580,6 +5644,8 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
           regularShifts={myTodayRegularShifts}
           clockTyp={clockTyp}
           CLOCK_KEY={CLOCK_KEY}
+          users={users}
+          meName={user&&user.vorname}
           onClose={()=>setModal(null)}
           onEin={(d)=>{
             // ⏱ 모달이 확정한 시각(d) 하나만을 진실의 원천으로 사용한다.
@@ -9256,9 +9322,19 @@ function SchluesselBoard({ meName, isAdmin, users }){
                       {k.note&&<span style={{fontSize:10,color:C.muted}}>{"· "+k.note}</span>}
                     </div>
                     <div style={{display:"flex",gap:5,flexShrink:0}}>
-                      {!isMine && mini("Zu mir", ()=>setHolder(k,"person",meName))}
-                      {mini("Übergeben", ()=>setPicker(isPicking&&picker.mode==="uebergeben"?null:{id:k.id,mode:"uebergeben"}))}
-                      {mini("Abgeben",   ()=>setPicker(isPicking&&picker.mode==="abgeben"?null:{id:k.id,mode:"abgeben"}))}
+                      {(()=>{
+                        const btnUeber = mini("Übergeben", ()=>setPicker(isPicking&&picker.mode==="uebergeben"?null:{id:k.id,mode:"uebergeben"}));
+                        const btnAbg   = mini("Abgeben",   ()=>setPicker(isPicking&&picker.mode==="abgeben"?null:{id:k.id,mode:"abgeben"}));
+                        const btnZu    = mini("Zu mir",    ()=>setHolder(k,"person",meName));
+                        if(isAdmin){
+                          // 관리자: 전체 버튼
+                          return (<React.Fragment>{!isMine&&btnZu}{btnUeber}{btnAbg}</React.Fragment>);
+                        }
+                        // 직원: 내 열쇠 → 넘기기/반납 · 매장/예비 → 가져오기 · 남의 열쇠 → 버튼 없음
+                        if(isMine) return (<React.Fragment>{btnUeber}{btnAbg}</React.Fragment>);
+                        if(k.holderKind!=="person") return btnZu;
+                        return null;
+                      })()}
                       {isAdmin && (
                         <button onClick={()=>isEditing?setEditId(null):startEdit(k)} title="Bearbeiten"
                           style={{fontSize:11,padding:"4px 7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",cursor:"pointer"}}>{"✏️"}</button>
