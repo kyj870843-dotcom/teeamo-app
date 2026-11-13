@@ -4088,6 +4088,116 @@ function MasterGate({ userKey }){
   );
 }
 
+// 📦 관리자: Dienstplan-Archiv — 월별 근무표를 Firebase 아카이브에 박제 + Excel 다운로드
+//    · 라이브 schedule과 분리된 사본 → 퇴사자 삭제해도 아카이브는 안 바뀜
+//    · dienstplanArchiv/<YYYY-MM> = { month, savedAt, data:(schedule_YYYY_MM 스냅샷) }
+function DienstplanArchiv(){
+  const [archiv] = useFirebase("dienstplanArchiv", {});
+  const now = new Date();
+  const nowYM = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");
+  const [selM, setSelM] = useState(nowYM);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // 월 목록: 작년 1월 ~ 이번 달 (내림차순)
+  const months = (()=>{
+    const arr=[]; const endY=now.getFullYear(), endM=now.getMonth()+1;
+    for(let yy=endY-1; yy<=endY; yy++) for(let mm=1; mm<=12; mm++){
+      if(yy===endY && mm>endM) break;
+      arr.push(yy+"-"+String(mm).padStart(2,"0"));
+    }
+    return arr.reverse();
+  })();
+  const archivedSet = new Set(Object.keys(archiv||{}));
+  const archivedList = Object.keys(archiv||{}).sort().reverse();
+
+  async function archiveMonth(){
+    if(busy) return;
+    if(!window._fbGet||!window._fbRef||!window._fbDb||!window._fbSet){ return; }
+    setBusy(true);
+    try{
+      const snapKey = "schedule_"+selM.replace("-","_");
+      const snap = await window._fbGet(window._fbRef(window._fbDb, snapKey));
+      const data = snap && snap.val();
+      if(!data || (typeof data==="object" && Object.keys(data).length===0)){
+        setMsg("⚠️ Keine Daten für "+selM+".");
+      } else {
+        await window._fbSet(window._fbRef(window._fbDb, "dienstplanArchiv/"+selM),
+          { month:selM, savedAt:Date.now(), data });
+        setMsg("✅ "+selM+" archiviert.");
+      }
+    }catch(e){ console.error("archiv:",e); setMsg("⚠️ Fehler beim Archivieren."); }
+    setBusy(false);
+    setTimeout(()=>setMsg(""),3500);
+  }
+
+  function downloadArchiv(){
+    const keys = Object.keys(archiv||{}).sort();
+    if(keys.length===0){ setMsg("⚠️ Noch nichts archiviert."); setTimeout(()=>setMsg(""),3000); return; }
+    if(!window.XLSX){ setMsg("⚠️ Excel nicht verfügbar."); setTimeout(()=>setMsg(""),3000); return; }
+    try{
+      const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
+      const wb = window.XLSX.utils.book_new();
+      keys.forEach(ym=>{
+        const entry = archiv[ym]; const data = (entry&&entry.data)||{};
+        const body = [];
+        Object.keys(data).sort().forEach(name=>{
+          norm(data[name]).forEach(s=>{
+            if(!s) return;
+            body.push([ s.d||s.date||"", name, s.f||s.filiale||"", s.t||s.time||"", s.typ||"" ]);
+          });
+        });
+        body.sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
+        const rows = [["Datum","Name","Filiale","Zeit","Typ"], ...body];
+        const ws = window.XLSX.utils.aoa_to_sheet(rows);
+        window.XLSX.utils.book_append_sheet(wb, ws, ym.slice(0,31));
+      });
+      window.XLSX.writeFile(wb, "Dienstplan_Archiv.xlsx");
+      setMsg("📥 Heruntergeladen.");
+    }catch(e){ console.error("archiv-xlsx:",e); setMsg("⚠️ Export fehlgeschlagen."); }
+    setTimeout(()=>setMsg(""),3000);
+  }
+
+  return (
+    <div style={{...S.card,marginBottom:12}}>
+      <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"📦 Dienstplan-Archiv"}</div>
+      <div style={{fontSize:10,color:C.muted,marginBottom:12,lineHeight:1.5}}>
+        {"Monat archivieren = eingefrorene Kopie (bleibt auch nach dem Löschen von Ex-Mitarbeitern erhalten). Download = alle archivierten Monate als eine Excel-Datei."}
+      </div>
+      {msg && <div style={{fontSize:11,fontWeight:700,color:msg.startsWith("✅")||msg.startsWith("📥")?C.mintDark:C.red,marginBottom:8}}>{msg}</div>}
+
+      <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:10}}>
+        <select value={selM} onChange={e=>setSelM(e.target.value)}
+          style={{...S.input,flex:1,minWidth:0,fontSize:12,padding:"8px 9px",boxSizing:"border-box"}}>
+          {months.map(m=><option key={m} value={m}>{m}{archivedSet.has(m)?"  ✓":""}</option>)}
+        </select>
+        <button onClick={archiveMonth} disabled={busy}
+          style={{flexShrink:0,padding:"8px 12px",borderRadius:8,border:"none",fontSize:11.5,fontWeight:800,
+            cursor:busy?"wait":"pointer",background:C.mintDark,color:"#fff"}}>{busy?"…":"📸 Archivieren"}</button>
+      </div>
+
+      {archivedList.length>0 && (
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:9,fontWeight:800,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".04em"}}>
+            {"Archiviert ("+archivedList.length+")"}
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+            {archivedList.map(m=>(
+              <span key={m} style={{fontSize:10.5,fontWeight:700,padding:"4px 9px",borderRadius:999,background:C.mintLight,color:C.mintDark}}>{m}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button onClick={downloadArchiv} disabled={archivedList.length===0}
+        style={{width:"100%",padding:"9px",borderRadius:9,border:`1.5px solid ${archivedList.length?C.mint:C.border}`,
+          background:archivedList.length?C.mintLight:"#f3f3f3",color:archivedList.length?C.mintDark:C.muted,
+          fontWeight:800,fontSize:12,cursor:archivedList.length?"pointer":"not-allowed"}}>
+        {"📥 Archiv herunterladen (Excel)"}
+      </button>
+    </div>
+  );
+}
 // ⏰ 관리자: 근무표 VON/BIS 빠른 시간 버튼 편집 (config/quickTimes)
 function ZeitPresetEditor(){
   const [cfg] = useFirebase("config/quickTimes", null);
@@ -4472,6 +4582,9 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         {/* ⏰ 근무표 빠른 시간 프리셋 편집 — 관리자 전용 */}
         {isAdmin && <ZeitPresetEditor/>}
 
+        {/* 📦 Dienstplan-Archiv — 관리자 전용 (Temp-Konto 삭제 전 백업용) */}
+        {isAdmin && <DienstplanArchiv/>}
+
         {/* 🔗 임시 계정 매칭 (Zuweisen) — 관리자 전용 */}
         {isAdmin && (()=>{
           const registered = new Set((Array.isArray(users)?users:[]).map(u=>(u.vorname||"").toLowerCase()));
@@ -4554,6 +4667,20 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
             setTimeout(()=>setZuweisenMsg(""),3000);
           }
 
+          // 🗑 퇴사자(미연결 Temp-Namen) 완전 삭제 — 라이브 schedule에서만 제거. records(급여)는 보존.
+          function deleteTempName(tn){
+            if(!window.confirm("„"+tn+"“ wirklich aus dem Dienstplan löschen?\n\nAlle geplanten Schichten unter diesem Namen werden entfernt.\nArbeitszeiten (Lohn/records) bleiben erhalten.")) return;
+            if(window._fbRemove&&window._fbRef&&window._fbDb){
+              window._fbRemove(window._fbRef(window._fbDb,"schedule/"+tn)).catch(e=>console.error("del schedule:",e));
+            }
+            setTempLinks(prev=>{ const n={...(prev||{})};
+              Object.keys(n).forEach(k=>{ if((n[k]&&n[k].temp||k).toLowerCase()===tn.toLowerCase()) delete n[k]; });
+              return n; });
+            setZuweisenSel(prev=>{ const n={...prev}; delete n[tn]; return n; });
+            setZuweisenMsg("🗑 „"+tn+"“ gelöscht.");
+            setTimeout(()=>setZuweisenMsg(""),3000);
+          }
+
           return(
             <div style={{...S.card,marginBottom:12,border:`1px solid ${C.mint}`}}>
               <div style={{fontSize:12,fontWeight:800,color:C.mintDark,marginBottom:4}}>{"🔗 Temp-Konto zuweisen"}</div>
@@ -4578,6 +4705,8 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
                   <button onClick={()=>doLink(tn)} disabled={!zuweisenSel[tn]}
                     style={{flexShrink:0,padding:"7px 10px",borderRadius:8,border:"none",fontSize:11,fontWeight:800,cursor:zuweisenSel[tn]?"pointer":"not-allowed",
                       background:zuweisenSel[tn]?C.mintDark:C.border,color:"#fff"}}>{"Zuweisen"}</button>
+                  <button onClick={()=>deleteTempName(tn)} title="Aus Dienstplan löschen (z. B. Ex-Mitarbeiter)"
+                    style={{flexShrink:0,width:30,height:30,borderRadius:8,border:`1px solid ${C.red}`,background:C.redLight,color:C.red,fontSize:13,fontWeight:700,cursor:"pointer"}}>{"🗑"}</button>
                 </div>
               ))}
 
