@@ -5242,6 +5242,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
               </div>
             </div>
           )}
+          {/* 🔑 열쇠 현황판 (직원) */}
+          <SchluesselBoard meName={user&&user.vorname} isAdmin={false} users={users} />
+
           <div style={{textAlign:"center",marginBottom:18}}>
             {/* 📍 지점을 고르기 전에는 출근 버튼을 누를 수 없다 (오입력 방지) */}
             <button onClick={()=>{ if(!clockedIn && !selFiliale) return; setModal(clockedIn?"aus":"ein"); }}
@@ -7071,6 +7074,21 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
   // 🔄 Schichtbörse 구독 — 세 화면(공개/관리자/직원)이 이 컴포넌트를 공유하므로
   //    여기서 한 번만 구독하면 모든 Dienstplan 리스트에 자동 반영된다.
   const [freieSchichten] = useFirebase("freieSchichten", []);
+  // 🔑 열쇠 보유 현황 구독 → Plan에서 이름 옆 뱃지로 "지금 어느 지점 열쇠 보유중" 표시 (실시간)
+  const [keysNode] = useFirebase("keys", {});
+  const heldByName = React.useMemo(()=>{
+    const map={};
+    Object.values(keysNode||{}).forEach(k=>{
+      if(k && k.holderKind==="person" && k.holder){
+        const kk=String(k.holder).trim().toLowerCase();
+        const sh=filShort[k.filiale]||k.filiale;
+        if(!map[kk]) map[kk]=[];
+        if(map[kk].indexOf(sh)<0) map[kk].push(sh);
+      }
+    });
+    return map;
+  },[keysNode]);
+  const keysHeldBy = name => heldByName[String(name||"").trim().toLowerCase()]||[];
   // 인라인 수정/양도/Nachtragen 상태
   const [editRow, setEditRow] = useState(null);   // {name, fil, von, bis}
   const [nachRow, setNachRow] = useState(null);   // {name, von, bis}
@@ -7355,6 +7373,10 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:13,fontWeight:700,color:C.text,display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
                         <span style={r.isOffen?{color:"#92400e",fontStyle:"italic"}:undefined}>{r.name}</span>
+                        {!r.isOffen&&(()=>{ const held=keysHeldBy(r.name); if(!held.length) return null; return (
+                          <span title="Hat aktuell diesen/diese Schlüssel" style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,
+                            background:"#FBF0DA",color:"#9a7b16",whiteSpace:"nowrap"}}>{"🔑 "+held.join(" · ")}</span>
+                        ); })()}
                         {r.isOffen&&(
                           <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,
                             background:C.offenLight,color:"#92400e",border:`1px solid ${C.offen}`}}>
@@ -8844,6 +8866,9 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
 
       </div>
       {tab==="uebersicht"&&!detailKey&&(
+        <SchluesselBoard meName={displayNameOf(safeUsers, userKey)} isAdmin={true} users={safeUsers} />
+      )}
+      {tab==="uebersicht"&&!detailKey&&(
         <UebersichtAllTab
           empList={allStaffList}
           schedule={schedule}
@@ -9090,6 +9115,183 @@ function ManagerView({records,setRecords,antraege,setAntraege,onLogout,userKey,u
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+// ╔═══════════════════════════════════════════════════════════╗
+// ║  🔑 SCHLÜSSEL-BOARD  (열쇠 현황판)                           ║
+// ║  Firebase 노드: keys/{id} = {id,filiale,label,note,         ║
+// ║    holderKind:"person"|"store"|"other", holder, order}      ║
+// ║  - holderKind "store" → 자기 매장(filiale)에 있음           ║
+// ║  - holderKind "other" → holder = 보관중인 다른 지점         ║
+// ║  누구나 소지자 변경 / 관리자만 열쇠 추가·삭제·편집          ║
+// ╚═══════════════════════════════════════════════════════════╝
+function keyShortFil(f){
+  const m={ "TEEAMO Arkaden":"Arkaden","TEEAMO Aegidiimarkt":"Aegidiimarkt","TEEnJOY":"TEEnJOY" };
+  return m[f]||f;
+}
+function SchluesselBoard({ meName, isAdmin, users }){
+  const [keys] = useFirebase("keys", {});
+  const [picker, setPicker]   = useState(null);   // {id, mode:"uebergeben"|"abgeben"}
+  const [editId, setEditId]   = useState(null);   // 관리자 편집중인 열쇠 id
+  const [editLabel,setEditLabel]=useState("");
+  const [editNote, setEditNote] =useState("");
+  const [editFil,  setEditFil]  =useState("");
+  const [delArm,   setDelArm]   =useState(null);   // 🗑 삭제 2단계 확인(인라인)
+
+  const stores = FILIALEN.filter(f=>!isOnigiriFiliale(f) && !isOnlineFiliale(f));
+  const keyList = Object.values(keys||{}).filter(k=>k&&k.id);
+  const byStore = {};
+  stores.forEach(s=>{ byStore[s]=[]; });
+  keyList.forEach(k=>{ const f=stores.indexOf(k.filiale)>=0?k.filiale:stores[0]; (byStore[f]=byStore[f]||[]).push(k); });
+  Object.keys(byStore).forEach(s=>byStore[s].sort((a,b)=>(a.order||0)-(b.order||0)));
+
+  const staff = safeList(users).filter(u=>u&&u.vorname&&!u.ehemalig)
+    .sort((a,b)=>String(a.vorname).localeCompare(String(b.vorname)));
+
+  const R = p => window._fbRef(window._fbDb, p);
+  function setHolder(k, kind, holder){
+    if(!window._fbDb||!window._fbUpdate) return;
+    window._fbUpdate(R("keys/"+k.id), { holderKind:kind, holder:holder||"", updatedAt:Date.now(), updatedBy:meName||"" }).catch(e=>console.error("key holder:",e));
+    setPicker(null);
+  }
+  function addKey(store){
+    const existing=byStore[store]||[];
+    const maxOrder=existing.reduce((m,k)=>Math.max(m,k.order||0),0);
+    const id="key_"+Date.now()+"_"+Math.random().toString(36).slice(2,6);
+    const obj={ id, filiale:store, label:"Schlüssel "+(existing.length+1), note:"", holderKind:"store", holder:"", order:maxOrder+1, updatedAt:Date.now(), updatedBy:meName||"" };
+    window._fbSet(R("keys/"+id), obj).catch(e=>console.error("key add:",e));
+  }
+  function removeKey(k){
+    window._fbRemove(R("keys/"+k.id)).catch(e=>console.error("key del:",e));
+    setDelArm(null);
+    if(editId===k.id) setEditId(null);
+  }
+  function startEdit(k){ setEditId(k.id); setEditLabel(k.label||""); setEditNote(k.note||""); setEditFil(stores.indexOf(k.filiale)>=0?k.filiale:stores[0]); setPicker(null); }
+  function saveEdit(k){
+    window._fbUpdate(R("keys/"+k.id), { label:(editLabel.trim()||"Schlüssel"), note:editNote.trim() }).catch(e=>console.error("key edit:",e));
+    setEditId(null);
+  }
+  function holderView(k){
+    if(k.holderKind==="person" && k.holder) return {txt:k.holder, pill:"👤 dabei", bg:"#EEE9F5", fg:"#6b5b8a"};
+    if(k.holderKind==="other"  && k.holder) return {txt:"bei "+keyShortFil(k.holder), pill:"📍 Ersatz", bg:"#FBF0DA", fg:"#9a7b16"};
+    return {txt:"im Laden", pill:"🏠 "+keyShortFil(k.filiale), bg:C.mintLight, fg:C.mintDark};
+  }
+
+  const totalKeys = keyList.length;
+  const chip = (txt,on,onClick)=>(
+    <button onClick={onClick} style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:`1px solid ${C.border}`,
+      background:on?C.mintDark:"#fff",color:on?"#fff":C.mintDark,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{txt}</button>
+  );
+  const mini = (txt,onClick)=>(
+    <button onClick={onClick} style={{fontSize:10.5,padding:"4px 9px",borderRadius:8,border:`1px solid ${C.border}`,
+      background:"#fff",color:C.mintDark,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{txt}</button>
+  );
+
+  return (
+    <div style={{...S.card, marginBottom:14, padding:"14px 14px 12px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+        <div style={{fontSize:15,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>{"🔑 Schlüssel"}</div>
+        <div style={{fontSize:10,color:C.muted}}>{totalKeys>0?(totalKeys+(totalKeys===1?" Schlüssel":" Schlüssel")):""}</div>
+      </div>
+      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>{isAdmin?"Von allen änderbar · als Admin hinzufügen/löschen":"Von allen änderbar"}</div>
+
+      {totalKeys===0 && !isAdmin && (
+        <div style={{fontSize:12,color:C.muted,padding:"8px 2px"}}>{"Noch keine Schlüssel angelegt."}</div>
+      )}
+
+      {stores.map(store=>{
+        const list=byStore[store]||[];
+        if(list.length===0 && !isAdmin) return null;
+        return (
+          <div key={store} style={{marginTop:12}}>
+            <div style={{fontSize:11,fontWeight:800,color:C.mintDark,marginBottom:6,letterSpacing:".02em"}}>{keyShortFil(store)}</div>
+
+            {list.length===0 && (
+              <div style={{fontSize:11,color:C.muted,padding:"4px 2px 8px"}}>{"Keine Schlüssel"}</div>
+            )}
+
+            {list.map(k=>{
+              const hv=holderView(k);
+              const isMine = k.holderKind==="person" && sameName(k.holder, meName);
+              const isEditing = editId===k.id;
+              const isPicking = picker && picker.id===k.id;
+              return (
+                <div key={k.id} style={{background:C.bg,borderRadius:10,padding:"9px 10px",marginBottom:6}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",minWidth:0}}>
+                      <span style={{fontSize:11,fontWeight:800,color:C.muted,whiteSpace:"nowrap"}}>{k.label||"Schlüssel"}</span>
+                      <span style={{fontSize:13.5,fontWeight:700}}>{hv.txt}</span>
+                      <span style={{fontSize:10,padding:"2px 7px",borderRadius:999,fontWeight:700,background:hv.bg,color:hv.fg,whiteSpace:"nowrap"}}>{hv.pill}</span>
+                      {k.note&&<span style={{fontSize:10,color:C.muted}}>{"· "+k.note}</span>}
+                    </div>
+                    <div style={{display:"flex",gap:5,flexShrink:0}}>
+                      {!isMine && mini("Zu mir", ()=>setHolder(k,"person",meName))}
+                      {mini("Übergeben", ()=>setPicker(isPicking&&picker.mode==="uebergeben"?null:{id:k.id,mode:"uebergeben"}))}
+                      {mini("Abgeben",   ()=>setPicker(isPicking&&picker.mode==="abgeben"?null:{id:k.id,mode:"abgeben"}))}
+                      {isAdmin && (
+                        <button onClick={()=>isEditing?setEditId(null):startEdit(k)} title="Bearbeiten"
+                          style={{fontSize:11,padding:"4px 7px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",cursor:"pointer"}}>{"✏️"}</button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 소지자 변경 패널 */}
+                  {isPicking && picker.mode==="uebergeben" && (
+                    <div style={{marginTop:8,paddingTop:8,borderTop:`1px dashed ${C.border}`}}>
+                      <div style={{fontSize:10.5,fontWeight:700,color:C.muted,marginBottom:6}}>{"Übergeben an:"}</div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {staff.map(u=>chip(u.vorname, sameName(u.vorname,k.holder), ()=>setHolder(k,"person",u.vorname)))}
+                      </div>
+                    </div>
+                  )}
+                  {isPicking && picker.mode==="abgeben" && (
+                    <div style={{marginTop:8,paddingTop:8,borderTop:`1px dashed ${C.border}`}}>
+                      <div style={{fontSize:10.5,fontWeight:700,color:C.muted,marginBottom:6}}>{"Wohin ablegen?"}</div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {chip("🏠 Im Laden ("+keyShortFil(k.filiale)+")", k.holderKind==="store", ()=>setHolder(k,"store",""))}
+                        {stores.filter(s=>s!==k.filiale).map(s=>
+                          chip("📍 "+keyShortFil(s), k.holderKind==="other"&&k.holder===s, ()=>setHolder(k,"other",s)))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 관리자 편집 패널 */}
+                  {isEditing && (
+                    <div style={{marginTop:8,paddingTop:8,borderTop:`1px dashed ${C.border}`}}>
+                      <input value={editLabel} onChange={e=>setEditLabel(e.target.value)} placeholder="Name (z.B. Schlüssel 1)"
+                        style={{width:"100%",fontSize:12,padding:"7px 9px",borderRadius:8,border:`1px solid ${C.border}`,marginBottom:6,boxSizing:"border-box"}}/>
+                      <input value={editNote} onChange={e=>setEditNote(e.target.value)} placeholder="Notiz (optional)"
+                        style={{width:"100%",fontSize:12,padding:"7px 9px",borderRadius:8,border:`1px solid ${C.border}`,marginBottom:8,boxSizing:"border-box"}}/>
+                      <div style={{display:"flex",gap:6}}>
+                        <button onClick={()=>saveEdit(k)} style={{flex:1,fontSize:12,padding:"8px",borderRadius:8,border:"none",background:C.mintDark,color:"#fff",fontWeight:800,cursor:"pointer"}}>{"Speichern"}</button>
+                        <button onClick={()=>setEditId(null)} style={{fontSize:12,padding:"8px 12px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,cursor:"pointer"}}>{"Abbrechen"}</button>
+                        {delArm===k.id ? (
+                          <React.Fragment>
+                            <button onClick={()=>removeKey(k)} style={{fontSize:12,padding:"8px 12px",borderRadius:8,border:"none",background:C.red,color:"#fff",fontWeight:800,cursor:"pointer"}}>{"Wirklich löschen?"}</button>
+                            <button onClick={()=>setDelArm(null)} style={{fontSize:12,padding:"8px 10px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.muted,fontWeight:700,cursor:"pointer"}}>{"Nein"}</button>
+                          </React.Fragment>
+                        ) : (
+                          <button onClick={()=>setDelArm(k.id)} style={{fontSize:12,padding:"8px 12px",borderRadius:8,border:`1px solid ${C.red}`,background:C.redLight,color:C.red,fontWeight:700,cursor:"pointer"}}>{"🗑 Löschen"}</button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {isAdmin && (
+              <button onClick={()=>addKey(store)}
+                style={{width:"100%",marginTop:2,padding:"8px",borderRadius:9,border:`1.5px dashed ${C.mint}`,
+                  background:C.mintLight,color:C.mintDark,fontWeight:700,fontSize:11.5,cursor:"pointer"}}>
+                {"➕ Schlüssel hinzufügen"}
+              </button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
