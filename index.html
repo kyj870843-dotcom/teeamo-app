@@ -359,6 +359,12 @@ const ONLINE_FILIALE = "Online";
 function isOnlineFiliale(f){ return String(f||"").trim().toLowerCase()==="online"; }
 const FILIALEN   = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY", ONIGIRI_FILIALE];
 function isOnigiriFiliale(f){ return String(f||"").trim().toUpperCase()==="ONIGIRI"; }
+// 🎄 Weihnachtsmarkt — 시즌 한정 지점 (관리자 토글 config/weihnachtsmarktAktiv로 표시 제어).
+//    FILIALEN에는 넣지 않음 → picker에서 토글 ON일 때만 추가. 통계는 records 기준이라 항상 집계됨.
+const WEIHNACHTSMARKT = "Weihnachtsmarkt";
+function isWeihnachtsmarkt(f){ return String(f||"").trim()===WEIHNACHTSMARKT; }
+// picker용: 토글 ON이면 Weihnachtsmarkt를 뒤에 덧붙인 목록
+function filialenMitWM(wmOn, base){ const list=Array.isArray(base)?base:FILIALEN; return wmOn ? [...list, WEIHNACHTSMARKT] : list; }
 // 🧋 Arbeitstyp(근무 형태): Onigiri는 지점으로 이동했으므로 여기서 제거.
 //    저장값(typ)은 기존 데이터 호환을 위해 소문자 키 유지.
 const ARBEITSTYPEN = [
@@ -373,13 +379,13 @@ function typLabel(t){ return (TYP_META[typNorm(t)]||TYP_META.normal).lbl; }
 function typIcon(t){ return (TYP_META[typNorm(t)]||TYP_META.normal).icon; }
 // 지점 표시 순서 (ONIGIRI는 항상 최하단)
 const FILIAL_ORDER = ["TEEAMO Arkaden","TEEAMO Aegidiimarkt","TEEnJOY", ONIGIRI_FILIALE];
-function filialRank(f){ if(isOnigiriFiliale(f)) return 900; const i=FILIAL_ORDER.indexOf(f); return i<0?500:i; }
+function filialRank(f){ if(isWeihnachtsmarkt(f)) return 950; if(isOnigiriFiliale(f)) return 900; const i=FILIAL_ORDER.indexOf(f); return i<0?500:i; }
 function filialSort(a,b){ return filialRank(a)-filialRank(b) || String(a||"").localeCompare(String(b||"")); }
 // 지점 표시용 아이콘 (ONIGIRI → 🍙, Online → 💻)
-function filialIcon(f){ return isOnigiriFiliale(f) ? "🍙" : (isOnlineFiliale(f) ? "💻" : "📍"); }
+function filialIcon(f){ return isWeihnachtsmarkt(f) ? "🎄" : isOnigiriFiliale(f) ? "🍙" : (isOnlineFiliale(f) ? "💻" : "📍"); }
 // 지점 짧은 표기 (버튼 등 좁은 자리용)
 const FILIAL_SHORT = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt",
-                       "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI", "Online":"Online" };
+                       "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI", "Online":"Online", "Weihnachtsmarkt":"X-Markt" };
 function filialShort(f){ return FILIAL_SHORT[f] || String(f||"").replace(/^TEEAMO\s+/,""); }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2859,6 +2865,8 @@ function ShiftRow({ s, userName, records, setNotifications, users, myShifts }) {
 // · 여기서 Übernehmen → 내 Dienstplan에 "Normal" 근무로 추가됨
 function SchichtboerseView({ userName, users, isAdmin }) {
   const [freieSchichten, setFreieSchichten] = useFirebase("freieSchichten", []);
+  const [wmAktivSB]=useFirebase("config/weihnachtsmarktAktiv", false);   // 🎄 토글
+  const FILS_SB = filialenMitWM(wmAktivSB);
   // ⏳ 시간이 겹치는 수락은 관리자 승인을 거치므로 신청 목록을 함께 다룬다
   const [, setAntraege] = useFirebase("antraege", []);
   const [myTab, setMyTab] = useState("offen");
@@ -3308,7 +3316,7 @@ function SchichtboerseView({ userName, users, isAdmin }) {
               <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:4}}>FILIALE</div>
               <select value={fsFiliale} onChange={e=>setFsFiliale(e.target.value)}
                 style={{...S.input,width:"100%",fontSize:13,padding:"10px 12px",boxSizing:"border-box"}}>
-                {FILIALEN.map(f=><option key={f} value={f}>{f.replace("TEEAMO ","")}</option>)}
+                {FILS_SB.map(f=><option key={f} value={f}>{filialShort(f)}</option>)}
               </select>
             </div>
             {/* VON / BIS — 나란히, 넉넉한 간격과 padding으로 겹침 방지 */}
@@ -4088,6 +4096,30 @@ function MasterGate({ userKey }){
   );
 }
 
+// 🎄 관리자: Weihnachtsmarkt 시즌 지점 ON/OFF 토글 (config/weihnachtsmarktAktiv)
+function WeihnachtsmarktToggle(){
+  const [aktiv] = useFirebase("config/weihnachtsmarktAktiv", false);
+  const set = v=>{ if(window._fbDb&&window._fbRef&&window._fbSet)
+    window._fbSet(window._fbRef(window._fbDb,"config/weihnachtsmarktAktiv"), !!v).catch(e=>console.error("wm toggle:",e)); };
+  return (
+    <div style={{...S.card,marginBottom:12}}>
+      <div style={{fontSize:12,fontWeight:800,color:C.text,marginBottom:4}}>{"🎄 Weihnachtsmarkt"}</div>
+      <div style={{fontSize:10,color:C.muted,marginBottom:12,lineHeight:1.5}}>
+        {"Saison-Filiale. AN = erscheint beim Ein-/Ausstempeln und im Dienstplan. Die Statistik zeigt die Stunden immer — unabhängig vom Schalter."}
+      </div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+        <div style={{fontSize:12,fontWeight:700,color:aktiv?C.mintDark:C.muted}}>
+          {aktiv?"🎄 X-Markt sichtbar":"ausgeblendet"}
+        </div>
+        <button onClick={()=>set(!aktiv)} title={aktiv?"Ausschalten":"Einschalten"}
+          style={{width:52,height:30,borderRadius:999,border:"none",cursor:"pointer",position:"relative",flexShrink:0,
+            background:aktiv?C.mintDark:C.border,transition:"background .2s"}}>
+          <span style={{position:"absolute",top:3,left:aktiv?25:3,width:24,height:24,borderRadius:"50%",background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,.2)",transition:"left .2s"}}/>
+        </button>
+      </div>
+    </div>
+  );
+}
 // 📦 관리자: Dienstplan-Archiv — 월별 근무표를 Firebase 아카이브에 박제 + Excel 다운로드
 //    · 라이브 schedule과 분리된 사본 → 퇴사자 삭제해도 아카이브는 안 바뀜
 //    · dienstplanArchiv/<YYYY-MM> = { month, savedAt, data:(schedule_YYYY_MM 스냅샷) }
@@ -4582,6 +4614,9 @@ function SettingsView({ user, users, setUsers, userKey, onLogout, onClose, isAdm
         {/* ⏰ 근무표 빠른 시간 프리셋 편집 — 관리자 전용 */}
         {isAdmin && <ZeitPresetEditor/>}
 
+        {/* 🎄 Weihnachtsmarkt 시즌 지점 토글 — 관리자 전용 */}
+        {isAdmin && <WeihnachtsmarktToggle/>}
+
         {/* 📦 Dienstplan-Archiv — 관리자 전용 (Temp-Konto 삭제 전 백업용) */}
         {isAdmin && <DienstplanArchiv/>}
 
@@ -5026,6 +5061,9 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   const [nMsg,setNMsg]=useState("");
   // 조기 퇴근(Vorzeitiges Ausstempeln) 관련
   const [scheduleData]=useFirebase("schedule",{});
+  // 🎄 Weihnachtsmarkt 토글 — ON이면 출퇴근 지점 선택에 추가
+  const [wmAktiv]=useFirebase("config/weihnachtsmarktAktiv", false);
+  const FILS_MV = filialenMitWM(wmAktiv);
   // 📍 오늘 이 직원에게 근무표상 배정된 지점 목록 (출근 도장 실수 방지용).
   //    출근 시 여기 없는 지점을 고르면 한 번 더 확인한다.
   const [myTodayFilialen, myTodayRegularShifts] = React.useMemo(()=>{
@@ -5193,7 +5231,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
   // 총 근무 = 지점별 합계의 총합 (관리자 통계와 동일 정의)
   const totalH=myBreakdown.total;
   function fmtH(h){const hh=Math.floor(h);const mm=Math.round((h-hh)*60);return hh+"h"+String(mm).padStart(2,"0")+"m";}
-  const monthSummary=FILIALEN.map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+recHours(r),0)})).filter(x=>x.h>0);
+  const monthSummary=[...FILIALEN, WEIHNACHTSMARKT].map(f=>({f,h:myRecs.filter(r=>r.filiale===f&&r.aus).reduce((a,r)=>a+recHours(r),0)})).filter(x=>x.h>0);
 
   // 알림 카운트 (Schichtbörse 새 근무 + Tausch 요청)
   const [_notifications] = useFirebase("notifications", {});
@@ -5578,7 +5616,7 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
 
                     <div style={{fontSize:9,fontWeight:800,color:C.muted,marginBottom:5}}>{"FILIALE"}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:11}}>
-                      {FILIALEN.map(f=>{
+                      {FILS_MV.map(f=>{
                         const on=sameFiliale(f, clockFiliale);
                         return (
                           <button key={f} onClick={()=>changeActiveShift(f, clockTyp)}
@@ -5656,13 +5694,13 @@ function MitarbeiterView({userKey,users,setUsers,records,setRecords,antraege,set
             <div style={{...S.card,marginBottom:12}}>
               <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:7}}>{"Filiale auswählen"}</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:10}}>
-                {FILIALEN.map(f=>(
+                {FILS_MV.map(f=>(
                   <button key={f} onClick={()=>setSelFiliale(f)}
                     style={{padding:"9px 4px",borderRadius:9,fontSize:10,fontWeight:700,cursor:"pointer",
                       border:`2px solid ${selFiliale===f?(isOnigiriFiliale(f)?"#ec4899":C.mint):C.border}`,
                       background:selFiliale===f?(isOnigiriFiliale(f)?"#fce7f3":C.mintLight):"#fff",
                       color:selFiliale===f?(isOnigiriFiliale(f)?"#9d174d":C.mintDark):C.muted}}>
-                    {(isOnigiriFiliale(f)?"🍙 ":"")+f.replace("TEEAMO ","")}
+                    {(isOnigiriFiliale(f)?"🍙 ":isWeihnachtsmarkt(f)?"🎄 ":"")+filialShort(f)}
                   </button>
                 ))}
                 {/* 💻 Online — 오너(Yeaji)에게만 보이는 재택근무 지점 */}
@@ -6100,14 +6138,15 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
   }
   // ── Zeilen-Builder: 개별·통합에서 공용으로 재사용 ──
   function summaryRows(){
-    const hdr=["Name","Rolle","Gesamtstunden","Arkaden","Aegidiimarkt","TEEnJOY","Onigiri","Online"];
+    const hdr=["Name","Rolle","Gesamtstunden","Arkaden","Aegidiimarkt","TEEnJOY","X-Markt🎄","Onigiri","Online"];
     return [hdr,...empList.map(emp=>{
       const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
       const total=er.reduce((a,r)=>a+recHours(r),0);
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+recHours(r),0);});
       const onlineH=er.filter(r=>isOnlineFiliale(r.filiale)).reduce((a,r)=>a+recHours(r),0);
       const onigiriH=er.filter(r=>isOnigiriFiliale(r.filiale)).reduce((a,r)=>a+recHours(r),0);
-      return[emp.vorname,emp.role,Number(total.toFixed(2)),Number((byFil["TEEAMO Arkaden"]||0).toFixed(2)),Number((byFil["TEEAMO Aegidiimarkt"]||0).toFixed(2)),Number((byFil["TEEnJOY"]||0).toFixed(2)),Number(onigiriH.toFixed(2)),Number(onlineH.toFixed(2))];
+      const wmH=er.filter(r=>isWeihnachtsmarkt(r.filiale)).reduce((a,r)=>a+recHours(r),0);
+      return[emp.vorname,emp.role,Number(total.toFixed(2)),Number((byFil["TEEAMO Arkaden"]||0).toFixed(2)),Number((byFil["TEEAMO Aegidiimarkt"]||0).toFixed(2)),Number((byFil["TEEnJOY"]||0).toFixed(2)),Number(wmH.toFixed(2)),Number(onigiriH.toFixed(2)),Number(onlineH.toFixed(2))];
     })];
   }
   function gesamtRows(){ return [ABRECHNUNG_HEADER, ...abrechnungRows(monthRecs, schedule)]; }
@@ -6161,14 +6200,15 @@ function StatistikTab({records,setRecords,users,schedule,userKey}){
     else downloadCSV(rows,`Stundennachweis_Detail_${selMonth}.csv`);
   }
   function exportSummary(fmt="xlsx"){
-    const hdr=["Name","Rolle","Gesamtstunden","Arkaden","Aegidiimarkt","TEEnJOY","Onigiri","Online"];
+    const hdr=["Name","Rolle","Gesamtstunden","Arkaden","Aegidiimarkt","TEEnJOY","X-Markt🎄","Onigiri","Online"];
     const rows=[hdr,...empList.map(emp=>{
       const er=monthRecs.filter(r=>sameName(r.user,emp.vorname));
       const total=er.reduce((a,r)=>a+recHours(r),0);
       const byFil={};FILIALEN.forEach(f=>{byFil[f]=er.filter(r=>r.filiale===f).reduce((a,r)=>a+recHours(r),0);});
       const onlineH=er.filter(r=>isOnlineFiliale(r.filiale)).reduce((a,r)=>a+recHours(r),0);
       const onigiriH=er.filter(r=>isOnigiriFiliale(r.filiale)).reduce((a,r)=>a+recHours(r),0);
-      return[emp.vorname,emp.role,Number(total.toFixed(2)),Number((byFil["TEEAMO Arkaden"]||0).toFixed(2)),Number((byFil["TEEAMO Aegidiimarkt"]||0).toFixed(2)),Number((byFil["TEEnJOY"]||0).toFixed(2)),Number(onigiriH.toFixed(2)),Number(onlineH.toFixed(2))];
+      const wmH=er.filter(r=>isWeihnachtsmarkt(r.filiale)).reduce((a,r)=>a+recHours(r),0);
+      return[emp.vorname,emp.role,Number(total.toFixed(2)),Number((byFil["TEEAMO Arkaden"]||0).toFixed(2)),Number((byFil["TEEAMO Aegidiimarkt"]||0).toFixed(2)),Number((byFil["TEEnJOY"]||0).toFixed(2)),Number(wmH.toFixed(2)),Number(onigiriH.toFixed(2)),Number(onlineH.toFixed(2))];
     })];
     if(fmt==="xlsx") downloadXLSX(rows,`Monatsübersicht_${selMonth}.xlsx`,"Monatsübersicht");
     else downloadCSV(rows,`Monatsübersicht_${selMonth}.csv`);
@@ -7353,8 +7393,10 @@ function NachMitarbeiterAntrag({name, d, nList, approveNachtrag, rejectNachtrag}
 //    highlightName이 주어지면(직원 뷰) 본인 근무를 강조. 안전 렌더링(정규화)으로 크래시 방지.
 function DienstplanKalender({ schedule, records, highlightName, allowDelete, users, setRecords, FILIALEN_LIST }) {
   const norm = v => !v ? [] : Array.isArray(v) ? v : Object.values(v);
-  const filShort = { "TEEAMO Arkaden":"Arkaden","TEEAMO Aegidiimarkt":"Aegidiimarkt","TEEnJOY":"TEEnJOY","ONIGIRI":"ONIGIRI" };
-  const FILS = Array.isArray(FILIALEN_LIST)&&FILIALEN_LIST.length?FILIALEN_LIST:(typeof FILIALEN!=="undefined"?FILIALEN:[]);
+  const filShort = { "TEEAMO Arkaden":"Arkaden","TEEAMO Aegidiimarkt":"Aegidiimarkt","TEEnJOY":"TEEnJOY","ONIGIRI":"ONIGIRI","Weihnachtsmarkt":"X-Markt" };
+  const [wmAktivDK]=useFirebase("config/weihnachtsmarktAktiv", false);   // 🎄 토글
+  const _FILS_BASE = Array.isArray(FILIALEN_LIST)&&FILIALEN_LIST.length?FILIALEN_LIST:(typeof FILIALEN!=="undefined"?FILIALEN:[]);
+  const FILS = filialenMitWM(wmAktivDK, _FILS_BASE);
   const todayStr = today();
   const [calYM, setCalYM] = useState(()=>{ const p=todayStr.split("-"); return {y:+p[0], m:(+p[1])-1}; });
   const [selDate, setSelDate] = useState(todayStr);
@@ -7729,7 +7771,7 @@ function DienstplanKalender({ schedule, records, highlightName, allowDelete, use
                             {"📍 Filiale ändern — Zeiten bleiben unverändert"}
                           </div>
                           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
-                            {(FILIALEN_LIST||FILIALEN).map(f=>{
+                            {FILS.map(f=>{
                               const on=sameFiliale(f, rec.filiale);
                               return (
                                 <button key={f} disabled={on}
@@ -8270,9 +8312,11 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
   const empOptions = (Array.isArray(users)?users:[]).filter(u=>!isManagerName(u.key) && u.vorname!==adminName).sort(byName);
   // ⏰ 추천 시간: 관리자 편집 가능한 프리셋 (config/quickTimes, 없으면 기본값)
   const [quickCfgUp] = useFirebase("config/quickTimes", null);
+  const [wmAktivUp]=useFirebase("config/weihnachtsmarktAktiv", false);   // 🎄 토글
+  const FILS_UP = filialenMitWM(wmAktivUp);
   const { von:QUICK_VON, bis:QUICK_BIS } = resolveQuickTimes(quickCfgUp);
   const DRAFT_KEY = "teeamo_schicht_cart_v1";
-  const filShort = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt", "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI" };
+  const filShort = { "TEEAMO Arkaden":"Arkaden", "TEEAMO Aegidiimarkt":"Aegidiimarkt", "TEEnJOY":"TEEnJOY", "ONIGIRI":"ONIGIRI", "Weihnachtsmarkt":"X-Markt" };
 
   // 선택된 월 스케줄 (달력 점 표시용)
   const scheduleKey = selMonth ? "schedule_"+selMonth : "schedule";
@@ -8544,7 +8588,7 @@ function DienstplanUploadView({ users, selMonth, onScheduleSaved, adminName }) {
                 <div style={{marginBottom:8}}>
                   <div style={{fontSize:9,fontWeight:700,color:C.muted,marginBottom:3}}>FILIALE</div>
                   <select value={aFil} onChange={e=>setAFil(e.target.value)} style={inp}>
-                    {FILIALEN.map(f=><option key={f} value={f}>{filShort[f]||f}</option>)}
+                    {FILS_UP.map(f=><option key={f} value={f}>{filShort[f]||f}</option>)}
                   </select>
                 </div>
                 <div style={{marginBottom:8}}>
